@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: unify-mzpeakiv-mzpeakexplorer
 status: building
-stopped_at: THE imaging spatial round-trip works in a browser (file→ion image→pixel→spectrum); capability shell + imaging-render engine, 163 unit + 5 e2e green
+stopped_at: Phase 5 URL resolver + imaging (multi-channel/optical) + Structure spike done; 175 unit + 9 e2e green
 last_updated: "2026-06-12"
 last_activity: 2026-06-12
 progress:
   total_phases: 7
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 0
   completed_plans: 0
-  percent: 68
+  percent: 82
 ---
 
 # Project State
