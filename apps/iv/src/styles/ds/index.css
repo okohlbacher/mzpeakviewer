@@ -1,0 +1,19 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   mzPeak Design System — project entry point (mzPeakIV).
+
+   Full closure: token custom properties, `.mz-*` component classes, the global
+   base reset (body type/bg, h1–h6 margins, :focus-visible, box-sizing), and the
+   persistent app-shell layout. base.css + shell.css were activated in Phase 2
+   alongside the App.tsx shell rebuild that replaced the legacy inline layout.
+
+   Fonts are self-hosted via @fontsource, imported in src/main.tsx (NOT here) —
+   the upstream tokens/fonts.css render-blocking Google @import has been removed.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@import "./tokens/colors.css";
+@import "./tokens/colormaps.css";
+@import "./tokens/typography.css";
+@import "./tokens/spacing.css";
+@import "./tokens/base.css";
+@import "./components/components.css";
+@import "./shell.css";

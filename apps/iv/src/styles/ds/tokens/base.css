@@ -1,0 +1,72 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   mzPeak Design System — Base / reset
+   Minimal element defaults so specimen cards, components and UI kits share a
+   common baseline. Kept lean: box-sizing, body type, focus, scrollbars.
+   ────────────────────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--text-body);
+  background: var(--bg-app);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+  color: var(--text-strong);
+  line-height: var(--leading-tight);
+}
+
+a {
+  color: var(--text-link);
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+
+/* Tabular numerics everywhere a measured value appears */
+code, kbd, samp, .tnum {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-xs);
+}
+
+/* Thin, unobtrusive scrollbars (chrome panels) */
+.mz-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--gray-300) transparent;
+}
+.mz-scroll::-webkit-scrollbar { width: 9px; height: 9px; }
+.mz-scroll::-webkit-scrollbar-thumb {
+  background: var(--gray-300);
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.mz-scroll::-webkit-scrollbar-thumb:hover { background: var(--gray-400); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

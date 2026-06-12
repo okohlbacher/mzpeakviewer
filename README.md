@@ -16,34 +16,49 @@ design-system / deploy maintenance.
 - **Requirements:** [`.planning/REQUIREMENTS.md`](.planning/REQUIREMENTS.md)
 - **Project overview:** [`.planning/PROJECT.md`](.planning/PROJECT.md)
 
-## Target architecture
+## Repository layout
 
 ```
-app shell (Explorer base)  →  capability-adaptive sidebar, one store, deep-link resolver
-        │
-        ├── @mzpeak/contracts  protocol + store + capability types + URL grammar (KEYSTONE — shipped)
-        ├── @mzpeak/ui-kit     design tokens + presentational components
-        └── @mzpeak/core       ONE Web Worker data engine (reader + scheduler + cache + compute)
+packages/
+  contracts/   ✅ Phase 1 — wire protocol + store/view + capability model + URL grammar (KEYSTONE)
+  ui-kit/      Phase 2 — design tokens + presentational components            (not yet)
+  core/        Phase 3 — ONE Web Worker data engine (reader + scheduler + cache) (not yet)
+apps/
+  iv/          mzPeakIV, ingested — imaging viewer (transitional; removed at Phase 6)
+  explorer/    mzPeakExplorer, ingested — general explorer (transitional; removed at Phase 6)
+  viewer/      Phase 4 — the unified shell                                      (not yet)
+vendor/
+  mzpeakts/    git submodule — the one shared reader (aux-arrays + Numpress Linear)
 ```
 
 ## Status
 
-**Phase 1 (Unified Contracts) — first version shipped.** The npm workspace and the
-keystone package [`packages/contracts`](packages/contracts) are in: the superset worker
-protocol + per-message clone/transfer/cancellation policy, the plain wire payload types,
-the capability model (phased imaging detection + tri-state chromatogram capability), the
-unified store/view-state model, and a pure URL grammar (parse / conflict-matrix resolve /
-shortest-canonical serialize) with legacy `/IV/` translation. 49 tests; build, typecheck,
-and tests green. See [`packages/contracts/SPEC.md`](packages/contracts/SPEC.md).
+**Harmonized baseline in place (Step H of `research/HARMONIZATION-PLAN.md`).** Both source
+apps now live in one repo, build against **one** vendored `mzpeakts` (the converged
+`okohlbacher/mzpeakts@4067f84` — aux-arrays + Numpress Linear), and are green:
 
-Phase 0 (reader convergence) remains the prerequisite for the *engine* phases, in flight
-via [HUPO-PSI/mzpeakts#1](https://github.com/HUPO-PSI/mzpeakts/pull/1) — the contracts are
-decoupled from the reader, so Phase 1 landed first. The v2 roadmap got a second
-adversarial review (codex + vibe); both `reject`ed on under-specification, which the
-contracts resolve — see [the synthesis](.planning/research/ADVERSARIAL-REVIEW-v2-SYNTHESIS.md).
+| | typecheck | unit | prod build |
+|---|---|---|---|
+| `apps/explorer` | ✅ | ✅ 48 | ✅ (hashed wasm asset) |
+| `apps/iv` | ✅ | ✅ 150 (+2 skip) | ✅ (worker + wasm) |
+| `packages/contracts` | ✅ | ✅ 49 | ✅ |
+
+**Phase 1 (Unified Contracts) shipped:** [`packages/contracts`](packages/contracts) — the
+superset worker protocol + per-message clone/transfer/cancellation policy, plain wire
+payload types, the capability model (phased imaging detection + tri-state chromatogram
+capability), the unified store/view-state model, and a pure URL grammar with legacy `/IV/`
+translation. See [`packages/contracts/SPEC.md`](packages/contracts/SPEC.md).
+
+The two apps are unmodified product code (provenance in [`SOURCES.md`](SOURCES.md)); the
+roadmap refactors *out* of them into `packages/*` behind parity gates, deleting them at
+Phase 6. The v2 roadmap got a second adversarial review (codex + vibe); both `reject`ed on
+under-specification, resolved in the contracts + recorded roadmap deltas — see
+[the synthesis](.planning/research/ADVERSARIAL-REVIEW-v2-SYNTHESIS.md).
 
 ```bash
-npm install && npm test    # 49 passing
+npm run bootstrap     # submodule init → build reader → workspace install (fresh checkout)
+npm test              # contracts + both apps
+npm run -w mzpeakexplorer dev      # or  -w mzpeakiv
 ```
 
-Source apps: `~/Claude/mzPeakIV`, `~/Claude/mzPeakExplorer`.
+Source apps: `~/Claude/mzPeakIV`, `~/Claude/mzPeakExplorer` (authoritative until Phase 6).

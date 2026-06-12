@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="OpenMS mark">
+  <title>OpenMS mark</title>
+  <rect width="64" height="64" rx="12" fill="#3b54da"></rect>
+  <g fill="#ffffff">
+    <rect x="12" y="30" width="3.4" height="22"></rect>
+    <rect x="22" y="14" width="3.4" height="38"></rect>
+    <rect x="32" y="24" width="3.4" height="28"></rect>
+    <rect x="42" y="18" width="3.4" height="34"></rect>
+    <rect x="52" y="34" width="3.4" height="18"></rect>
+  </g>
+  <rect x="10" y="50" width="46" height="2.6" fill="#c00000"></rect>
+</svg>

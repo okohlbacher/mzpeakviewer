@@ -1,0 +1,15 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   mzPeak Design System — Webfonts (NEUTRALIZED)
+
+   The upstream handoff shipped a render-blocking Google Fonts `@import url(...)`
+   here. That is a hard external-CDN dependency and violates the project's
+   client-side / offline / GitHub-Pages constraints. It has been removed.
+
+   IBM Plex Sans / IBM Plex Mono are self-hosted via @fontsource and imported as
+   JS modules in `src/main.tsx` (specific latin weight files: sans 400/500/600/
+   700 + 400-italic, mono 400/500/600). The `--font-sans` / `--font-mono` tokens
+   in typography.css keep `system-ui` as the fallback so nothing breaks if a
+   weight fails to load.
+
+   Do NOT re-add an `@import url("https://fonts.googleapis.com/...")` here.
+   ────────────────────────────────────────────────────────────────────────── */

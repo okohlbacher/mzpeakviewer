@@ -1,0 +1,50 @@
+/* ============================================================
+   mzPeak Explorer — Base element defaults
+   Mirrors the global rules from the source app's styles.css so
+   any surface that links the design system inherits the same
+   box-sizing, body type, and link/heading rhythm.
+   ============================================================ */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--text-body);
+  background: var(--surface-page);
+  font-size: 13px;            /* the app's comfortable working size */
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Any measured figure that must align uses tabular figures. */
+.tnum,
+.mono,
+code,
+kbd,
+samp {
+  font-feature-settings: "tnum" 1;
+}
+
+.mono,
+code,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+a {
+  color: var(--text-accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
