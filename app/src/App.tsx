@@ -630,6 +630,53 @@ function StatusBar() {
 // View router
 // ---------------------------------------------------------------------------
 
+const VIEW_META: Record<View, { title: string; subtitle: string }> = {
+  summary: { title: "Summary", subtitle: "File overview, stats and capabilities" },
+  spectra: { title: "Spectra", subtitle: "m/z vs intensity for the selected spectrum" },
+  chromatograms: { title: "Chromatograms", subtitle: "Total-ion / extracted chromatograms over time" },
+  metadata: { title: "Metadata", subtitle: "File-level metadata (file description, instruments, software)" },
+  structure: { title: "Structure", subtitle: "Parquet members and column footers" },
+  overview: { title: "Overview (TIC)", subtitle: "Per-pixel total-ion-current heatmap" },
+  ion: { title: "Ion image", subtitle: "Spatial map for an m/z window — click a pixel to inspect its spectrum" },
+  multi: { title: "RGB channels", subtitle: "RGB composite of up to three m/z channels" },
+  optical: { title: "Optical", subtitle: "Embedded optical microscopy image" },
+  overlay: { title: "Overlay", subtitle: "Ion image composited over the optical image" },
+  grid: { title: "Grid", subtitle: "Imaging pixel-grid diagnostics" },
+};
+
+function ViewHeader({ view }: { view: View }) {
+  const meta = VIEW_META[view];
+  if (!meta) return null;
+  return (
+    <div style={{ marginBottom: "1rem", minWidth: 0 }}>
+      <h2
+        style={{
+          margin: 0,
+          fontSize: "1.05rem",
+          fontWeight: "var(--weight-semibold, 600)",
+          color: "var(--text-heading, #1e293b)",
+          letterSpacing: "-0.01em",
+        }}
+      >
+        {meta.title}
+      </h2>
+      <p
+        style={{
+          margin: "0.15rem 0 0",
+          fontSize: "var(--text-sm, 0.8rem)",
+          color: "var(--text-muted, #94a3b8)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+        title={meta.subtitle}
+      >
+        {meta.subtitle}
+      </p>
+    </div>
+  );
+}
+
 function ViewRouter() {
   const view = useStore((s) => s.view);
 
@@ -641,6 +688,7 @@ function ViewRouter() {
       tabIndex={0}
       style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", padding: "1.25rem 1.5rem" }}
     >
+      <ViewHeader view={view} />
       {view === "summary" && <Summary />}
       {view === "spectra" && <Spectra />}
       {view === "chromatograms" && <Chromatograms />}

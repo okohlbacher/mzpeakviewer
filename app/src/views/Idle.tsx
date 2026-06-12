@@ -6,11 +6,14 @@ import { useStore } from "../store";
 
 const BASE = import.meta.env.BASE_URL;
 
-type Demo = { id: string; label: string; desc: string; file: string; imaging: boolean };
+type Demo = { id: string; label: string; desc: string; file: string; imaging: boolean; stats: string[] };
+// Stat chips are REAL facts read from each fixture's mzpeak_index.json (and the
+// engine's reported ranges) — never invented. demo: imaging 3×3/100µm grid;
+// lc/chunked: 48 MS1/2 spectra, the latter in chunked Parquet.
 const DEMOS: Demo[] = [
-  { id: "imaging", label: "Imaging (MSI)", desc: "Tiny 3×3 ion-image grid + per-pixel spectra", file: "demo.mzpeak", imaging: true },
-  { id: "lc", label: "LC-MS", desc: "48 spectra, MS levels 1/2, a TIC chromatogram", file: "lc.mzpeak", imaging: false },
-  { id: "chunked", label: "Chunked layout", desc: "Chunked storage variant of the spectra", file: "chunked.mzpeak", imaging: false },
+  { id: "imaging", label: "Imaging (MSI)", desc: "Tiny 3×3 ion-image grid + per-pixel spectra", file: "demo.mzpeak", imaging: true, stats: ["3 × 3 px", "100 µm/px", "m/z 100–800"] },
+  { id: "lc", label: "LC-MS", desc: "48 spectra, MS levels 1/2, a TIC chromatogram", file: "lc.mzpeak", imaging: false, stats: ["48 spectra", "MS 1 / 2", "TIC"] },
+  { id: "chunked", label: "Chunked layout", desc: "Chunked storage variant of the spectra", file: "chunked.mzpeak", imaging: false, stats: ["48 spectra", "chunked Parquet"] },
 ];
 
 export function Idle() {
@@ -103,6 +106,24 @@ export function Idle() {
                     {d.label}
                   </span>
                   <span style={{ fontSize: "var(--text-sm, 0.8rem)", color: "var(--text-muted, #94a3b8)" }}>{d.desc}</span>
+                  <span style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", marginTop: "0.15rem" }}>
+                    {d.stats.map((s) => (
+                      <span
+                        key={s}
+                        style={{
+                          fontFamily: "var(--font-mono, monospace)",
+                          fontSize: "var(--text-xs, 0.7rem)",
+                          color: "var(--text-secondary, #475569)",
+                          background: "var(--surface-panel, #f1f5f9)",
+                          border: "1px solid var(--border-default, #e2e8f0)",
+                          borderRadius: 4,
+                          padding: "0.05rem 0.35rem",
+                        }}
+                      >
+                        {s}
+                      </span>
+                    ))}
+                  </span>
                 </button>
               ))}
             </div>
