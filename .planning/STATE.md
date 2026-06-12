@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: unify-mzpeakiv-mzpeakexplorer
 status: building
-stopped_at: Phase 3 engine (open/spectrum/scan/chrom, dual-reviewed, value-parity) + Phase 4 slice 1 (app runs in a browser, e2e green)
+stopped_at: THE imaging spatial round-trip works in a browser (file→ion image→pixel→spectrum); capability shell + imaging-render engine, 163 unit + 5 e2e green
 last_updated: "2026-06-12"
 last_activity: 2026-06-12
 progress:
   total_phases: 7
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 0
   completed_plans: 0
-  percent: 52
+  percent: 68
 ---
 
 # Project State
