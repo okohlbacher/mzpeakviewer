@@ -15,6 +15,7 @@ import { openEngineFile, openEngineUrl, type EngineFile } from "../engine/open";
 import { readEngineSpectrum } from "../engine/spectrum";
 import { engineScanBreakdown } from "../engine/scanBreakdown";
 import { engineExtractChrom, type ChromContext } from "../engine/chrom";
+import { engineRenderIonImage, engineMeanSpectrum, engineRoiSpectrum } from "../engine/imaging";
 import { UnsupportedEncodingError, CorruptFileError } from "../reader/errors";
 import { buffersOf, type Respond } from "./respond";
 
@@ -121,6 +122,29 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         const reader = requireActive(ctx).reader;
         const series = await engineExtractChrom(reader, req.chrom, ctx.scan ?? undefined);
         respond({ type: "chromResult", requestId: req.requestId, series }, buffersOf(series.time, series.intensity));
+        return;
+      }
+
+      case "renderIonImage": {
+        const active = requireActive(ctx);
+        if (!active.grid) {
+          respond({ type: "renderResult", requestId: req.requestId, ionImage: null, stats: null });
+          return;
+        }
+        const { ionImage, stats } = await engineRenderIonImage(active.reader, active.grid, req.mz, req.tolDa);
+        respond({ type: "renderResult", requestId: req.requestId, ionImage, stats }, buffersOf(ionImage));
+        return;
+      }
+
+      case "meanSpectrum": {
+        const spectrum = await engineMeanSpectrum(requireActive(ctx).reader);
+        respond({ type: "meanSpectrumResult", requestId: req.requestId, spectrum }, buffersOf(spectrum.mz, spectrum.intensity));
+        return;
+      }
+
+      case "roiSpectrum": {
+        const spectrum = await engineRoiSpectrum(requireActive(ctx).reader, req.spectrumIndices);
+        respond({ type: "meanSpectrumResult", requestId: req.requestId, spectrum }, buffersOf(spectrum.mz, spectrum.intensity));
         return;
       }
 
