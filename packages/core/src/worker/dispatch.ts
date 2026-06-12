@@ -16,6 +16,9 @@ import { readEngineSpectrum } from "../engine/spectrum";
 import { engineScanBreakdown } from "../engine/scanBreakdown";
 import { engineExtractChrom, type ChromContext } from "../engine/chrom";
 import { engineRenderIonImage, engineMeanSpectrum, engineRoiSpectrum } from "../engine/imaging";
+import { engineRenderMultiChannel } from "../engine/multichannel";
+import { engineGetOpticalImage } from "../engine/optical";
+import { engineArchiveList, engineParquetFooter, engineSampleColumn, clearStructureCache } from "../engine/structure";
 import { UnsupportedEncodingError, CorruptFileError } from "../reader/errors";
 import { buffersOf, type Respond } from "./respond";
 
@@ -55,6 +58,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         const g = ++ctx.gen;
         ctx.active = null;
         ctx.scan = null;
+        clearStructureCache(); // path-keyed footer cache must not leak across files
         const ef =
           req.source.kind === "file"
             ? await openEngineFile(req.source.bytes, req.source.name)
@@ -145,6 +149,58 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
       case "roiSpectrum": {
         const spectrum = await engineRoiSpectrum(requireActive(ctx).reader, req.spectrumIndices);
         respond({ type: "meanSpectrumResult", requestId: req.requestId, spectrum }, buffersOf(spectrum.mz, spectrum.intensity));
+        return;
+      }
+
+      case "renderMultiChannel": {
+        const active = requireActive(ctx);
+        if (!active.grid) {
+          respond({ type: "multiChannelResult", requestId: req.requestId, channels: req.channels.map(() => null) });
+          return;
+        }
+        const channels = await engineRenderMultiChannel(active.reader, active.grid, req.channels);
+        respond(
+          { type: "multiChannelResult", requestId: req.requestId, channels },
+          buffersOf(...channels.filter((c): c is Float32Array => c !== null)),
+        );
+        return;
+      }
+
+      case "archiveList": {
+        const members = await engineArchiveList(requireActive(ctx).reader);
+        respond({ type: "archiveListResult", requestId: req.requestId, members });
+        return;
+      }
+
+      case "parquetFooter": {
+        const footer = await engineParquetFooter(requireActive(ctx).reader, req.archivePath);
+        respond({ type: "parquetFooterResult", requestId: req.requestId, footer });
+        return;
+      }
+
+      case "sampleColumn": {
+        const sample = await engineSampleColumn(requireActive(ctx).reader, req.archivePath, req.column, req.n);
+        respond({ type: "sampleColumnResult", requestId: req.requestId, sample });
+        return;
+      }
+
+      // gen-echoed (not requestId) — its own case before the requestId-keyed default.
+      case "getOpticalImage": {
+        const active = requireActive(ctx);
+        try {
+          const { width, height, rgba } = await engineGetOpticalImage(active.reader, req.archivePath);
+          respond(
+            { type: "opticalImageResult", archivePath: req.archivePath, gen: req.gen, width, height, rgba },
+            [rgba.buffer],
+          );
+        } catch (err) {
+          respond({
+            type: "opticalImageError",
+            archivePath: req.archivePath,
+            gen: req.gen,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
         return;
       }
 

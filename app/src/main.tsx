@@ -6,6 +6,7 @@ import "@fontsource/ibm-plex-sans/500.css";
 import "@fontsource/ibm-plex-sans/600.css";
 import "@fontsource/ibm-plex-mono/400.css";
 import { App } from "./App";
+import { hydrateFromLocation } from "./urlSync";
 
 const rootEl = document.getElementById("root");
 if (!rootEl) throw new Error("Root element #root not found");
@@ -15,3 +16,7 @@ createRoot(rootEl).render(
     <App />
   </StrictMode>,
 );
+
+// Phase 5: apply a deep link (?file=…&view=…&scan=…) once the app has mounted.
+// Self-guarded + async (no-op when there's no `file` param).
+void hydrateFromLocation();

@@ -77,6 +77,8 @@ export interface AppState {
 
   // actions
   openFile: (file: File) => Promise<void>;
+  /** Open a remote .mzpeak by URL (deep-link / ?file= path). Mirrors openFile. */
+  openUrl: (url: string) => Promise<void>;
   setView: (view: View) => void;
   selectSpectrum: (index: number) => Promise<void>;
   loadChrom: (req: { mode: "tic" }) => Promise<void>;
@@ -241,6 +243,114 @@ export const useStore = create<AppState>((set, get) => ({
 
     } catch (err) {
       // Stale guard: only apply error state if we're still the current open.
+      if (seq !== currentOpenSeq) return;
+      set({
+        phase: "error",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+
+  // -------------------------------------------------------------------------
+  // openUrl — open a remote .mzpeak by URL (deep-link ?file= path).
+  //
+  // Mirrors openFile exactly (same stale-async race guard via currentOpenSeq,
+  // same post-open set, same scanBreakdown follow-up + pre-select spectrum 0),
+  // but the engine fetches the bytes itself via {kind:"url"} (HTTP range reads),
+  // so there is no local arrayBuffer step. fileName is derived from the URL.
+  // -------------------------------------------------------------------------
+  openUrl: async (url: string) => {
+    const seq = ++currentOpenSeq;
+
+    // Derive a display name from the URL path's last segment.
+    let displayName = url;
+    try {
+      const u = new URL(url, typeof location !== "undefined" ? location.href : undefined);
+      const last = u.pathname.split("/").filter(Boolean).pop();
+      if (last) displayName = decodeURIComponent(last);
+    } catch {
+      // Non-absolute / unparseable: keep the raw url as the display name.
+    }
+
+    set({
+      phase: "loading",
+      error: null,
+      capabilities: null,
+      stats: null,
+      fileMeta: null,
+      manifest: null,
+      grid: null,
+      ticColumn: null,
+      opticalImages: [],
+      fileName: displayName,
+      fileSize: null,
+      view: "summary",
+      selector: null,
+      spectrum: null,
+      browse: null,
+      chrom: null,
+      notices: [],
+    });
+
+    try {
+      const opened = await engine.open({ kind: "url", url });
+
+      // Stale guard: if a newer open was called while we were awaiting, drop.
+      if (seq !== currentOpenSeq) return;
+
+      const isImaging = opened.capabilities.imaging.isImaging;
+
+      set({
+        phase: "ready",
+        capabilities: opened.capabilities,
+        stats: opened.stats,
+        fileMeta: opened.fileMeta,
+        manifest: opened.manifest,
+        grid: opened.grid,
+        ticColumn: opened.tic,
+        opticalImages: opened.opticalImages,
+        fileSize: opened.fileSize,
+        expanded: { advanced: false, imaging: isImaging },
+        notices: opened.mixedRepresentationWarning
+          ? [
+              {
+                id: "mixed-repr",
+                severity: "warning" as const,
+                message: opened.mixedRepresentationWarning,
+              },
+            ]
+          : [],
+      });
+
+      // Kick off the scan-breakdown to populate browse index + stats.
+      void engine
+        .scanBreakdown()
+        .then(({ stats, browse, ticColumn }) => {
+          if (seq !== currentOpenSeq) return;
+          set((s) => ({
+            stats: { ...s.stats, ...stats },
+            browse,
+            capabilities: s.capabilities
+              ? {
+                  ...s.capabilities,
+                  chromatograms: {
+                    ...s.capabilities.chromatograms,
+                    ticColumn,
+                  },
+                }
+              : s.capabilities,
+          }));
+        })
+        .catch(() => {
+          // Non-fatal: scan breakdown failing doesn't break the core UI
+        });
+
+      // Pre-select spectrum 0 if file has spectra.
+      if (opened.stats && opened.stats.numSpectra > 0) {
+        if (seq !== currentOpenSeq) return;
+        await get().selectSpectrum(0);
+      }
+    } catch (err) {
       if (seq !== currentOpenSeq) return;
       set({
         phase: "error",

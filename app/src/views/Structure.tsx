@@ -1,29 +1,115 @@
-// Structure view — placeholder for Parquet structure browser.
+// Structure view — the parquet/archive inspector. Lists ZIP members; clicking a
+// parquet member shows its footer (row count + per-column type/codec/stats) via the
+// engine worker. The Structure/Parquet spike, surfaced.
+import { useEffect, useState } from "react";
+import { useStore } from "../store";
+import { engine } from "../engine";
+import type { ArchiveMemberList, ParquetFooter } from "@mzpeak/contracts";
+
+type Member = ArchiveMemberList["members"][number];
+
+function fmtBytes(n: number | null | undefined): string {
+  if (n == null) return "—";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export function Structure() {
+  const phase = useStore((s) => s.phase);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [footer, setFooter] = useState<ParquetFooter | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (phase !== "ready") return;
+    let live = true;
+    setError(null);
+    setFooter(null);
+    setSelected(null);
+    engine
+      .archiveList()
+      .then((r) => { if (live) setMembers(r.members); })
+      .catch((e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
+    return () => { live = false; };
+  }, [phase]);
+
+  async function pick(m: Member) {
+    if (!m.isParquet) return;
+    setSelected(m.path);
+    setFooter(null);
+    setError(null);
+    try {
+      setFooter(await engine.parquetFooter(m.path));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   return (
-    <div data-testid="structure-view" style={{ maxWidth: 640 }}>
-      <div
-        style={{
-          padding: "1.5rem",
-          border: "1px solid var(--border-default)",
-          borderRadius: "var(--radius-md)",
-          background: "var(--surface-panel)",
-          color: "var(--text-muted)",
-          textAlign: "center",
-        }}
-      >
-        <p
-          style={{
-            margin: "0 0 0.5rem",
-            fontWeight: "var(--weight-semibold)",
-            color: "var(--text-heading)",
-          }}
-        >
-          Parquet structure
-        </p>
-        <p style={{ margin: 0, fontSize: "var(--text-sm)" }}>
-          Parquet structure browser — coming in a later slice.
-        </p>
+    <div data-testid="structure-view" style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start" }}>
+      <div style={{ minWidth: 280 }}>
+        <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.5rem" }}>Archive members</h2>
+        {error && <p data-testid="structure-error" style={{ color: "var(--danger, #c00)" }}>{error}</p>}
+        <ul data-testid="structure-members" style={{ listStyle: "none", margin: 0, padding: 0, fontFamily: "var(--font-mono, monospace)", fontSize: "var(--text-sm, 0.85rem)" }}>
+          {members.map((m) => (
+            <li key={m.path}>
+              <button
+                onClick={() => void pick(m)}
+                disabled={!m.isParquet}
+                title={m.kind ?? undefined}
+                style={{
+                  display: "flex", width: "100%", justifyContent: "space-between", gap: "0.75rem",
+                  padding: "0.25rem 0.4rem", border: "none", borderRadius: "var(--radius-sm, 4px)",
+                  background: selected === m.path ? "var(--surface-panel, #f1f5f9)" : "transparent",
+                  color: m.isParquet ? "var(--text-link, #2563eb)" : "var(--text-muted, #94a3b8)",
+                  cursor: m.isParquet ? "pointer" : "default", textAlign: "left",
+                }}
+              >
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.path}</span>
+                <span style={{ color: "var(--text-muted, #94a3b8)", flexShrink: 0 }}>{fmtBytes(m.bytes)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {footer ? (
+          <div data-testid="structure-footer">
+            <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.5rem" }}>
+              {selected} · {footer.numRows.toLocaleString()} rows · {footer.numRowGroups} row group(s)
+              {footer.createdBy ? ` · ${footer.createdBy}` : ""}
+            </h2>
+            <table style={{ borderCollapse: "collapse", fontSize: "var(--text-sm, 0.85rem)", width: "100%" }}>
+              <thead>
+                <tr style={{ textAlign: "left", color: "var(--text-muted, #94a3b8)" }}>
+                  <th style={{ padding: "0.2rem 0.6rem 0.2rem 0" }}>column</th>
+                  <th style={{ padding: "0.2rem 0.6rem" }}>type</th>
+                  <th style={{ padding: "0.2rem 0.6rem" }}>codec</th>
+                  <th style={{ padding: "0.2rem 0.6rem" }}>values</th>
+                  <th style={{ padding: "0.2rem 0.6rem" }}>min</th>
+                  <th style={{ padding: "0.2rem 0.6rem" }}>max</th>
+                </tr>
+              </thead>
+              <tbody style={{ fontFamily: "var(--font-mono, monospace)" }}>
+                {footer.columns.map((c) => (
+                  <tr key={c.name} style={{ borderTop: "1px solid var(--border-hairline, #eee)" }}>
+                    <td style={{ padding: "0.2rem 0.6rem 0.2rem 0" }}>{c.name}</td>
+                    <td style={{ padding: "0.2rem 0.6rem" }}>{c.logicalType ?? c.type}</td>
+                    <td style={{ padding: "0.2rem 0.6rem" }}>{c.codec ?? "—"}</td>
+                    <td style={{ padding: "0.2rem 0.6rem" }}>{c.numValues ?? "—"}</td>
+                    <td style={{ padding: "0.2rem 0.6rem" }}>{c.min ?? "—"}</td>
+                    <td style={{ padding: "0.2rem 0.6rem" }}>{c.max ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p style={{ color: "var(--text-muted, #94a3b8)" }}>Select a parquet member to inspect its columns.</p>
+        )}
       </div>
     </div>
   );

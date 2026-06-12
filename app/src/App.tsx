@@ -29,6 +29,7 @@ import { Metadata } from "./views/Metadata";
 import { Structure } from "./views/Structure";
 import { IonImageView } from "./views/IonImage";
 import { engine } from "./engine";
+import { ShareButton } from "./ShareButton";
 
 // ---------------------------------------------------------------------------
 // Sidebar
@@ -506,8 +507,12 @@ function TopBar() {
         </span>
       )}
 
+      <span style={{ marginLeft: "auto" }}>
+        <ShareButton />
+      </span>
+
       <label
-        style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.4rem" }}
+        style={{ marginLeft: "0.5rem", display: "flex", alignItems: "center", gap: "0.4rem" }}
       >
         <input
           data-testid="file-input"

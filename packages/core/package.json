@@ -21,7 +21,8 @@
     "hyparquet": "^1.26.0",
     "hyparquet-compressors": "^1.1.1",
     "mzpeakts": "file:../../vendor/mzpeakts/lib",
-    "parquet-wasm": "0.7.1"
+    "parquet-wasm": "0.7.1",
+    "utif2": "^4.1.0"
   },
   "devDependencies": {
     "typescript": "~5.9.3",

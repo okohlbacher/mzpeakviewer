@@ -73,10 +73,26 @@ describe("worker dispatch — real imaging fixture", () => {
   });
 
   it("an unimplemented message errors with class 'unsupported'", async () => {
-    const res = await run(ctx, { type: "parquetFooter", archivePath: "x.parquet", requestId: 9 });
+    // studyMeta/deepColumn/archiveMemberBytes aren't wired yet → fail loud, not silent.
+    const res = await run(ctx, { type: "studyMeta", requestId: 9 });
     expect(res.type).toBe("error");
     if (res.type !== "error") return;
     expect(res.class).toBe("unsupported");
     expect(res.requestId).toBe(9);
+  });
+
+  it("archiveList + parquetFooter are wired: footer for a real parquet member", async () => {
+    const list = await run(ctx, { type: "archiveList", requestId: 10 });
+    expect(list.type).toBe("archiveListResult");
+    if (list.type !== "archiveListResult") return;
+    const parquet = list.members.members.find((m) => m.isParquet);
+    expect(parquet).toBeDefined();
+    const res = await run(ctx, { type: "parquetFooter", archivePath: parquet!.path, requestId: 11 });
+    // Dispatch-level: prove the handler is wired + returns the right shape (footer
+    // depth/value parity is pinned in structure.golden.test against the LC fixture).
+    expect(res.type).toBe("parquetFooterResult");
+    if (res.type !== "parquetFooterResult") return;
+    expect(res.footer.archivePath).toBe(parquet!.path);
+    expect(Array.isArray(res.footer.columns)).toBe(true);
   });
 });
