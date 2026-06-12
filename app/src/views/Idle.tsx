@@ -37,11 +37,13 @@ export function Idle() {
   return (
     <div data-testid="idle-view" style={{ width: "100%", overflowY: "auto", display: "flex", justifyContent: "center" }}>
       <div style={{ maxWidth: 640, width: "100%", padding: "6vh 1.5rem 3rem", textAlign: "center" }}>
-        <div aria-hidden style={{ width: 56, height: 56, margin: "0 auto 1rem", borderRadius: 14, background: "var(--blue-600, #3b54da)", display: "grid", placeItems: "center", color: "#fff", fontWeight: 700, fontSize: "1.5rem", fontFamily: "var(--font-mono, monospace)" }}>
-          m/z
-        </div>
-        <h1 style={{ margin: "0 0 0.4rem", fontSize: "1.4rem", color: "var(--text-heading, #1e293b)", fontWeight: "var(--weight-semibold, 600)" }}>
-          Explore an mzPeak file
+        <img
+          src={`${BASE}mzpeak-logo.png`}
+          alt="mzPeak"
+          style={{ height: 54, width: "auto", margin: "0 auto 1.1rem", display: "block" }}
+        />
+        <h1 style={{ margin: "0 0 0.4rem", fontSize: "1.25rem", color: "var(--text-heading, #1e293b)", fontWeight: "var(--weight-semibold, 600)" }}>
+          Explore a mass-spectrometry file
         </h1>
         <p style={{ margin: "0 0 1.5rem", color: "var(--text-muted, #64748b)", fontSize: "var(--text-body, 0.9rem)", lineHeight: 1.5 }}>
           One viewer for the <strong>mzPeak</strong> mass-spectrometry format — imaging (MSI) and LC-MS alike. Pick an

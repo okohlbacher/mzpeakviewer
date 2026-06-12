@@ -478,16 +478,22 @@ function TopBar() {
         flexShrink: 0,
       }}
     >
-      <span
-        style={{
-          fontWeight: "var(--weight-semibold, 600)",
-          fontSize: "1rem",
-          color: "var(--text-heading, #1e293b)",
-          letterSpacing: "-0.01em",
-          userSelect: "none",
-        }}
-      >
-        mzPeak Viewer
+      <span style={{ display: "inline-flex", alignItems: "baseline", gap: "0.4rem", userSelect: "none" }}>
+        <img
+          src={`${import.meta.env.BASE_URL}mzpeak-logo.png`}
+          alt="mzPeak"
+          style={{ height: 22, width: "auto", alignSelf: "center" }}
+        />
+        <span
+          style={{
+            fontWeight: "var(--weight-medium, 500)",
+            fontSize: "0.95rem",
+            color: "var(--text-muted, #64748b)",
+            letterSpacing: "-0.01em",
+          }}
+        >
+          Viewer
+        </span>
       </span>
 
       {fileName && (
