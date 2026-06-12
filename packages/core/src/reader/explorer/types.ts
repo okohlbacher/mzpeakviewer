@@ -48,6 +48,17 @@ export type SpectrumIndexRow = {
   tic: number | null;
 };
 
+/** A fully reconstructed single spectrum's signal arrays + identity. */
+export type SpectrumArrays = {
+  index: number;
+  id: string;
+  msLevel: number | null;
+  representation: Representation;
+  time: number | null;
+  mz: Float64Array;
+  intensity: Float32Array;
+};
+
 /** One point of an extracted-ion / total-ion chromatogram. */
 export type ChromPoint = { time: number; index: number; intensity: number };
 

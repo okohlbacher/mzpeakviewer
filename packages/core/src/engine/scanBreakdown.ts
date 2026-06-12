@@ -6,7 +6,7 @@
 //
 // Reader I/O is harvested from mzPeakExplorer (src/reader/explorer/{open,summary}.ts);
 // the columnar mapping is the pure adapt/browse.ts adapter. No signal arrays are read.
-import type { FileStats, BrowseIndex } from "@mzpeak/contracts";
+import type { FileStats, BrowseIndex, Presence } from "@mzpeak/contracts";
 import { buildBrowseIndex, type BrowseRow } from "../adapt/browse";
 import type { Reader } from "../reader/explorer/open";
 import { computeFastSummary, scanSpectra } from "../reader/explorer/summary";
@@ -29,19 +29,46 @@ function toBrowseRow(r: SpectrumIndexRow): BrowseRow {
 }
 
 /**
+ * F3 — does the file carry a usable promoted per-spectrum TIC column (MS:1000285)?
+ * `present` exactly when the cheap-TIC path in chrom.ts would succeed: the MS1 rows
+ * (or all rows, when none are MS1 — mirrors Explorer's `ticRows`) every carry a
+ * finite, non-NaN TIC. `absent` otherwise (any contributing TIC missing/NaN), and
+ * `absent` when there are no rows at all (an exotic reader that exposes no columns).
+ * This lets the shell flip CapabilityModel.chromatograms.ticColumn from "unknown".
+ */
+function detectTicColumn(rows: readonly SpectrumIndexRow[]): Presence {
+  if (rows.length === 0) return "absent";
+  const ms1 = rows.filter((r) => r.msLevel === 1);
+  const contributing = ms1.length > 0 ? ms1 : rows;
+  const allFinite = contributing.every(
+    (r) => r.tic != null && Number.isFinite(r.tic),
+  );
+  return allFinite ? "present" : "absent";
+}
+
+/**
  * Run the per-spectrum scan and assemble the wire stats + browse index.
  *
- * @returns `stats` (FileStats aggregates) and `browse` (per-spectrum BrowseIndex,
- *   parallel typed arrays of length `stats.numSpectra`).
+ * @returns `stats` (FileStats aggregates), `browse` (per-spectrum BrowseIndex,
+ *   parallel typed arrays of length `stats.numSpectra`), `ticColumn` (F3:
+ *   present/absent so the shell can set CapabilityModel.chromatograms.ticColumn),
+ *   and `rows` (the raw scan rows so the dispatcher can thread them into
+ *   engineExtractChrom's ChromContext for the cheap-TIC path + source pick).
  */
 export async function engineScanBreakdown(
   reader: Reader,
-): Promise<{ stats: FileStats; browse: BrowseIndex }> {
+): Promise<{
+  stats: FileStats;
+  browse: BrowseIndex;
+  ticColumn: Presence;
+  rows: SpectrumIndexRow[];
+}> {
   const numEntities = countEntities(reader);
   const fast = computeFastSummary(reader, [], "", null);
   const { rows, aggregates } = await scanSpectra(reader);
 
   const browse = buildBrowseIndex(rows.map(toBrowseRow));
+  const ticColumn = detectTicColumn(rows);
 
   const msLevels = Object.keys(aggregates.msLevelCounts)
     .map(Number)
@@ -63,5 +90,5 @@ export async function engineScanBreakdown(
     instrument: fast.instrument,
   };
 
-  return { stats, browse };
+  return { stats, browse, ticColumn, rows };
 }

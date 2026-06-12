@@ -27,7 +27,7 @@ import type {
 import { buildCapabilityModel } from "../adapt/capability";
 import { flattenGrid } from "../adapt/grid";
 import { fileMeta, manifest as readManifest } from "../reader/fileMeta";
-import { openBlob, type Reader } from "../reader/openUrl";
+import { openBlob, openUrl, type Reader } from "../reader/openUrl";
 import { buildImagingGrid } from "../reader/grid";
 import { extractCoords, readGridGeometry } from "../reader/scanCoords";
 import {
@@ -107,16 +107,29 @@ function buildTic(reader: Reader, grid: ImagingGrid): Float32Array {
   return tic;
 }
 
-/**
- * Open `bytes` as an mzPeak file and assemble the wire `opened` payload.
- * Imaging grid + TIC are built only when the file is detected as imaging.
- */
+/** Open local bytes (Blob path) and assemble the wire payload. */
 export async function openEngineFile(
   bytes: ArrayBuffer | Uint8Array,
   _name?: string,
 ): Promise<EngineFile> {
-  const reader = await openBlob(toBlob(bytes));
+  return assembleEngineFile(await openBlob(toBlob(bytes)));
+}
 
+/**
+ * Open a remote URL and assemble the wire payload. Uses the reader's URL path
+ * (HTTP RANGE reads via zip.js) — NOT a whole-file fetch — so a large remote file
+ * isn't fully downloaded just to open it (review MAJOR: the dispatcher must not
+ * `fetch().arrayBuffer()` the whole archive).
+ */
+export async function openEngineUrl(url: string | URL): Promise<EngineFile> {
+  return assembleEngineFile(await openUrl(url));
+}
+
+/**
+ * Assemble the wire `opened` payload from an already-open reader. Imaging grid +
+ * TIC are built only when the file is detected as imaging.
+ */
+async function assembleEngineFile(reader: Reader): Promise<EngineFile> {
   // ── Detection + capability model ──────────────────────────────────────────
   const manifestEntries = readManifest(reader);
   const ivCaps = computeCapabilities(reader, manifestEntries); // layout/encodings/isImaging

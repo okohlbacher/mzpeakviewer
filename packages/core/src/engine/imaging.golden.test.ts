@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 
 import { openEngineFile, type EngineFile } from "./open";
 import { readEngineSpectrum } from "./spectrum";
+import { getSpectrumArrays as referenceGetSpectrumArrays } from "../reader/explorer/browse";
+import type { Reader as ExplorerReader } from "../reader/explorer/open";
 
 const FIXTURE = fileURLToPath(
   new URL("../../test/fixtures/imaging.mzpeak", import.meta.url),
@@ -59,5 +61,28 @@ describe("engine golden round-trip against real imaging.mzpeak", () => {
     expect(s.mz.length).toBeGreaterThan(0);
     expect(s.mz.length).toBe(s.intensity.length);
     expect(["profile", "centroid"]).toContain(s.representation);
+  });
+
+  // VALUE-PARITY: the engine's reconstruction must reproduce the OLD reader's output
+  // byte-for-byte — not just the right shape. The reference is the source-faithful
+  // Explorer `getSpectrumArrays` harvested into reader/explorer/browse.ts. Same reader
+  // handle, same spectrum → identical mz/intensity values (within 1e-6).
+  it("engine spectrum 0 is VALUE-EQUAL to the old Explorer reader (parity)", async () => {
+    const engine = await readEngineSpectrum(opened.reader, 0);
+    // The engine's live reader is the same mzpeakts MzPeakReader the Explorer path
+    // wraps; pass it straight to the reference reconstruction.
+    const reference = await referenceGetSpectrumArrays(
+      opened.reader as unknown as ExplorerReader,
+      0,
+    );
+
+    expect(engine.mz.length).toBe(reference.mz.length);
+    expect(engine.intensity.length).toBe(reference.intensity.length);
+    for (let i = 0; i < reference.mz.length; i++) {
+      expect(engine.mz[i]).toBeCloseTo(reference.mz[i]!, 6);
+      expect(engine.intensity[i]).toBeCloseTo(reference.intensity[i]!, 6);
+    }
+    // Representation also agrees (both derive it from MS:1000525).
+    expect(engine.representation).toBe(reference.representation);
   });
 });

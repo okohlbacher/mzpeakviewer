@@ -26,9 +26,17 @@ export type Reader = InstanceType<typeof MzPeakReader>;
  * Throws UnsupportedEncodingError if any unsupported encodings are found (DATA-02).
  */
 async function capabilityGate(reader: Reader): Promise<Reader> {
-  // Eagerly load the spectrum data reader so the arrayIndex is populated.
-  // This is required for Numpress detection from static Parquet metadata.
-  await reader.spectrumData();
+  // Eagerly load the spectrum data reader so the arrayIndex is populated (needed
+  // for Numpress detection from static Parquet metadata). TOLERATE its absence: a
+  // chromatogram-only mzPeak has no spectrum data, and the unified engine must open
+  // it rather than reject (review MAJOR — the single open boundary serves both
+  // imaging/LC spectra files AND chrom-only files, matching Explorer's open).
+  try {
+    await reader.spectrumData();
+  } catch {
+    // No spectrum data (e.g. chromatogram-only file) — continue; downstream reads
+    // that genuinely need spectra fail loudly at their own call site.
+  }
   const findings = detectUnsupported(reader, []);
   if (findings.length > 0) {
     throw new UnsupportedEncodingError(findings);

@@ -48,12 +48,20 @@ describe("worker dispatch — real imaging fixture", () => {
     expect(["profile", "centroid", null]).toContain(res.spectrum.representation);
   });
 
-  it("scanBreakdown → stats + a BrowseIndex of length numSpectra", async () => {
+  it("scanBreakdown → stats + a BrowseIndex of length numSpectra + a resolved ticColumn", async () => {
     const res = await run(ctx, { type: "scanBreakdown", requestId: 2 });
     expect(res.type).toBe("scanBreakdownResult");
     if (res.type !== "scanBreakdownResult") return;
     expect(res.browse.id.length).toBe(res.stats.numSpectra);
     expect(res.browse.msLevel.length).toBe(res.stats.numSpectra);
+    expect(["present", "absent"]).toContain(res.ticColumn); // no longer "unknown"
+  });
+
+  it("cancel is acknowledged (cancelled), never an unsupported error", async () => {
+    const res = await run(ctx, { type: "cancel", cancelId: 5 });
+    expect(res.type).toBe("cancelled");
+    if (res.type !== "cancelled") return;
+    expect(res.cancelId).toBe(5);
   });
 
   it("a request before open errors loudly (not a hang)", async () => {

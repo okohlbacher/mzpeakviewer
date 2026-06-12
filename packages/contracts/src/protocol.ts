@@ -36,7 +36,7 @@ import type {
   UnsupportedFinding,
   LoadStage,
 } from "./wire";
-import type { CapabilityModel } from "./capability";
+import type { CapabilityModel, Presence } from "./capability";
 
 // ---------------------------------------------------------------------------
 // Inbound (main thread → worker)
@@ -121,8 +121,9 @@ export type WorkerResponse =
     }
   // spectrum mz/intensity buffers TRANSFERRED; selectId echoed for ordering.
   | { type: "spectrumResult"; spectrum: SpectrumArrays; selectId: number }
-  // stats = aggregates; browse = the per-spectrum columnar index (typed arrays transfer).
-  | { type: "scanBreakdownResult"; requestId: number; stats: FileStats; browse: BrowseIndex }
+  // stats = aggregates; browse = the per-spectrum columnar index (typed arrays transfer);
+  // ticColumn resolves CapabilityModel.chromatograms.ticColumn (was "unknown" at open).
+  | { type: "scanBreakdownResult"; requestId: number; stats: FileStats; browse: BrowseIndex; ticColumn: Presence }
   | { type: "meanSpectrumResult"; requestId: number; spectrum: SpectrumArrays }
   | { type: "chromResult"; requestId: number; series: ChromatogramSeries }
   | { type: "archiveListResult"; requestId: number; members: ArchiveMemberList }

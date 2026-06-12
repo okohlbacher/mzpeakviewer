@@ -1,13 +1,17 @@
 // HARVESTED (trimmed) from mzPeakExplorer/src/reader/browse.ts (read-only source).
-// Signal access for the Browse tab: XIC extraction and stored-chromatogram access.
-// All return plain typed arrays / POJOs — no Arrow, no bigint upward.
+// Signal access for the Browse tab: single-spectrum reconstruction, XIC extraction,
+// and stored-chromatogram access. All return plain typed arrays / POJOs — no Arrow,
+// no bigint upward.
 //
-// Trimmed vs. upstream: getSpectrumMetadata (plainify dep) and getSpectrumArrays
-// (single-spectrum reconstruction, owned by another module) are dropped — the LC
-// chromatogram slice only needs the XIC / stored-chrom read paths.
+// Trimmed vs. upstream: getSpectrumMetadata (plainify dep) is dropped. The
+// source-faithful `getSpectrumArrays` IS retained: it is the golden REFERENCE the
+// engine's reconstruction is asserted value-equal against (engine/imaging.golden.test)
+// — i.e. it is the "old reader" the unified engine must reproduce byte-for-byte.
 import type { Reader } from "./open";
-import type { ChromPoint, StoredChromatogram } from "./types";
+import { recRepresentation } from "./cv";
+import type { ChromPoint, SpectrumArrays, StoredChromatogram } from "./types";
 
+const MZ_KEY = "m/z array";
 const INTENSITY_KEY = "intensity array";
 const TIME_KEY = "time array";
 
@@ -17,7 +21,7 @@ const TIME_KEY = "time array";
  * path: when the input is already finite + sorted + equal-length (the normal
  * case for real data), the inputs are returned unchanged with no copy.
  */
-function sanitizePairs(
+export function sanitizePairs(
   x: Float64Array,
   y: Float32Array,
 ): { x: Float64Array; y: Float32Array } {
@@ -45,6 +49,68 @@ function sanitizePairs(
     ny[i] = y[j]!;
   }
   return { x: nx, y: ny };
+}
+
+type RawSpectrum = {
+  id: unknown;
+  msLevel?: number | null;
+  time?: number | null;
+  meta?: unknown;
+  isProfile?: boolean;
+  dataArrays?: Record<string, ArrayLike<number>> | undefined;
+  centroids?: { mz: number; intensity: number }[] | undefined;
+};
+
+/**
+ * Read + reconstruct spectrum `index` into plain typed arrays — the source-faithful
+ * Explorer reconstruction, retained verbatim as the golden parity reference for the
+ * unified engine. Prefers the profile data-array source, falls back to centroids
+ * (spectra_peaks), then to data-arrays again, sanitizing the result.
+ */
+export async function getSpectrumArrays(
+  reader: Reader,
+  index: number,
+): Promise<SpectrumArrays> {
+  const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
+  if (!spectrum) throw new Error(`No spectrum at index ${index}`);
+
+  const id = String(spectrum.id);
+  const representation = recRepresentation(spectrum);
+  const time =
+    typeof spectrum.time === "number" && Number.isFinite(spectrum.time)
+      ? spectrum.time
+      : null;
+  const msLevel =
+    typeof spectrum.msLevel === "number" ? spectrum.msLevel : null;
+
+  let mz: Float64Array;
+  let intensity: Float32Array;
+
+  const da = spectrum.dataArrays;
+  const centroids = spectrum.centroids;
+  // Prefer the profile data-array source; fall back to centroids (spectra_peaks).
+  if (representation !== "centroid" && da && da[MZ_KEY] && da[INTENSITY_KEY]) {
+    mz = Float64Array.from(da[MZ_KEY]);
+    intensity = Float32Array.from(da[INTENSITY_KEY]);
+  } else if (centroids && centroids.length > 0) {
+    const k = centroids.length;
+    mz = new Float64Array(k);
+    intensity = new Float32Array(k);
+    for (let i = 0; i < k; i++) {
+      mz[i] = centroids[i]!.mz;
+      intensity[i] = centroids[i]!.intensity;
+    }
+  } else if (da && da[MZ_KEY] && da[INTENSITY_KEY]) {
+    mz = Float64Array.from(da[MZ_KEY]);
+    intensity = Float32Array.from(da[INTENSITY_KEY]);
+  } else {
+    throw new Error(`Spectrum ${index} has no reconstructable m/z + intensity arrays`);
+  }
+
+  // Defensively drop non-finite points and enforce ascending m/z; a length mismatch
+  // is reconciled here too.
+  const clean = sanitizePairs(mz, intensity);
+  return { index, id, msLevel, representation, time, mz: clean.x, intensity: clean.y };
 }
 
 type XicPoint = {
