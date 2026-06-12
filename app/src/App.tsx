@@ -178,7 +178,7 @@ function Sidebar() {
         }}
       >
         {label}
-        {id === "ion" || id === "grid" ? (
+        {id === "grid" ? (
           <span
             style={{
               marginLeft: "auto",
@@ -461,7 +461,9 @@ function TopBar() {
   const phase = useStore((s) => s.phase);
   const fileName = useStore((s) => s.fileName);
   const openFile = useStore((s) => s.openFile);
+  const openUrl = useStore((s) => s.openUrl);
   const busy = phase === "loading";
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
     <header
@@ -511,66 +513,78 @@ function TopBar() {
         <ShareButton />
       </span>
 
-      <label
-        style={{ marginLeft: "0.5rem", display: "flex", alignItems: "center", gap: "0.4rem" }}
+      {/* Hidden input is NOT wrapped in a label — clicking the buttons below calls
+          .click() exactly ONCE. (A label wrapper + an explicit .click() double-fires
+          and re-opens the native dialog — the bug this replaces.) */}
+      <input
+        ref={fileInputRef}
+        data-testid="file-input"
+        type="file"
+        accept=".mzpeak"
+        disabled={busy}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void openFile(file);
+          e.target.value = "";
+        }}
+        style={{ display: "none" }}
+      />
+
+      <button
+        type="button"
+        data-testid="load-demo-btn"
+        disabled={busy}
+        onClick={() => void openUrl(`${import.meta.env.BASE_URL}demo.mzpeak`)}
+        style={{
+          marginLeft: "0.5rem",
+          padding: "0.35rem 0.75rem",
+          border: "1px solid var(--border-default, #e2e8f0)",
+          borderRadius: "var(--radius-sm, 4px)",
+          background: "var(--surface-card, #fff)",
+          color: "var(--text-secondary, #64748b)",
+          fontSize: "var(--text-sm, 0.875rem)",
+          fontWeight: "var(--weight-medium, 500)",
+          cursor: busy ? "not-allowed" : "pointer",
+        }}
       >
-        <input
-          data-testid="file-input"
-          type="file"
-          accept=".mzpeak"
-          disabled={busy}
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) void openFile(file);
-            e.target.value = "";
-          }}
-          style={{ display: "none" }}
-        />
-        <span
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              (e.currentTarget.previousElementSibling as HTMLInputElement)?.click();
-            }
-          }}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "0.35rem",
-            padding: "0.35rem 0.75rem",
-            border: "1px solid var(--border-default, #e2e8f0)",
-            borderRadius: "var(--radius-sm, 4px)",
-            background: busy ? "var(--surface-panel, #f1f5f9)" : "var(--surface-card, #fff)",
-            color: busy ? "var(--text-muted, #94a3b8)" : "var(--text-secondary, #64748b)",
-            fontSize: "var(--text-sm, 0.875rem)",
-            fontWeight: "var(--weight-medium, 500)",
-            cursor: busy ? "not-allowed" : "pointer",
-            userSelect: "none",
-          }}
-          onClick={() => {
-            if (!busy) {
-              (document.querySelector('[data-testid="file-input"]') as HTMLInputElement)?.click();
-            }
-          }}
+        Load demo
+      </button>
+
+      <button
+        type="button"
+        data-testid="open-file-btn"
+        disabled={busy}
+        onClick={() => fileInputRef.current?.click()}
+        style={{
+          marginLeft: "0.4rem",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "0.35rem",
+          padding: "0.35rem 0.75rem",
+          border: "1px solid var(--border-default, #e2e8f0)",
+          borderRadius: "var(--radius-sm, 4px)",
+          background: busy ? "var(--surface-panel, #f1f5f9)" : "var(--surface-card, #fff)",
+          color: busy ? "var(--text-muted, #94a3b8)" : "var(--text-secondary, #64748b)",
+          fontSize: "var(--text-sm, 0.875rem)",
+          fontWeight: "var(--weight-medium, 500)",
+          cursor: busy ? "not-allowed" : "pointer",
+        }}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          style={{ width: "0.9rem", height: "0.9rem" }}
         >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-            style={{ width: "0.9rem", height: "0.9rem" }}
-          >
-            <path d="M5 12H3l9-9 9 9h-2" />
-            <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
-          </svg>
-          {busy ? "Opening…" : "Open file"}
-        </span>
-      </label>
+          <path d="M5 12H3l9-9 9 9h-2" />
+          <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
+        </svg>
+        {busy ? "Opening…" : "Open file"}
+      </button>
     </header>
   );
 }
