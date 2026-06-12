@@ -19,8 +19,11 @@ export type View =
   // Advanced accordion
   | "metadata"
   | "structure"
-  // Imaging (MSI) accordion — gated on capabilities.imaging.isImaging
+  // Imaging (MSI) accordion — gated on capabilities.imaging.isImaging.
+  // Mirrors mzPeakIV's imaging modes: overview(TIC) / ion / multi(RGB) / optical / overlay(blend).
+  | "overview"
   | "ion"
+  | "multi"
   | "optical"
   | "overlay"
   | "grid";
@@ -31,14 +34,16 @@ export const ALL_VIEWS: readonly View[] = [
   "chromatograms",
   "metadata",
   "structure",
+  "overview",
   "ion",
+  "multi",
   "optical",
   "overlay",
   "grid",
 ] as const;
 
 /** Views that only make sense for imaging files. */
-export const IMAGING_VIEWS: readonly View[] = ["ion", "optical", "overlay", "grid"] as const;
+export const IMAGING_VIEWS: readonly View[] = ["overview", "ion", "multi", "optical", "overlay", "grid"] as const;
 /** Views that only make sense for LC/general files. */
 export const LC_VIEWS: readonly View[] = ["chromatograms"] as const;
 

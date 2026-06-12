@@ -39,33 +39,6 @@ function modeFromCapabilities(): FileMode {
 }
 
 /**
- * Wait until the store reaches a terminal load phase ("ready" or "error") for
- * the file we just kicked off, OR a timeout elapses. Resolves regardless so the
- * caller can proceed (resolve() degrades gracefully on "unknown" mode).
- */
-function awaitOpen(timeoutMs = 60_000): Promise<void> {
-  return new Promise((resolveP) => {
-    const { phase } = useStore.getState();
-    if (phase === "ready" || phase === "error") {
-      resolveP();
-      return;
-    }
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      unsub();
-      clearTimeout(timer);
-      resolveP();
-    };
-    const unsub = useStore.subscribe((s) => {
-      if (s.phase === "ready" || s.phase === "error") finish();
-    });
-    const timer = setTimeout(finish, timeoutMs);
-  });
-}
-
-/**
  * Apply a resolved ViewState to the store. Maps the grammar's rich selector to
  * the app store's narrower `selectSpectrum(index)` action where possible:
  *   - by:"spectrum" → selectSpectrum(index)   (direct absolute index)

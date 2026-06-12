@@ -45,9 +45,9 @@ test("full real-click flow: demo → Spectra → Ion image → pixel → spectru
   await page.getByLabel("m/z", { exact: true }).fill("800");
   await page.getByLabel("tolerance in Da").fill("5000");
   await page.getByRole("button", { name: "Render" }).click();
-  await expect(page.getByTestId("ion-image-canvas")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("imaging-canvas")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("ion-image-max")).not.toHaveText("max 0", { timeout: 30_000 });
-  await page.getByTestId("ion-image-canvas").click({ position: { x: 8, y: 8 } });
+  await page.getByTestId("imaging-canvas").click({ position: { x: 8, y: 8 } });
   await expect(page.getByTestId("spectra-view")).toBeVisible({ timeout: 15_000 });
 
   expect(await page.getByTestId("error").count()).toBe(0);

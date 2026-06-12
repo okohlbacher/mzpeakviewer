@@ -27,9 +27,8 @@ import { Spectra } from "./views/Spectra";
 import { Chromatograms } from "./views/Chromatograms";
 import { Metadata } from "./views/Metadata";
 import { Structure } from "./views/Structure";
-import { IonImageView } from "./views/IonImage";
+import { Imaging } from "./views/Imaging";
 import { Idle } from "./views/Idle";
-import { engine } from "./engine";
 import { ShareButton } from "./ShareButton";
 
 // ---------------------------------------------------------------------------
@@ -43,6 +42,7 @@ function Sidebar() {
   const expanded = useStore((s) => s.expanded);
   const setView = useStore((s) => s.setView);
   const toggleAccordion = useStore((s) => s.toggleAccordion);
+  const hasOptical = useStore((s) => s.opticalImages.length > 0);
 
   const ready = phase === "ready";
   const caps = capabilities;
@@ -60,14 +60,17 @@ function Sidebar() {
   // Advanced accordion items — only when the accordion is open.
   if (expanded.advanced) allTabs.push("metadata", "structure");
   // MSI accordion items — only when imaging AND the accordion is open.
+  // Optical/Overlay only appear when the file actually carries an optical image.
   if (isImaging && expanded.imaging) {
-    allTabs.push("ion", "grid");
+    allTabs.push("overview", "ion", "multi");
+    if (hasOptical) allTabs.push("optical", "overlay");
+    allTabs.push("grid");
   }
 
   // When the active view is inside a collapsed accordion, auto-expand it so
   // the active tab is always reachable in the roving set.
   const advancedViews: View[] = ["metadata", "structure"];
-  const imagingViews: View[] = ["ion", "grid", "optical", "overlay"];
+  const imagingViews: View[] = ["overview", "ion", "multi", "grid", "optical", "overlay"];
   const activeNeedsAdvanced = advancedViews.includes(view) && !expanded.advanced;
   const activeNeedsImaging = imagingViews.includes(view) && isImaging && !expanded.imaging;
   if (activeNeedsAdvanced) {
@@ -138,7 +141,7 @@ function Sidebar() {
     depth?: number;
   }) {
     const isActive = view === id;
-    const isPlaceholder = id === "ion" || id === "optical" || id === "overlay" || id === "grid";
+    const isPlaceholder = id === "grid";
     return (
       <button
         ref={(el) => setTabRef(id, el)}
@@ -326,7 +329,11 @@ function Sidebar() {
               hidden={!expanded.imaging}
               data-testid="msi-accordion-body"
             >
+              <TabButton id="overview" label="Overview (TIC)" depth={1} />
               <TabButton id="ion" label="Ion image" depth={1} />
+              <TabButton id="multi" label="RGB channels" depth={1} />
+              {hasOptical && <TabButton id="optical" label="Optical" depth={1} />}
+              {hasOptical && <TabButton id="overlay" label="Overlay" depth={1} />}
               <TabButton id="grid" label="Grid" depth={1} />
             </div>
           </>
@@ -406,32 +413,8 @@ function MiniRow({ k, v }: { k: string; v: ReactNode }) {
 }
 
 // ---------------------------------------------------------------------------
-// IonImage placeholder (the real view is another agent's file)
+// Grid inspector placeholder (the imaging modes live in views/Imaging.tsx)
 // ---------------------------------------------------------------------------
-
-/** Ion-image view: wires the store's grid + the engine render call + pixel→spectrum. */
-function IonImagePanel() {
-  const grid = useStore((s) => s.grid);
-  const selectSpectrum = useStore((s) => s.selectSpectrum);
-  if (!grid) {
-    return (
-      <div data-testid="ion-no-grid" style={{ color: "var(--text-muted, #94a3b8)" }}>
-        No imaging grid available for this file.
-      </div>
-    );
-  }
-  return (
-    <div data-testid="ion-image-view">
-      <IonImageView
-        grid={grid}
-        renderIonImage={(mz, tolDa) => engine.renderIonImage(mz, tolDa)}
-        onPickSpectrum={(idx) => {
-          void selectSpectrum(idx); // routes to the Spectra view (store action)
-        }}
-      />
-    </div>
-  );
-}
 
 function GridPlaceholder() {
   return (
@@ -663,18 +646,12 @@ function ViewRouter() {
       {view === "chromatograms" && <Chromatograms />}
       {view === "metadata" && <Metadata />}
       {view === "structure" && <Structure />}
-      {view === "ion" && <IonImagePanel />}
+      {view === "overview" && <Imaging mode="overview" />}
+      {view === "ion" && <Imaging mode="ion" />}
+      {view === "multi" && <Imaging mode="multi" />}
+      {view === "optical" && <Imaging mode="optical" />}
+      {view === "overlay" && <Imaging mode="overlay" />}
       {view === "grid" && <GridPlaceholder />}
-      {view === "optical" && (
-        <div data-testid="optical-placeholder">
-          Optical image viewer — coming in a later slice.
-        </div>
-      )}
-      {view === "overlay" && (
-        <div data-testid="overlay-placeholder">
-          Overlay — coming in a later slice.
-        </div>
-      )}
     </div>
   );
 }

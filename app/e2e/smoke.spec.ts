@@ -135,14 +135,14 @@ test("imaging spatial round-trip: m/z → ion image → click pixel → spectrum
 
   // MSI accordion is open by default for imaging files → open the Ion image view.
   await page.getByTestId("nav-tab-ion").click();
-  await expect(page.getByTestId("ion-image-view")).toBeVisible();
+  await expect(page.getByTestId("imaging-ion")).toBeVisible();
 
   // --- Step 1: wide render to confirm signal exists in this fixture ---
   await page.getByLabel("m/z", { exact: true }).fill("800");
   await page.getByLabel("tolerance in Da").fill("5000");
   await page.getByRole("button", { name: "Render" }).click();
 
-  await expect(page.getByTestId("ion-image-canvas")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("imaging-canvas")).toBeVisible({ timeout: 30_000 });
   // The wide window MUST produce signal — non-zero max confirms the spatial
   // compute path ran and found data in the fixture.
   await expect(page.getByTestId("ion-image-max")).not.toHaveText("max 0", { timeout: 30_000 });
@@ -153,14 +153,14 @@ test("imaging spatial round-trip: m/z → ion image → click pixel → spectrum
   await page.getByRole("button", { name: "Render" }).click();
   // Canvas must still render (even if max is 0 for this exact narrow window the
   // render should complete without error — the "renders" contract is preserved).
-  await expect(page.getByTestId("ion-image-canvas")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("imaging-canvas")).toBeVisible({ timeout: 30_000 });
   expect(await page.getByTestId("error").count()).toBe(0);
 
   // --- Step 3: click pixel A, capture its spectrum metadata ---
   // Go back to the wide render so we are sure there is signal at clickable pixels.
   await page.getByLabel("tolerance in Da").fill("5000");
   await page.getByRole("button", { name: "Render" }).click();
-  await expect(page.getByTestId("ion-image-canvas")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("imaging-canvas")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("ion-image-max")).not.toHaveText("max 0", { timeout: 30_000 });
 
   // Determine the actual rendered canvas dimensions so our pixel-A and pixel-B
@@ -169,8 +169,8 @@ test("imaging spatial round-trip: m/z → ion image → click pixel → spectrum
   // pixel-A: center of cell (col=0, row=0) → (80, 80).
   // pixel-B: center of cell (col=2, row=2) → (400, 400).
   // This guarantees A and B are in distinct grid cells regardless of the scale factor.
-  const canvasBbox = await page.getByTestId("ion-image-canvas").boundingBox();
-  if (!canvasBbox) throw new Error("ion-image-canvas not found");
+  const canvasBbox = await page.getByTestId("imaging-canvas").boundingBox();
+  if (!canvasBbox) throw new Error("imaging-canvas not found");
   const cellW = canvasBbox.width / 3; // fixture is 3×3
   const cellH = canvasBbox.height / 3;
   // Click A: grid cell (0, 0) — top-left cell centre.
@@ -178,7 +178,7 @@ test("imaging spatial round-trip: m/z → ion image → click pixel → spectrum
   // Click B: grid cell (2, 2) — bottom-right cell centre, definitely a different spectrum.
   const clickB = { x: Math.round(cellW * 2.5), y: Math.round(cellH * 2.5) };
 
-  await page.getByTestId("ion-image-canvas").click({ position: clickA });
+  await page.getByTestId("imaging-canvas").click({ position: clickA });
   await expect(page.getByTestId("spectra-view")).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".chart-host canvas").first()).toBeVisible({ timeout: 15_000 });
   // Wait for the spectrum metadata to settle.
@@ -189,17 +189,17 @@ test("imaging spatial round-trip: m/z → ion image → click pixel → spectrum
   // The IonImageView component is stateful; navigating away remounts it (the
   // rendered canvas is lost). Re-issue the render request after returning.
   await page.getByTestId("nav-tab-ion").click();
-  await expect(page.getByTestId("ion-image-view")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("imaging-ion")).toBeVisible({ timeout: 10_000 });
 
   // Re-fill and render (the view remounted so inputs are back to defaults).
   await page.getByLabel("m/z", { exact: true }).fill("800");
   await page.getByLabel("tolerance in Da").fill("5000");
   await page.getByRole("button", { name: "Render" }).click();
-  await expect(page.getByTestId("ion-image-canvas")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("imaging-canvas")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("ion-image-max")).not.toHaveText("max 0", { timeout: 30_000 });
 
   // Click pixel B — bottom-right cell of the 3×3 grid, definitely a different spectrum.
-  await page.getByTestId("ion-image-canvas").click({ position: clickB });
+  await page.getByTestId("imaging-canvas").click({ position: clickB });
   await expect(page.getByTestId("spectra-view")).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".chart-host canvas").first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("spectrum-meta")).toBeVisible({ timeout: 15_000 });
