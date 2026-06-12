@@ -31,6 +31,19 @@ typecheck clean; 19 tests (contracts 49 unaffected).
 vibe round2 hit its 30-turn limit without a verdict (diff too broad for the budget);
 re-run with a higher --max-turns next time.
 
+## Re-review (codex round2b) — verdict: reject → 3 residual MAJORs fixed
+codex confirmed the harvest/CSS/token fixes (its "verified" list) and found 3 residual:
+- `representation?` optional in the wire but required in ui-kit's local type → not
+  assignable. Made wire `representation: SpectrumRepresentation` REQUIRED+nullable
+  (engine always sets it; null = unknown).
+- closure test unsound — JSX-only extraction missed `el.className = "spec-tooltip"`,
+  concatenated `mz-btn`, conditional `str`. Broadened to scan ALL string literals for
+  DS-class tokens (mz-/tree/chart-/spec-); still green (proves no class lacks a rule).
+- ChromPlot still imported `uplot/dist/uPlot.min.css` (only SpectrumPlot was fixed) →
+  removed. uPlot CSS ships only via styles.css now.
+All locally verified (typecheck assignability, grep-confirmed import removal, broadened
+closure test green). 19 ui-kit + 49 contracts tests.
+
 ## DEFERRED to Phase 4 (review #7)
 Explorer's `components.tsx` has pure primitives IV's ds lacks — `PlotSpinner`, `Logo`,
 `SideNav`, `TextField`, `AppHeader` — and Button/Badge VARIANTS (`quiet`, `slate`,

@@ -66,12 +66,12 @@ export type SpectrumArrays = {
   mz: Float64Array;
   intensity: Float32Array;
   /**
-   * Profile/centroid, when the engine knows it. The spectrum plot needs this to
-   * render centroid as needles + pick top peaks vs profile as a filled trace
-   * (Phase-2 ui-kit found the gap — it kept a local type carrying this). The
-   * engine MUST populate it; `null`/absent = unknown (plot falls back to profile).
+   * Profile/centroid — the spectrum plot renders centroid as needles + picks top
+   * peaks, profile as a filled trace. REQUIRED and nullable (re-review): the engine
+   * MUST always set it (`null` = genuinely unknown → plot falls back to profile), so
+   * a wire spectrum is structurally assignable to ui-kit's plot input.
    */
-  representation?: SpectrumRepresentation;
+  representation: SpectrumRepresentation;
 };
 
 /** Ion-image intensity stats sent with renderResult. */

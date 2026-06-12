@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import uPlot from "uplot";
-import "uplot/dist/uPlot.min.css";
+// uPlot base CSS ships via @mzpeak/ui-kit/styles.css — no JS side-effect import here
+// (codex Phase-2 #8 / re-review).
 import { wheelZoomPlugin } from "./uplotZoom";
 import { STAGE, stageAxes, xRange } from "./chartTheme";
 import { useUplot } from "./useUplot";

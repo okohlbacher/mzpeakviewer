@@ -47,7 +47,14 @@ function definedClasses(src: string): Set<string> {
   return out;
 }
 
-/** Every static className token a component emits (handles "a b" and `a${...}` prefixes). */
+// A token that LOOKS like a design-system class (so it must have a CSS rule). We
+// scan ALL string literals — not just JSX `className=` — so `el.className = "x"`,
+// concatenations (`"mz-btn " + ...`), and arrays (`["mz-seg", ...]`) are covered
+// too (re-review: JSX-only extraction was unsound). External classes (uPlot `u-*`,
+// the app `data-stage` context) are allow-listed separately.
+const DS_CLASS = /^(mz-[\w-]*|tree(-[\w-]+)?|chart-[\w-]+|spec-[\w-]+)$/;
+
+/** Every design-system class token a component could emit (from any string literal). */
 function emittedClasses(dir: string): Map<string, string> {
   const found = new Map<string, string>(); // token -> file
   const walk = (d: string) => {
@@ -58,13 +65,17 @@ function emittedClasses(dir: string): Map<string, string> {
         continue;
       }
       if (!/\.tsx$/.test(name) || /\.test\./.test(name)) continue;
-      const src = readFileSync(p, "utf8");
-      // className="..."  and  className={`... up to first ${ ...`}
-      const lists: string[] = [];
-      for (const m of src.matchAll(/className=\{?["'`]([^"'`$]+)/g)) lists.push(m[1]!);
-      for (const list of lists) {
-        for (const tok of list.split(/\s+/)) {
-          if (/^[a-z][\w-]*$/.test(tok) && !found.has(tok)) found.set(tok, p);
+      let src = readFileSync(p, "utf8");
+      // Neutralize template interpolations so `a${x}` yields the literal token `a`.
+      src = src.replace(/\$\{[^}]*\}/g, " ");
+      // Every string-literal body: "...", '...', `...`.
+      const bodies: string[] = [];
+      for (const m of src.matchAll(/"([^"]*)"|'([^']*)'|`([^`]*)`/g)) {
+        bodies.push(m[1] ?? m[2] ?? m[3] ?? "");
+      }
+      for (const body of bodies) {
+        for (const tok of body.split(/\s+/)) {
+          if (DS_CLASS.test(tok) && !found.has(tok)) found.set(tok, p);
         }
       }
     }
