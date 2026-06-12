@@ -9,8 +9,7 @@ test/data/*.mzpeak
 public/static/*.mzpeak
 !test/data/example.mzpeak
 
-# Large local-only demo datasets (fetched from the data.mzpeak.org CDN at runtime,
-# never committed). Mirrors mzPeakIV's ignore — rsync copies the working tree, so
-# guard against re-adding these on a re-sync.
-apps/*/public/HR2MSI.mzpeak
-apps/*/public/HR2MSI-optical.mzpeak
+# Large demo datasets are fetched from the data.mzpeak.org CDN at runtime, never
+# committed (the old apps gitignore the same — mirror it for the new app).
+**/public/HR2MSI.mzpeak
+**/public/HR2MSI-optical.mzpeak

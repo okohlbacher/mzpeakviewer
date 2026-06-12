@@ -18,14 +18,14 @@ synthesized, adversarially-reviewed design at [research/MERGE-ROADMAP.md](resear
 ## KIT — Shared ui-kit (Phase 2)
 - **KIT-01** npm-workspace monorepo with `@mzpeak/ui-kit` design tokens (the value-equal token set) building independently.
 - **KIT-02** Purely presentational components in ui-kit (uPlot spectrum plot, metadata JSON tree, structure/parquet inspector view, cv/format utils) — no reader/store/imaging assumptions.
-- **KIT-03** Both source apps consume ui-kit tokens + components and remain visually/behaviorally identical (snapshot/e2e green).
+- **KIT-03** The new app consumes ui-kit tokens + components and renders identically to render fixtures captured from the old apps (snapshot parity). The old apps are external read-only sources, not built in-repo.
 
 ## ENG — Engine migration `@mzpeak/core` (Phase 3)
 - **ENG-01** One Web Worker engine owns the Reader (Arrow/WASM handles never cross the boundary) + scheduler + LRU cache storage in-worker.
 - **ENG-02** All Explorer main-thread data access (archiveList, parquetFooter, deepColumn, sampleColumn, scanBreakdown, XIC/stored chrom, studyMeta) rewritten as messages.
 - **ENG-03** IV imaging handlers (renderIonImage, renderMultiChannel, meanSpectrum/ROI, opticalImage, grid) merged into the one engine.
 - **ENG-04** Per-message cancellation + transfer lists + size caps/paging; large member reads stream/transfer (no 256 MB structured clone); single open file per session.
-- **ENG-05** Golden-output parity tests vs old outputs for an imaging AND an LC fixture; imaging + LC e2e green; file→ion-image→spectrum invariant under e2e.
+- **ENG-05** Golden-output parity tests vs fixtures captured from the old apps (+ live deploys) for an imaging AND an LC fixture; imaging + LC e2e green on the new app; file→ion-image→spectrum invariant under e2e.
 
 ## NAV — Unified shell + capability sidebar (Phase 4)
 - **NAV-01** Capability-adaptive rail: always-on Summary + Spectra; grouped accordions; single active `view`.

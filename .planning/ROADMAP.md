@@ -57,20 +57,20 @@ This roadmap is derived from the synthesized design at [research/MERGE-ROADMAP.m
 **Requirements:** KIT-01, KIT-02, KIT-03
 **Success Criteria:**
   1. The repo is an npm workspace with `@mzpeak/ui-kit` (tokens + presentational components) building independently.
-  2. Both source apps import tokens + at least the spectrum plot, metadata tree, and structure inspector view from `@mzpeak/ui-kit`; they remain visually and behaviorally identical (snapshot/e2e green).
-  3. No data-bound widget (file loader, anything touching the reader/store) is in ui-kit — those stay in the shells.
+  2. The new app's tokens + at least the spectrum plot, metadata tree, and structure inspector view come from `@mzpeak/ui-kit` and render identically to fixtures **captured from the old apps** (snapshot parity). The old apps are external read-only sources — not built here (see research/HARMONIZATION-PLAN.md).
+  3. No data-bound widget (file loader, anything touching the reader/store) is in ui-kit — those stay in the app shell.
 **Plans:** TBD
 **Review:** Codex round1 + round2 per PROC-01
 **UI hint:** yes
 
 ### Phase 3: Engine Migration (`@mzpeak/core`)
-**Goal:** Implement the Phase-1 protocol as ONE Web Worker engine that owns the `mzpeakts` Reader, hosts the scheduler + LRU cache storage in-worker, and exposes all reads/compute as messages — including a full rewrite of Explorer's main-thread data access (archiveList, parquetFooter, deepColumn, sampleColumn, scanBreakdown, XIC/stored chrom, studyMeta) into cancellable, transfer-aware messages, merged with IV's imaging handlers. Both shells call the engine via thin adapters.
+**Goal:** Implement the Phase-1 protocol as ONE Web Worker engine that owns the `mzpeakts` Reader, hosts the scheduler + LRU cache storage in-worker, and exposes all reads/compute as messages — including a full rewrite of Explorer's main-thread data access (archiveList, parquetFooter, deepColumn, sampleColumn, scanBreakdown, XIC/stored chrom, studyMeta) into cancellable, transfer-aware messages, merged with IV's imaging handlers. The new app calls the engine via thin adapters (Explorer's data access is harvested from its read-only source, not run in-repo).
 **Mode:** mvp
 **Depends on:** Phase 1
 **Requirements:** ENG-01, ENG-02, ENG-03, ENG-04, ENG-05
 **Success Criteria:**
-  1. One worker engine backs BOTH apps' data paths; Arrow/WASM handles never cross the boundary; large member reads use transfer/streaming (no 256 MB structured clone).
-  2. Golden-output parity tests compare new-engine results to the old main-thread/worker outputs for an imaging fixture AND an LC fixture; imaging + LC e2e green.
+  1. One worker engine backs the new app's data path; Arrow/WASM handles never cross the boundary; large member reads use transfer/streaming (no 256 MB structured clone).
+  2. Golden-output parity tests compare the new engine's results to **golden fixtures captured from the old apps** (and their live deploys) for an imaging fixture AND an LC fixture; imaging + LC e2e green on the new app.
   3. Lazy remote row-group reads, the priority/background scheduler, cancellation, and the spectrum cache all function through the worker; the file→ion-image→spectrum invariant holds under e2e.
 **Plans:** TBD
 **Review:** Codex round1 + round2 per PROC-01

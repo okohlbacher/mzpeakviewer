@@ -1,233 +1,140 @@
-# Harmonization & ingestion plan — pulling the two apps into one coherent codebase
+# Harmonization plan — building ONE new app by harvesting from two old ones
 
-**Date:** 2026-06-12 · **Status:** proposed (pre-execution) · **Author:** build session
-**Sources:** `~/Claude/mzPeakIV` (imaging, ~14.4k LOC) + `~/Claude/mzPeakExplorer`
-(general explorer, ~9.1k LOC). **Target:** this repo (`okohlbacher/mzpeakviewer`).
-**Reads against:** `MERGE-ROADMAP.md` (the v2 phase design), `SOURCE-ARCHITECTURE.md`
-(the deep tree maps), `ADVERSARIAL-REVIEW-v2-SYNTHESIS.md` (review deltas).
+**Date:** 2026-06-12 · **Revised:** 2026-06-12 (operator correction — see §0) · **Status:** active
+**Reference sources (external, read-only):** `~/Claude/mzPeakIV` (imaging, ~14.4k LOC) +
+`~/Claude/mzPeakExplorer` (general explorer, ~9.1k LOC). **Target:** this repo, ONE new app.
+**Reads against:** `MERGE-ROADMAP.md`, `SOURCE-ARCHITECTURE.md`,
+`ADVERSARIAL-REVIEW-v2-SYNTHESIS.md`, `SOURCES.md`.
 
-> Naming note: the operator wrote "mzPeakIV and mzPeakViewer". The two *source* apps
-> are **mzPeakIV** and **mzPeakExplorer**; **mzpeakviewer** is the *target* merge repo
-> (where `@mzpeak/contracts` already lives). This plan reads it that way.
+## 0. The model (corrected)
 
-The roadmap refactors **along** phases. This document is the step **before** that: how
-the two existing codebases physically arrive in one repo and reach a *coherent,
-green, behavior-unchanged baseline* — so every later refactor has a parity oracle to
-measure against. The principle the adversarial reviews enforced: **never refactor
-without a same-repo parity gate.** That gate only exists once both apps build and run
-here.
+We are building **one new app**. The two old apps (mzPeakIV, mzPeakExplorer) are **external,
+read-only reference repos we harvest code from** — they are never modified, and they are
+**not hosted, copied, or built inside this repo**. They stay deployed (`mzpeak.org/IV`,
+`/view`) and act as the **parity oracle**: golden outputs are *captured from them* into
+fixtures the new app's tests check against. The only thing physically vendored here is the
+shared **reader** (`vendor/mzpeakts`, a submodule). Everything else arrives as **specific
+code harvested phase by phase** into `packages/*` and the single `app/`.
 
----
+> A first attempt copied both whole apps into `apps/iv` + `apps/explorer` as in-repo
+> "parity oracles" (a literal reading of the roadmap's "both source apps … e2e green"
+> wording). That was an over-build — the old apps are reference-only. Those copies were
+> removed; this plan reflects the one-app model and the roadmap parity gates are realigned
+> to captured fixtures (§4, and ROADMAP.md Phase 2/3).
 
-## 0. The decomposition (what "shared core" actually is — grounded, not assumed)
+## 1. What is genuinely shared, and where each piece goes (grounded, verified)
 
-Verified against the live trees this session:
+Verified against the live source trees:
 
-| Layer | Genuinely shared? | Evidence | Lands in |
+| Layer | Shared? | Evidence | Lands in |
 |---|---|---|---|
-| **`mzpeakts` reader** (Parquet+Arrow+ZIP) | **Yes — THE core.** Both vendor it; only the commit/consumption differs. | IV = submodule `b826397`; Explorer = in-tree `a87abe3` + numpress patch | `vendor/mzpeakts` (one submodule) — **Phase 0** |
-| **`@mzpeak/contracts`** | **Yes (already built).** | shipped commit `d63ccd0` | `packages/contracts` ✅ |
-| **Design tokens** | **Yes — value-equal.** grays, `--blue-600 #3b54da`, reds byte-identical; IV only *adds* `--ink`/`--sentinel`/colormaps | diff of `colors.css` (this session) | `packages/ui-kit` tokens — **Phase 2** |
-| **Pure presentational components** | **Yes — zero store coupling.** | IV `src/ui/ds/*` (Button/Select/Panel/Badge/…) import no store; Explorer `SpectrumPlot`, `TreeView`, `components.tsx`, `useUplot`, `chartTheme`, `cvTerms`, `format` → **0 store refs** | `packages/ui-kit` components — **Phase 2** |
-| **`src/reader/*` adapter layer** | **No — app-specific.** IV: `stats`/`probeIsImaging`/`imaging`/`arrays`; Explorer: `browse`/`archive`/`parquetDeep`/`summary`/`sampleMeta`. Different surfaces over the same `mzpeakts`. | tree maps | merged **inside** `packages/core` — **Phase 3** |
-| **Data engine** | **No — divergent (the long pole).** IV = Web Worker; Explorer = main-thread reader + scheduler + LRU cache | SOURCE-ARCHITECTURE §C | `packages/core` (one worker) — **Phase 3** |
-| **Tab containers** (`SpectraTab`, `StructureTab`, `MetadataTab`, imaging panels) | **No — store-bound.** | SpectraTab=19 store refs, MetadataTab=3, StructureTab=1 | the unified shell `apps/viewer` — **Phase 4** |
+| **`mzpeakts` reader** | **Yes — the one vendored thing.** | both old apps use it; only commit/consumption differed | `vendor/mzpeakts` submodule ✅ (`4067f84`, both fixes) |
+| **`@mzpeak/contracts`** | new, already built | shipped `d63ccd0` | `packages/contracts` ✅ |
+| **Design tokens** | **harvest once — value-equal.** grays, `--blue-600 #3b54da`, reds byte-identical; IV only *adds* `--ink`/`--sentinel`/colormaps | `colors.css` diff | `packages/ui-kit` (Phase 2) |
+| **Pure presentational components** | **harvest — zero store coupling (verified grep).** IV `src/ui/ds/*`; Explorer `SpectrumPlot`/`useUplot`/`chartTheme`/`uplotZoom`, `TreeView`, `components.tsx` primitives, `cvTerms`/`curie`/`format` → 0 store refs | grep this session | `packages/ui-kit` (Phase 2) |
+| **`src/reader/*` adapter code** | **No — app-specific.** IV `stats`/`probeIsImaging`/`imaging`; Explorer `browse`/`archive`/`parquetDeep`/`summary`/`sampleMeta` | tree maps | harvested **into** `packages/core` (Phase 3) |
+| **Data engine** | **No — divergent (long pole).** IV worker vs Explorer main-thread+scheduler+cache | §C | `packages/core`, ONE worker (Phase 3) |
+| **Tab/panel containers** | **No — store-bound; rebuilt.** SpectraTab 19 store refs, etc. | grep | the new `app/` shell (Phase 4) |
 
-**Consequence:** the genuinely shared core is small and low-risk (one reader + tokens +
-pure components + contracts). The hard parts (reader adapters, engine, containers) are
-*not* shared — they get **merged**, behind parity gates, in their roadmap phases. This
-is why the reviewers' "presentational-only is optimistic" worry is real *for Tabs* but
-not for the files we actually lift: we lift the pure layer and leave the Tabs as shell
-containers.
+**Consequence:** the shared core is small and low-risk (reader + tokens + pure components +
+contracts). The hard parts (reader adapters, engine, containers) are **rewritten in the new
+app**, harvesting logic from the old apps, gated by parity against captured fixtures.
 
----
-
-## 1. Target monorepo layout
+## 2. Target layout
 
 ```
 mzpeakviewer/
   packages/
-    contracts/   ✅ Phase 1 — wire protocol, store/view, capability, URL grammar
-    ui-kit/      Phase 2 — unified tokens + pure presentational components
+    contracts/   ✅ Phase 1 — protocol, store/view, capability model, URL grammar
+    ui-kit/      Phase 2 — unified tokens + harvested pure components
     core/        Phase 3 — ONE Web Worker engine (owns mzpeakts + scheduler + cache)
-  apps/
-    iv/          transitional — mzPeakIV verbatim, rewired to packages; DELETED Phase 6
-    explorer/    transitional — mzPeakExplorer verbatim, rewired to packages; DELETED Phase 6
-    viewer/      Phase 4 — the unified shell (Explorer base + lazy MSI chunk)
+  app/           Phase 4 — THE one app (shell + capability sidebar + lazy MSI chunk)
   vendor/
-    mzpeakts/    git submodule, ONE converged commit (Phase 0)
-  .planning/ …   (unchanged)
+    mzpeakts/    submodule — the one shared reader
 ```
 
-`apps/iv` and `apps/explorer` are **scaffolding with a demolition date** (Phase 6).
-They exist only so each refactor step has a living, runnable parity oracle. `apps/viewer`
-is the product.
+No `apps/iv`, no `apps/explorer`. One app.
 
----
+## 3. Harvest mechanics
 
-## 2. Ingestion mechanics — how the code physically arrives
+- **Reader:** submodule (done). Re-point to upstream when `mzpeakts#1` merges.
+- **Code:** when a phase needs a module, copy the specific file(s) from the read-only
+  source checkout into `packages/*` or `app/`, refactor to the contracts, and **record the
+  source path + reference SHA** in the phase notes (lineage stays auditable; see `SOURCES.md`).
+  No whole-app copies; no subtree.
+- **Parity oracle:** capture golden outputs from the old apps (their unit fixtures + the
+  live `mzpeak.org/IV` and `/view` deploys) into fixtures under the new app's tests. The new
+  module must match the captured output. The old apps are the reference, not an in-repo build.
 
-**Recommendation: copy-snapshot at a recorded SHA, not `git subtree`.**
+## 4. Phase-by-phase (each harvests specific code into the one app)
 
-- The source repos **remain authoritative until Phase 6** (roadmap), so full git history
-  is preserved *there* — the monorepo doesn't need it.
-- Every ingested file will be **moved/renamed/refactored** within a few phases (into
-  `packages/*`, then deleted). Subtree history would attach blame to soon-dead paths and
-  bloat the monorepo's first commit with two unrelated histories.
-- A `SOURCES.md` records the exact source SHA each app was copied from, so provenance is
-  exact and re-syncable by diff if a source app changes before decommission.
+### Phase 0 — reader (done as H1)
+One `vendor/mzpeakts` submodule, both fixes. ✅
 
-*Alternative (if the operator wants blame continuity):* `git subtree add --prefix=apps/iv
-<local-iv> main` (and `apps/explorer`). Reversible, but heavier. Decide once, in §6.
+### Phase 1 — contracts (done)
+`@mzpeak/contracts`. ✅
 
-**Push/policy:** copying source code into this public repo pushes only to
-`okohlbacher/mzpeakviewer` (authorized). It does **not** touch the source remotes — their
-single-remote policies are untouched. (The source apps are already public deploys.)
+### Phase 2 — `packages/ui-kit`
+- **Tokens:** create the unified set = Explorer base tokens **+** IV's imaging additions
+  (`--ink`, `--sentinel`, `colormaps.css`). Value-equal → superset, not reconciliation.
+- **Components (verified pure):** harvest `SpectrumPlot`+`useUplot`+`chartTheme`+`uplotZoom`,
+  `TreeView`, the `components.tsx` primitives + IV `ds/*`, `cvTerms`/`curie`/`format`.
+- **Parity:** snapshot/visual tests in ui-kit; a captured-render fixture per component matches
+  the old apps' output. (No "both old apps consume ui-kit" — they're external.)
+- **Risk: low.**
 
----
+### Phase 3 — `packages/core` (the long pole, HIGH risk)
+- IV's worker as the base; harvest IN Explorer's data access as worker handlers implementing
+  `@mzpeak/contracts` `MESSAGE_POLICY` (`archiveList`/`parquetFooter`/`deepColumn`/
+  `sampleColumn` — the Structure path: reconstruct the reader-keyed `WeakMap` cache + dynamic
+  `hyparquet` **inside** the worker; `scanBreakdown`, `extractChrom`, `studyMeta`); port
+  Explorer's `readScheduler` + LRU cache into the worker; merge IV's imaging handlers.
+- **Pre-req spike (review delta E):** a Structure/Parquet workerization spike + parity
+  fixtures before the general migration.
+- **Parity (realigned):** golden-output fixtures captured from the OLD apps (imaging + LC) —
+  the new engine's output must match them; imaging+LC e2e on the new app; the
+  file→ion-image→spectrum invariant. Cancellation/perf smoke tests land here.
+- **Risk: HIGH.**
 
-## 3. The harmonization milestone (the pre-refactor baseline) — "Step H"
+### Phase 4 — `app/` (the one shell)
+- New shell (modeled on Explorer's `App.tsx`); capability-adaptive sidebar off `CapabilityModel`;
+  Advanced accordion (Metadata+Structure); MSI accordion (`isImaging`-gated, **lazy chunk**
+  harvesting IV's `ImagingPanel`/`OpticalPanel`/`GridDiagnosticsPanel`/`tiff`); merged into the
+  contracts' `UnifiedState`; pixel→spectrum + ROI→spectrum; a11y; detection-override UI.
+- **Risk: medium.**
 
-This is the gate between "two repos" and "refactor along the roadmap". It is essentially
-**Phase 0 + ingestion**, and it is the first thing that makes the codebase *coherent*.
+### Phase 5 — URL resolver
+- Wire `packages/contracts/url` into `app/`; publish the legacy shims via `LEGACY_PATH_MAP`
+  (`/IV/`→`/view/` mzpeak.org; `/mzPeakIV/`→`/mzpeakviewer/` GitHub Pages); old-link corpus +
+  query-preservation tests. **Risk: medium.**
 
-**H1. One reader (Phase 0).** Add `vendor/mzpeakts` as a single submodule pinned to the
-converged commit (aux-arrays **and** Numpress Linear). Until `HUPO-PSI/mzpeakts#1` merges,
-pin the **fork commit** carrying both (documented fallback; named SHA + owner in
-`SOURCES.md`). Reconcile the `DataArrays`/`Reader` type delta into one surface.
+### Phase 6 — single deploy + decommission
+- Safety harness + rollback canary; one CI; one deploy (`app/` at `/view/`, `/IV/` shim);
+  consolidated fixtures. **Decommission** = redirect/retire the old `mzpeak.org/IV` + `/view`
+  deploys (the source repos stay as archives). **Risk: low–medium.**
 
-**H2. Apps in, rewired to the one reader.** Copy `mzPeakIV → apps/iv`,
-`mzPeakExplorer → apps/explorer` at recorded SHAs. Delete each app's private mzpeakts
-copy; repoint both vite aliases + `file:` installs at `../../vendor/mzpeakts/lib`. Make
-the repo an npm workspace member set (`apps/*` + `packages/*`).
+**Order:** 0 → 1 → {2, 3} → 4 → 5 → 6.
 
-**H3. Both green, behavior unchanged.** Each app builds, typechecks, unit-tests, and
-e2e-passes from the monorepo against the one reader. **Add Explorer e2e** (it has none
-today — review codex #12): port IV's Playwright harness to `apps/explorer` so "both apps
-e2e green" is an actionable gate from here on.
+## 5. Reconciliation list (what must be *harmonized*, not just copied)
 
-**Definition of done for Step H:** `npm install && npm run -ws build && npm test` green;
-both apps run via `npm run dev -w apps/iv` / `-w apps/explorer`; one `vendor/mzpeakts`;
-no local reader patches; `SOURCES.md` records both SHAs + the reader SHA. **No feature
-work, no extraction yet** — this is the coherent baseline the roadmap refactors from.
+1. Reader vendoring → ONE submodule ✅. 2. Reader type delta (`DataArrays`) → one surface
+(in the reader; ✅ via `4067f84`). 3. Tokens → value-equal superset (Phase 2). 4. Detection →
+contracts' phased `ImagingDetection`, replacing Explorer's 1-signal (Phase 3/4). 5. `scan`
+semantics → provenance-tagged selector + legacy `scan=N→spectrum=N-1` (✅ in `url/legacy.ts`).
+6. e2e → build it for the new app (the old apps' e2e isn't reused in-repo). 7. Deploy base →
+unified `VITE_BASE` per target; both redirect roots (Phase 5/6). 8. `hasTicColumn` → tri-state
+(✅ contracts).
 
-> Why this ordering: the roadmap's Phase-2 and Phase-3 acceptance criteria literally say
-> "both source apps … remain visually/behaviorally identical (snapshot/e2e green)" and
-> "golden-output parity vs the OLD outputs." Those gates are **impossible to run** until
-> both apps live and build in this repo against one reader. Step H makes the gates exist.
+## 6. Decisions (resolved)
 
----
+- **Old-app code in the repo:** removed; old apps are external read-only sources, harvested
+  per phase. *(operator, 2026-06-12)*
+- **Parity gates:** captured golden fixtures from the old apps + live deploys, not in-repo
+  app builds. *(operator, 2026-06-12 — ROADMAP.md Phase 2/3 realigned accordingly)*
 
-## 4. Then refactor along the roadmap (each step keeps both apps green)
+## 7. Review alignment
 
-### Phase 2 — extract the shared UI core → `packages/ui-kit`
-- **Tokens:** create the unified set = Explorer's base tokens **+** IV's imaging-only
-  additions (`--ink`, `--ink-raised`, `--sentinel`, `colormaps.css`). They're value-equal,
-  so this is a superset merge, not a reconciliation. Both apps import tokens from ui-kit;
-  delete the two local token copies.
-- **Components (pure, verified 0 store refs):** `SpectrumPlot` + `useUplot` + `chartTheme`
-  + `uplotZoom` (spectrum plot), `TreeView` (metadata JSON tree), the `components.tsx`
-  primitives + IV `ds/*` (Button/Select/Panel/Badge/SegmentedControl/NumberField/Checkbox/
-  StatRow/ColormapScale), `cvTerms`/`curie`/`format` (cv/format utils). Move to ui-kit;
-  both apps import from `@mzpeak/ui-kit`; delete local copies.
-- **Explicitly NOT moved:** `SpectraTab`/`MetadataTab`/`StructureTab`/`ChromatogramsTab`/
-  `SummaryTab`/imaging panels (store-bound containers) and `FileLoader` (data-bound) — they
-  stay in the apps, now consuming ui-kit. This is the container/presenter line the
-  reviewers flagged; we hold it.
-- **Gate:** ui-kit builds standalone; both apps snapshot/e2e identical. **Risk: low**
-  (only the already-pure files move).
-
-### Phase 3 — merge the engine → `packages/core` (the long pole, HIGH risk)
-- **Base:** IV's worker (`src/worker/mzPeakWorker.ts` + protocol) — it already owns the
-  reader off-main-thread; the imaging compute needs it.
-- **Port IN Explorer's data access** as worker handlers implementing `@mzpeak/contracts`
-  `MESSAGE_POLICY`: `archiveList`/`parquetFooter`/`deepColumn`/`sampleColumn` (the
-  Structure path — note review CRITICAL: it uses `reader.store`, a `WeakMap` keyed by the
-  reader, and dynamic `hyparquet`; reconstruct cache identity **inside** the worker),
-  `scanBreakdown`, `extractChrom` (TIC/XIC/stored), `studyMeta`. Port Explorer's
-  `readScheduler` (priority/background lanes) + LRU spectrum cache **into** the worker.
-- **Merge IN** IV's imaging handlers (`renderIonImage`/`renderMultiChannel`/`meanSpectrum`/
-  `roiSpectrum`/`getOpticalImage`/grid) — they're already worker handlers.
-- **Both apps call `core` via thin adapters** (a `postMessage` client matching the
-  contracts union). Explorer's main-thread reader calls become async adapter calls.
-- **Pre-req spike (review delta E):** before the general migration, a *Structure/Parquet
-  workerization spike* with a concrete protocol slice + parity fixtures — it's a redesign
-  of cache identity, not a thin call surface.
-- **Gate:** golden-output parity (new engine vs OLD main-thread/worker outputs) for an
-  imaging fixture AND an LC fixture; imaging+LC e2e green; the file→ion-image→spectrum
-  invariant under e2e. Move minimal cancellation/perf smoke tests here (review delta).
-  **Risk: HIGH.**
-
-### Phase 4 — unified shell → `apps/viewer`
-- Explorer's `App.tsx` shell as the base; build the capability-adaptive sidebar off the
-  `CapabilityModel` (Summary/Spectra always; Chromatograms on
-  `numChromatograms>0 || ticColumn==="present"`; Advanced accordion = Metadata+Structure;
-  MSI accordion `isImaging`-gated, **lazy `import()` chunk** = IV's `ImagingPanel`/
-  `OpticalPanel`/`GridDiagnosticsPanel`/`tiff` export).
-- Merge the two zustand stores into the contracts' `UnifiedState`; wire pixel→spectrum and
-  ROI→spectrum to the `spectra` view (provenance-tagged `SpectrumSelector`).
-- a11y (`tablist`/accordion/roving focus) + detection-override UI from the contracts'
-  `ImagingDetection`. **Risk: medium.**
-
-### Phase 5 — URL resolver wired
-- Wire `packages/contracts/url` into `apps/viewer` (parse→replay on load; serialize←Share).
-- Publish the legacy redirect shims using `LEGACY_PATH_MAP`: `/IV/`→`/view/` (mzpeak.org)
-  and `/mzPeakIV/`→`/mzpeakviewer/` (GitHub Pages, committed `index.html` client shim).
-  Old-link regression corpus + query-preservation tests. **Risk: medium.**
-
-### Phase 6 — collapse & decommission
-- Safety harness + rollback canary; one CI pipeline; one deploy (`apps/viewer` at `/view/`,
-  `/IV/` shim). **Delete `apps/iv` and `apps/explorer`** and their fixtures (consolidated).
-  The transitional scaffolding is demolished here. **Risk: low–medium.**
-
----
-
-## 5. The reconciliation list (the specific things that must be *harmonized*, not just copied)
-
-1. **Reader vendoring** — submodule vs in-tree → ONE submodule; both vite aliases repointed
-   (H1/H2).
-2. **Reader type delta** — IV's `DataArrays` (incl. `BigInt64Array`) vs Explorer's older
-   shape → one surface (H1).
-3. **Tokens** — alias-name differences only; values equal → superset, single set (Phase 2).
-4. **Imaging detection** — IV 3-signal `probeIsImaging` vs Explorer 1-signal `readImaging`
-   → standardize on the contracts' phased `ImagingDetection` (hint→probed), replace
-   `readImaging` (Phase 3/4).
-5. **`scan` semantics** — IV 1-based index vs Explorer native number → contracts'
-   provenance-tagged selector; legacy `/IV/ scan=N → spectrum=N-1` (Phase 5; already in
-   `url/legacy.ts`).
-6. **e2e infra** — Explorer has none → port IV's Playwright in Step H so both apps gate.
-7. **Deploy base** — IV Pages base `/mzPeakIV/`, Explorer derives from repo name → unified
-   `VITE_BASE` per target; both redirect roots covered (Phase 5/6).
-8. **`hasTicColumn`** — only known after the scan pass → contracts' tri-state `ticColumn`;
-   nav shows optimistically (Phase 4).
-
----
-
-## 6. Open decisions (operator)
-
-1. **Ingestion mechanics:** copy-snapshot at recorded SHA *(recommended)* vs `git subtree`
-   (blame continuity) vs reference-in-place (apps stay external, only modules cherry-picked).
-2. **Execute Step H now, or wait for the reader PR?** `HUPO-PSI/mzpeakts#1` is still OPEN.
-   Option A: execute Step H now on the **fork-pin fallback** (named SHA with both fixes) and
-   re-point to the upstream commit on merge. Option B: hold Step H until the PR merges.
-   *Recommend A* — it unblocks the whole harmonization and the re-point is a one-line
-   submodule bump.
-3. **Source-app move timing** (the HANDOFF "still open" item): this plan resolves it →
-   **move both in at Step H** (the parity gates require it).
-
----
-
-## 7. Why this satisfies the adversarial review
-
-- **codex #1** (Phase 1 needs the workspace): workspace exists; `apps/*` slot into it.
-- **codex #3 / vibe CRITICAL-1** (Structure/Parquet understated): Phase 3 gets an explicit
-  workerization spike + parity fixtures before the general migration (§4 Phase 3).
-- **codex #6 / vibe MAJOR-2** (ui-kit not purely presentational): §0 + §4 move only the
-  *verified* zero-store-ref files; Tabs stay containers — the line is grounded in a real
-  grep, not optimism.
-- **codex #5 / vibe MAJOR-1** (Phase 0 schedule-critical): Step H names the fork-pin
-  fallback SHA + owner and treats the reader as the critical path.
-- **codex #12** (no Explorer e2e): Step H ports Playwright to Explorer so the parity gates
-  are real.
-- **review delta** (harness too late): cancellation/perf/redirect smoke tests move into the
-  phases that introduce those behaviors (§4).
+codex #1 (workspace) ✅; codex #3 / vibe CRITICAL-1 (Structure/Parquet) → Phase-3 spike +
+captured fixtures; codex #6 / vibe MAJOR-2 (ui-kit purity) → harvest only verified
+zero-store-ref files; codex #5 (Phase 0 critical) → reader is the foundation, fork-pin named;
+review delta (harness late) → smoke tests move into Phases 3/5.

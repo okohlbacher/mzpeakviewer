@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: unify-mzpeakiv-mzpeakexplorer
 status: planning
-stopped_at: Step H harmonization (H1 one reader + H2 both apps ingested, all green); Phase 1 contracts shipped
+stopped_at: Shared core in place (one reader submodule + Phase 1 contracts); one-app harvest model adopted
 last_updated: "2026-06-12"
 last_activity: 2026-06-12
 progress:
@@ -46,27 +46,31 @@ Design synthesized in `~/Claude/mzPeakIV` (where PROC-01 + the source-app analys
 - mzpeakts post-merge: single submodule (recommended).
 - Phase 7 (extra deep-link capabilities `ch=`/`roi=`/`px=`): in or backlog.
 
-## Step H — harmonization (DONE except e2e)
+## Model correction (operator, 2026-06-12)
 
-Operator chose copy-snapshot + run-now-on-fork-pin (HARMONIZATION-PLAN §6).
-- **H1 ✅** one `vendor/mzpeakts` submodule @ `4067f84` (aux-arrays + Numpress Linear).
-- **H2 ✅** both apps ingested (`apps/iv` @a5ec7c6, `apps/explorer` @f0723b0), rewired to
-  the one reader; workspace = `packages/* + apps/*`. typecheck + unit + prod build green
-  for both (Explorer 48, IV 150, contracts 49). Commit `141b853`.
-- **H3 ⏳** remaining: port IV's Playwright harness to `apps/explorer` so "both apps e2e
-  green" is an actionable parity gate (review codex #12). Then Step H is fully closed.
+We build **one new app**; the old apps are **external read-only sources** we harvest code
+from (not hosted/built here). An earlier attempt copied both whole apps into `apps/iv` +
+`apps/explorer` as in-repo parity oracles — that was removed. Parity is now via golden
+fixtures captured from the old apps + their live deploys. ROADMAP Phase 2/3 success criteria
+realigned accordingly. See `research/HARMONIZATION-PLAN.md` (revised).
+
+Useful finding kept from the throwaway copies: both old codebases compile + unit-pass on the
+single converged reader `4067f84` — Phase-0 convergence de-risked.
+
+## Shared core in place
+
+- `vendor/mzpeakts` submodule @ `4067f84` (aux-arrays + Numpress Linear, one commit).
+- `packages/contracts` shipped (49 tests). Workspace = `packages/*`.
 
 ## Next actions
 
-1. Close H3: add Explorer e2e (reuse `apps/iv/e2e` + a shared fixture), run both apps' e2e.
-2. Begin **Phase 2** (`packages/ui-kit`): unify the value-equal tokens (Explorer base +
-   IV imaging extras) + lift the verified zero-store-ref components (SpectrumPlot/useUplot/
-   chartTheme, TreeView, components primitives + IV ds/*, cvTerms/format); both apps import
-   from `@mzpeak/ui-kit`; snapshot/e2e parity gate. (Tabs stay in the apps — container line.)
-3. Operator: review `research/ADVERSARIAL-REVIEW-v2-SYNTHESIS.md` and apply the roadmap
-   deltas (Phase 0 → schedule-critical; split Phase 3's Structure/Parquet workerization
-   into a spike; narrow Phase 2 ui-kit scope; move cancellation/perf/redirect smoke tests
-   earlier; add the `0→2` dependency edge).
+1. Begin **Phase 2** (`packages/ui-kit`): unify the value-equal tokens (Explorer base + IV
+   imaging extras) + harvest the verified zero-store-ref components (SpectrumPlot/useUplot/
+   chartTheme/uplotZoom, TreeView, `components.tsx` primitives + IV `ds/*`, cvTerms/format)
+   from the read-only sources; parity via captured render fixtures. Containers stay out.
+2. Operator: review `research/ADVERSARIAL-REVIEW-v2-SYNTHESIS.md` and apply the remaining
+   roadmap deltas (Phase 0 → schedule-critical; split Phase 3's Structure/Parquet
+   workerization into a spike; move cancellation/perf/redirect smoke tests earlier).
 2. Land Phase 0 prerequisite (HUPO-PSI/mzpeakts#1 merge → single vendored reader).
 3. Phase 2/3 consume `@mzpeak/contracts`: the engine implements `MESSAGE_POLICY`; both
    shells wire the URL module behind their existing resolvers as a no-op parity check.

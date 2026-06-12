@@ -23,4 +23,4 @@ echo "[bootstrap] 2/3 — build the vendored reader (parquet-wasm + arrow + dist
 echo "[bootstrap] 3/3 — install the workspace"
 npm install
 
-echo "[bootstrap] done. Try: npm run -w mzpeakexplorer dev   (or  -w mzpeakiv)"
+echo "[bootstrap] done. Try: npm test   (the new app/ lands in Phase 4)"
