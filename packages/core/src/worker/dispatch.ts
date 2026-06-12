@@ -45,12 +45,11 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         const fileSize = bytes.byteLength;
         const ef = await openEngineFile(bytes, req.source.kind === "file" ? req.source.name : req.source.url);
         ctx.active = ef;
-        const transfer = buffersOf(
-          ef.tic,
-          ef.grid?.coordKey,
-          ef.grid?.spectrumIndex,
-          ef.grid?.presenceMask,
-        );
+        // Transfer ONLY the TIC (a fresh array). The grid arrays are structured-CLONED
+        // (copied) to the main thread: the worker RETAINS its grid — presenceMask +
+        // coord lookup are needed for subsequent ion-image renders, so transferring
+        // (detaching) them would break the render path (IV protocol invariant).
+        const transfer = buffersOf(ef.tic);
         respond(
           {
             type: "opened",
