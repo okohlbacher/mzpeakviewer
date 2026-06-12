@@ -1,0 +1,3 @@
+[submodule "vendor/mzpeakts"]
+	path = vendor/mzpeakts
+	url = https://github.com/okohlbacher/mzpeakts
