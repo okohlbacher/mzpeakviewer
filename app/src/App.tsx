@@ -28,6 +28,7 @@ import { Chromatograms } from "./views/Chromatograms";
 import { Metadata } from "./views/Metadata";
 import { Structure } from "./views/Structure";
 import { IonImageView } from "./views/IonImage";
+import { Idle } from "./views/Idle";
 import { engine } from "./engine";
 import { ShareButton } from "./ShareButton";
 
@@ -733,7 +734,9 @@ function NoticeBar() {
 // ---------------------------------------------------------------------------
 
 export function App() {
+  const phase = useStore((s) => s.phase);
   const error = useStore((s) => s.error);
+  const ready = phase === "ready";
 
   return (
     <div
@@ -748,13 +751,20 @@ export function App() {
       }}
     >
       <TopBar />
-      {error && <ErrorBanner message={error} />}
-      <StatusBar />
       <NoticeBar />
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        <Sidebar />
-        <ViewRouter />
-      </div>
+      {ready ? (
+        <>
+          {error && <ErrorBanner message={error} />}
+          <StatusBar />
+          <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+            <Sidebar />
+            <ViewRouter />
+          </div>
+        </>
+      ) : (
+        // idle / loading / open-error → the start screen (drop-zone + demos + URL).
+        <Idle />
+      )}
     </div>
   );
 }

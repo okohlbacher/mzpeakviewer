@@ -69,3 +69,17 @@ test("Structure (real clicks): list members → inspect a parquet footer", async
   await expect(page.getByTestId("structure-footer")).toBeVisible({ timeout: 20_000 });
   expect(await page.getByTestId("structure-error").count()).toBe(0);
 });
+
+test("idle start page: demo cards + dropzone + URL field, and a demo loads", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("idle-view")).toBeVisible();
+  await expect(page.locator('[data-testid^="demo-"]')).toHaveCount(3);
+  await expect(page.getByTestId("idle-dropzone")).toBeVisible();
+  await expect(page.getByTestId("idle-url")).toBeVisible();
+
+  // A demo card loads its file → the idle screen is replaced by the viewer.
+  await page.getByTestId("demo-lc").click();
+  await expect(page.getByTestId("is-imaging")).toHaveText("no", { timeout: 45_000 });
+  await expect(page.getByTestId("idle-view")).toHaveCount(0);
+  expect(await page.getByTestId("error").count()).toBe(0);
+});

@@ -1,3 +1,6 @@
+// MUST be first: repairs an invalid navigator.language before uPlot's module-load
+// `new Intl.NumberFormat(navigator.language)` can throw and blank the app (Firefox).
+import "./locale-guard";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "@mzpeak/ui-kit/styles.css";
