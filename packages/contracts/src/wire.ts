@@ -38,12 +38,22 @@ export type FileStats = {
   instrument?: string | null;
 };
 
+/** Profile vs centroid — the plot branches on this (peak labels, fill vs needles). */
+export type SpectrumRepresentation = "profile" | "centroid" | null;
+
 /** One spectrum's arrays (transfer mz + intensity buffers). */
 export type SpectrumArrays = {
   index: number;
   id: string;
   mz: Float64Array;
   intensity: Float32Array;
+  /**
+   * Profile/centroid, when the engine knows it. The spectrum plot needs this to
+   * render centroid as needles + pick top peaks vs profile as a filled trace
+   * (Phase-2 ui-kit found the gap — it kept a local type carrying this). The
+   * engine MUST populate it; `null`/absent = unknown (plot falls back to profile).
+   */
+  representation?: SpectrumRepresentation;
 };
 
 /** Ion-image intensity stats sent with renderResult. */

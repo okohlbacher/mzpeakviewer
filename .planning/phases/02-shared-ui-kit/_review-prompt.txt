@@ -1,0 +1,40 @@
+You are an adversarial reviewer for Phase 2 of the mzpeakviewer merge: building
+@mzpeak/ui-kit by HARVESTING presentational code from two read-only source apps into
+ONE new app's design-system package. Default to skepticism; find what is wrong,
+under-verified, or a future parity hazard. Do NOT rewrite code.
+
+WHAT WAS DONE: see the diff `git diff 4026904..030ee3d` in /Users/kohlbach/Claude/mzPeakViewer
+(packages/ui-kit/*). Tokens + IV's ds primitives + Explorer's SpectrumPlot/useUplot/
+chartTheme/uplotZoom/peaks + TreeView + cvTerms/curie/format were copied in and import-
+adapted. ui-kit imports nothing from @mzpeak/contracts or any reader/store (purely
+presentational by design). 11 primitive snapshot tests + typecheck pass.
+
+SOURCES (read-only, compare against): /Users/kohlbach/Claude/mzPeakIV (ds at src/ui/ds,
+tokens at src/styles/ds) and /Users/kohlbach/Claude/mzPeakExplorer (src/ui/SpectrumPlot.tsx,
+useUplot.ts, chartTheme.ts, uplotZoom.ts, peaks.ts, TreeView.tsx, cvTerms.ts; curie at
+src/reader/curie.ts; format at src/ui/format.ts). You have full disk read access.
+
+DIRECT THE ATTACK at:
+1. Harvest fidelity — did any copied file's BEHAVIOR change vs its source (beyond import
+   path fixes + noUncheckedIndexedAccess `!`/`?? null` coercions)? Diff them. Any coercion
+   that changes runtime semantics (not just types)?
+2. Presentational purity — does any ui-kit file actually still reach a store/reader/app
+   global, or assume one? (grep for it; the claim is "none".)
+3. Token unification — IV's tokens were lifted as the unified set on a "value-equal across
+   both apps" claim. VERIFY: diff IV's vs Explorer's token CSS (colors/typography/spacing/
+   base). Are there Explorer token names/values the new app needs that IV's set does NOT
+   contain (so an Explorer-harvested component referencing a missing var renders wrong)?
+4. The SpectrumArrays divergence — ui-kit kept a LOCAL spectrum type carrying
+   `representation` because contracts' wire SpectrumArrays lacks it. Is that the right call,
+   or does it signal a real GAP in the contracts wire type (the engine must emit
+   representation for the plot to label centroid vs profile)? Flag it.
+5. Completeness — was any genuinely-shared presentational component or util MISSED (present
+   in both source apps, needed by the new app, not harvested)? e.g. ChromPlot, reporters,
+   SettingsMenu pieces, components.tsx primitives.
+6. Test adequacy — Phase-2 success is "renders identically to fixtures captured from the old
+   apps." Is 11 renderToStaticMarkup snapshots + typecheck ENOUGH, or is the parity claim
+   under-tested (e.g. SpectrumPlot/TreeView have NO render test; CSS class contract untested)?
+
+OUTPUT: start with EXACTLY ONE line — `verdict: accept` | `verdict: accept-with-revisions`
+| `verdict: reject`. Then a PRIORITIZED findings list (CRITICAL/MAJOR/MINOR), each with the
+flaw, why it matters, a concrete fix, and file:line citations.

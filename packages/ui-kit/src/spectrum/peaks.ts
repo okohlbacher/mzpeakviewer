@@ -1,20 +1,19 @@
 /**
  * Representation discriminant used by the spectrum plot to choose stick (centroid)
- * vs line (profile) rendering and peak-picking. Kept local because the wire
- * `SpectrumArrays` in `@mzpeak/contracts` does not carry it.
+ * vs line (profile) rendering and peak-picking. Mirrors the contracts'
+ * `SpectrumRepresentation`; kept local to keep ui-kit contract-free.
  */
 export type Representation = "profile" | "centroid" | null;
 
 /**
- * Spectrum arrays as the plot cluster needs them. Structurally a superset of the
- * `@mzpeak/contracts` wire `SpectrumArrays` (`index`/`id`/`mz`/`intensity`) plus
- * the `representation` field the rendering and peak-picking logic branches on.
+ * Spectrum arrays as the plot cluster needs them. The `@mzpeak/contracts` wire
+ * `SpectrumArrays` now carries `representation?` too (added after the Phase-2
+ * review), so a contracts spectrum is structurally assignable to this type.
  *
- * Kept as a local type rather than importing `@mzpeak/contracts`: the contracts
- * `SpectrumArrays` is a strict subset (no `representation`), and importing it as
- * source under this package's `rootDir`/`declaration` config pulls the whole
- * contracts graph in and trips TS6059. A contracts `SpectrumArrays` (which adds
- * no extra required fields) is assignable to this type structurally.
+ * Kept as a LOCAL type on purpose: ui-kit is purely presentational and imports
+ * nothing from @mzpeak/contracts — the engine/app adapts wire spectra to this prop
+ * shape at the call site. (Importing contracts as source here also trips TS6059
+ * under this package's rootDir/declaration config.)
  */
 export type SpectrumArrays = {
   index: number;

@@ -4,6 +4,10 @@
 export { SpectrumPlot } from "./SpectrumPlot";
 export type { ReporterMarker } from "./SpectrumPlot";
 
+// Chromatogram navigator (time vs intensity, click-to-pick).
+export { ChromPlot } from "./ChromPlot";
+export type { ChromPoint } from "./ChromPlot";
+
 // Spectrum data shape the plot consumes (contracts wire shape + `representation`).
 export type { SpectrumArrays, Representation } from "./peaks";
 

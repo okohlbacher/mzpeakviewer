@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import uPlot from "uplot";
-import "uplot/dist/uPlot.min.css";
+// uPlot's base CSS ships via @mzpeak/ui-kit/styles.css (not a JS side-effect import,
+// so importing a primitive from the package root doesn't pull plot CSS — codex Phase-2 #8).
 import type { SpectrumArrays } from "./peaks";
 import { wheelZoomPlugin } from "./uplotZoom";
 import { STAGE, stageAxes, xRange, finiteExtent } from "./chartTheme";
