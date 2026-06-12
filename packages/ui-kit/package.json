@@ -1,0 +1,30 @@
+{
+  "name": "@mzpeak/ui-kit",
+  "version": "0.0.0",
+  "description": "Phase 2: unified design tokens + purely presentational components for the mzPeak viewer. No reader, no store, no imaging assumptions. Consumed as source (the app's bundler handles tsx/css).",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./styles.css": "./src/styles.css"
+  },
+  "files": ["src"],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "dependencies": {
+    "uplot": "1.6.32"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.16",
+    "@types/react-dom": "19.2.3",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "vitest": "4.1.8"
+  }
+}
