@@ -13,12 +13,12 @@ that passed a dual adversarial review (codex + vibe). No application code yet.
 
 ## Push / Remote Policy (HARD RULE)
 
-**This repo has NO authorized remote yet.** Do NOT add a git remote, push, or
-create a hosted repository for `mzpeak-viewer` without an explicit, interactive
-operator "yes" in chat naming the exact target. If/when the operator creates
-`github.com/okohlbacher/mzpeak-viewer`, that becomes the sole authorized push
-target (same discipline as the source repos: never push to a fork/mirror/other
-remote). Until then, all work is local-only.
+**The ONLY authorized push target is `github.com/okohlbacher/mzpeak-viewer`** (this
+repo's `origin`). Pushing there for committed work, when the operator has asked to
+push, is fine. Pushing to ANY other remote/repo (a fork, a different org/user, a new
+remote, a mirror) is prohibited by default — even if named or supplied; warn and
+require an explicit, interactive operator "yes" for that specific push first. Before
+any push, verify the resolved remote is `okohlbacher/mzpeak-viewer`.
 
 The source repos retain their own policies: mzPeakIV → only `okohlbacher/mzPeakIV`;
 mzPeakExplorer → only `okohlbacher/mzPeakExplorer`. Do not push merge work to

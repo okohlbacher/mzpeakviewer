@@ -135,6 +135,7 @@ submodule. Until merged, Phase 0 can pin the fork commit as a fallback.
 
 ## 8. Push / remote policy (HARD RULE — repeated from CLAUDE.md)
 
-This repo has **no authorized remote yet**. Do not add a remote, push, or create a
-hosted repo for `mzpeak-viewer` without an explicit operator "yes" in chat naming
-the exact target. Source repos keep their own single-remote policies.
+The sole authorized push target is **`github.com/okohlbacher/mzpeak-viewer`** (this
+repo's `origin`). Never push to any other remote (fork/mirror/other org) without an
+explicit operator "yes" naming the exact target. Source repos keep their own
+single-remote policies.
