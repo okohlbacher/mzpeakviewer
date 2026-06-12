@@ -3,6 +3,9 @@ dist/
 *.tsbuildinfo
 *.log
 .DS_Store
+playwright-report/
+test-results/
+/app/test-results/
 .planning/phases/**/*CODEX-ROUND*.log
 .planning/**/*.local.md
 test/data/*.mzpeak

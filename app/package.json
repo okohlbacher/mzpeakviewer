@@ -1,0 +1,40 @@
+{
+  "name": "@mzpeak/app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/ibm-plex-sans": "^5.2.8",
+    "@mzpeak/contracts": "*",
+    "@mzpeak/core": "*",
+    "@mzpeak/ui-kit": "*",
+    "@zip.js/zip.js": "2.8.26",
+    "apache-arrow": "21.1.0",
+    "arrow-js-ffi": "0.4.3",
+    "hyparquet": "^1.26.0",
+    "hyparquet-compressors": "^1.1.1",
+    "mzpeakts": "file:../vendor/mzpeakts/lib",
+    "parquet-wasm": "0.7.1",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "uplot": "1.6.32",
+    "zustand": "5.0.14"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.60.0",
+    "@types/react": "19.2.16",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "typescript": "~5.9.3",
+    "vite": "8.0.16",
+    "vite-plugin-wasm": "3.6.0"
+  }
+}
