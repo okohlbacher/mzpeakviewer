@@ -1,0 +1,39 @@
+Adversarial review of Phase-3 slice 1 of mzpeakviewer: the PURE layer of the unified
+Web Worker engine @mzpeak/core (main-thread protocol client + reader→wire adapters).
+The reader-I/O handlers + worker dispatcher are deliberately NOT in this slice (next,
+built against a golden parity gate). Default to skepticism; find correctness bugs.
+
+REVIEW: `git diff 47ebaa1..4645a01` in /Users/kohlbach/Claude/mzPeakViewer (packages/core/*).
+Targets: packages/core/src/client/EngineClient.ts, src/adapt/{capability,spectrum,browse,
+chrom,footer,grid,ionImage}.ts, src/worker/{state,respond}.ts.
+Compare against: packages/contracts/src/{protocol,wire}.ts and the read-only sources
+/Users/kohlbach/Claude/mzPeakIV + /Users/kohlbach/Claude/mzPeakExplorer (full disk read).
+Maps: .planning/phases/03-engine-migration/MAP-iv-worker.md + MAP-explorer-data.md.
+
+DIRECT THE ATTACK at:
+1. Adapter CORRECTNESS vs source semantics — verify each against the real source:
+   - spectrum: representation mapping (MS:1000128 profile / MS:1000127 centroid — is that
+     the source's actual rule? does it miss a representation source, e.g. per-spectrum vs
+     per-scan)? float coercion aliasing vs copying — any transfer-after-alias hazard?
+   - grid: the coord-key encoding (y*width+x, 0-based after coordinateBase) — does flattenGrid
+     match IV's ImagingGrid exactly? does it preserve coordinateBase/origin correctly, or is
+     originX/Y silently wrong (IV uses coordinateBase, the wire uses originX/Y)?
+   - ionImage stats: the agent dropped IV's presenceMask gating and uses nonzero instead —
+     does that change results when a present pixel is legitimately 0 intensity? real bug?
+   - browse: msLevel/tic null→0 vs rt null→NaN — does 0 collide with a real value (msLevel 0?
+     tic 0)? does the MS-level filter break?
+   - footer/chrom: any lossy or wrong mapping.
+2. EngineClient CORRECTNESS: the ready-buffer flush order; requestId/selectId correlation;
+   the stale-drop select whose Promise is LEFT PENDING FOREVER (agent says "by design") —
+   is that a memory/await leak the shell will hang on? cancel() rejecting + a later result
+   arriving; transfer list correctness; any race where a response arrives before the handler
+   is registered.
+3. The pure/impure split itself — are the adapter INPUT shapes actually what the reader
+   yields (so the handlers can wire them without reshaping)? Any adapter whose input is a
+   fiction that won't match mzpeakts?
+4. Anything MISSING from the pure layer that the handlers will need and that should have a
+   pure, tested home (e.g. error classification, the scan/pixel→spectrum selection logic).
+
+OUTPUT: start with EXACTLY ONE line — `verdict: accept` | `verdict: accept-with-revisions`
+| `verdict: reject`. Then prioritized findings (CRITICAL/MAJOR/MINOR), each: flaw, why it
+matters, concrete fix, file:line. Cite the source when claiming an adapter is wrong.

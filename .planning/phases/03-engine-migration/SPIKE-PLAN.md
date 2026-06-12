@@ -12,6 +12,16 @@ build the engine against a parity gate — never refactor blind.**
 - Arrow/WASM/parquet handles never cross; only the `wire.ts` payloads do.
 
 ## 1. Parity gate FIRST (the thing that makes the rest safe)
+
+**Key enabler (verified):** the `mzpeakts` reader + parquet-wasm run in **node** — IV's
+`src/reader/*.test.ts` (reader/stats/capability/arrays/scanCoords) open the real
+`example.mzpeak` (287 KB) in vitest. So the engine's reader-I/O HANDLERS and the golden
+gate are node-testable against real fixtures — NO browser needed until the Worker
+postMessage boundary + Canvas/WASM-in-worker bundling (Phase 4). This means slice 2
+(handlers) is unit/integration-testable here, not deferred to e2e. Fixtures available:
+IV `example.mzpeak` (imaging, 287 KB); Explorer `small.mzpeak` (LC, 2 MB),
+`imaging-demo.mzpeak`, `small.chunked.mzpeak`.
+
 Before porting anything, capture **golden fixtures** from the read-only old apps:
 - Run each old app's existing unit suites and record the reader-output snapshots they already
   assert on (IV: stats/grid/ion-image; Explorer: summary/browse/chrom/parquet) into
