@@ -48,6 +48,11 @@ Design synthesized in `~/Claude/mzPeakIV` (where PROC-01 + the source-app analys
 
 ## Next actions
 
+0. Operator: pick the ingestion mechanics + Step-H timing in
+   `research/HARMONIZATION-PLAN.md` §6 (recommended: copy-snapshot at recorded SHA; run
+   Step H now on the mzpeakts fork-pin fallback). Step H = bring both apps into `apps/iv`
+   + `apps/explorer`, one `vendor/mzpeakts` submodule, both green — the coherent pre-refactor
+   baseline that gives every later phase a parity oracle.
 1. Operator: review `research/ADVERSARIAL-REVIEW-v2-SYNTHESIS.md` and apply the roadmap
    deltas (Phase 0 → schedule-critical; split Phase 3's Structure/Parquet workerization
    into a spike; narrow Phase 2 ui-kit scope; move cancellation/perf/redirect smoke tests
