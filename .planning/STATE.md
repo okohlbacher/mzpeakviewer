@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: unify-mzpeakiv-mzpeakexplorer
 status: building
-stopped_at: Phase 2 ui-kit done (2 review rounds, green); Phase 3 engine kicked off (skeleton + spike plan)
+stopped_at: Phase 3 engine (open/spectrum/scan/chrom, dual-reviewed, value-parity) + Phase 4 slice 1 (app runs in a browser, e2e green)
 last_updated: "2026-06-12"
 last_activity: 2026-06-12
 progress:
   total_phases: 7
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 0
   completed_plans: 0
-  percent: 30
+  percent: 52
 ---
 
 # Project State
@@ -25,15 +25,27 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-Phase: 01 (Unified Contracts — first version delivered ahead of the Phase-0 gate)
-Plan: None (built directly as the "first version" deliverable; not run through /gsd:plan-phase)
-Status: `@mzpeak/contracts` package shipped — npm workspace + protocol/wire/capability/store
-types + a pure URL grammar module + 49 passing tests + `SPEC.md`. Build, typecheck, and
-tests all green. Phase 0 (reader convergence) is still gated on HUPO-PSI/mzpeakts#1 (OPEN)
-and was intentionally NOT done here — the contracts decouple from the reader, so Phase 1
-could land first. A round-2 design review (codex + vibe) was run on the v2 roadmap; both
-returned `reject` on under-specification, which the contracts resolve — see
-`research/ADVERSARIAL-REVIEW-v2-SYNTHESIS.md`.
+**The app runs end-to-end in a browser** (Phase 4 slice 1, e2e green). Built so far:
+- **Phase 0/H1** `vendor/mzpeakts` submodule @4067f84 (aux-arrays + Numpress).
+- **Phase 1** `@mzpeak/contracts` (49 tests) — protocol/wire/capability/store + URL grammar.
+- **Phase 2** `@mzpeak/ui-kit` (19 tests) — tokens + harvested pure components; 2 review rounds.
+- **Phase 3** `@mzpeak/core` (93 tests) — pure adapters + reader-I/O engine fns + worker
+  dispatcher; opens REAL imaging + LC fixtures in node, VALUE-PARITY vs the old readers
+  (spectrum within 1e-6, TIC matches). Two slices, each dual-reviewed (codex comprehensive
+  rejects → all fixed). SLICE1-NOTES / SLICE2-NOTES.
+- **Phase 4 slice 1** `app/` — Vite+React shell wiring EngineClient ↔ engine.worker ↔ ui-kit.
+  Builds with the worker+wasm landmine cleared (hashed 6.6MB wasm, separate worker chunk);
+  Playwright smoke opens imaging + LC fixtures in real Chromium and renders spectrum 0. ✅
+
+Total: 161 unit tests + 2 e2e, all green; everything pushed (HEAD `47cf5dd`).
+
+## Next actions
+1. Phase 4 slice 2 — capability sidebar (Summary/Spectra/Chromatograms + Advanced) + the
+   merged store + deep-link resolver (wire the Phase-1 URL module). Harvest Explorer shell
+   primitives (NOTES §7 deferred: PlotSpinner/Logo/SideNav/TextField/AppHeader).
+2. Phase 3 imaging-render slice — ion image / optical / multi-channel / ROI engine handlers
+   (IV compute) → the MSI accordion (lazy chunk) → the full spatial round-trip.
+3. The Structure/Parquet spike (archive/parquetFooter/deepColumn cache-identity redesign).
 
 ## How this was created
 
