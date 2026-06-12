@@ -49,14 +49,32 @@ function Sidebar() {
   const showChrom = caps ? showChromatograms(caps) : false;
   const isImaging = caps ? caps.imaging.isImaging : false;
 
-  // Build the flat list of all visible tab items for roving tabindex
+  // Build the flat list of VISIBLE tab items for roving tabindex.
+  // FINDING 3: only include tabs whose containing accordion is expanded (or tabs
+  // that are always-visible outside an accordion). Arrow-key nav must never focus
+  // a button that is hidden inside a collapsed accordion region.
   const allTabs: View[] = ["summary", "spectra"];
   if (showChrom) allTabs.push("chromatograms");
-  // Advanced accordion items
-  allTabs.push("metadata", "structure");
-  // MSI accordion items
-  if (isImaging) {
+  // Advanced accordion items — only when the accordion is open.
+  if (expanded.advanced) allTabs.push("metadata", "structure");
+  // MSI accordion items — only when imaging AND the accordion is open.
+  if (isImaging && expanded.imaging) {
     allTabs.push("ion", "grid");
+  }
+
+  // When the active view is inside a collapsed accordion, auto-expand it so
+  // the active tab is always reachable in the roving set.
+  const advancedViews: View[] = ["metadata", "structure"];
+  const imagingViews: View[] = ["ion", "grid", "optical", "overlay"];
+  const activeNeedsAdvanced = advancedViews.includes(view) && !expanded.advanced;
+  const activeNeedsImaging = imagingViews.includes(view) && isImaging && !expanded.imaging;
+  if (activeNeedsAdvanced) {
+    // Expand synchronously via the store action on next render — use useEffect
+    // equivalent: schedule a microtask so we don't call set inside render.
+    Promise.resolve().then(() => toggleAccordion("advanced"));
+  }
+  if (activeNeedsImaging) {
+    Promise.resolve().then(() => toggleAccordion("imaging"));
   }
 
   const tabRefs = useRef<Map<View, HTMLButtonElement>>(new Map());
@@ -128,6 +146,9 @@ function Sidebar() {
         aria-controls={tabPanelId}
         tabIndex={isActive ? 0 : -1}
         data-testid={`nav-tab-${id}`}
+        // FINDING 4: visible focus ring class; pseudo-selector styles injected
+        // via the <style> tag in the sidebar (inline styles can't cover :focus-visible).
+        className="mzpeak-tab-btn"
         disabled={!ready && !isPlaceholder}
         onClick={(e) => handleTabActivate(id, e)}
         onKeyDown={(e) => {
@@ -245,6 +266,16 @@ function Sidebar() {
         overflowY: "auto",
       }}
     >
+      {/* FINDING 4: inject focus-visible ring for tab buttons. Inline styles
+          can't express :focus-visible; a scoped <style> is the minimal fix. */}
+      <style>{`
+        .mzpeak-tab-btn:focus-visible {
+          outline: 2px solid var(--focus-ring, var(--accent, #3b82f6));
+          outline-offset: -2px;
+          z-index: 1;
+          position: relative;
+        }
+      `}</style>
       <div
         role="tablist"
         aria-label="Views"

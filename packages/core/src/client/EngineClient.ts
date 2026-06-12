@@ -26,6 +26,7 @@ import type {
   SpectrumArrays,
   FileStats,
   BrowseIndex,
+  Presence,
   ChromatogramSeries,
   ArchiveMemberList,
   ParquetFooter,
@@ -75,7 +76,7 @@ export type OpenedResult = {
   mixedRepresentationWarning: string | null;
 };
 
-export type ScanBreakdownResult = { stats: FileStats; browse: BrowseIndex };
+export type ScanBreakdownResult = { stats: FileStats; browse: BrowseIndex; ticColumn: Presence };
 export type RenderIonImageResult = {
   ionImage: Float32Array | null;
   stats: IonImageStats | null;
@@ -607,7 +608,7 @@ export class EngineClient {
         return rest;
       }
       case "scanBreakdownResult":
-        return { stats: msg.stats, browse: msg.browse };
+        return { stats: msg.stats, browse: msg.browse, ticColumn: msg.ticColumn };
       case "meanSpectrumResult":
         return msg.spectrum;
       case "chromResult":

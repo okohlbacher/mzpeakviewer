@@ -110,6 +110,47 @@ export async function getSpectrumArrays(
 }
 
 /**
+ * Ion-image / mean source read: harvest one spectrum's (mz, intensity) DIRECTLY
+ * from the DATA-ARRAY source (spectra_data point intensities), falling back to the
+ * centroid source (spectra_peaks) only when the spectrum has no data arrays.
+ *
+ * This is the SAME source-selection IV's ion-image path uses: IV builds its in-
+ * memory ion index from spectra_data (`forEachSpectraRowGroup` / `pointVecs` over
+ * spectra_data.parquet, mzPeakWorker.ts), and its legacy `getSpectrumArrays` tries
+ * dataArrays first, then centroids — it does NOT route by the file's declared
+ * representation. A file declared centroid that ALSO carries data arrays therefore
+ * sums the data-array intensities (matching IV), not the spectra_peaks centroids.
+ *
+ * Returns `null` (never throws) when the spectrum is absent or has neither source,
+ * so the ion-image / mean loop can simply skip an undecodable pixel.
+ */
+export async function harvestDataArraysOrNull(
+  reader: Reader,
+  index: number,
+): Promise<{ mz: Float64Array; intensity: Float32Array } | null> {
+  let spectrum: RawSpectrum | null;
+  try {
+    spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
+  } catch {
+    return null;
+  }
+  if (!spectrum) return null;
+  // Data-array source FIRST (spectra_data) — the IV ion-image source of truth.
+  const da = spectrum.dataArrays;
+  if (da && da[MZ_KEY] && da[INTENSITY_KEY]) {
+    const arr = fromDataArrays(spectrum, index);
+    return { mz: arr.mz, intensity: arr.intensity };
+  }
+  // Fall back to centroids ONLY when there are genuinely no data arrays.
+  const centroids = spectrum.centroids;
+  if (centroids && centroids.length > 0) {
+    const arr = fromCentroids(spectrum, index);
+    return { mz: arr.mz, intensity: arr.intensity };
+  }
+  return null; // no decodable signal — caller skips this spectrum
+}
+
+/**
  * Read + reconstruct spectrum `index`, routing the source by `representation`
  * (DATA-03 / IMAGING-SPEC C6) rather than incidental try-order:
  *   - `"centroid"` → centroid source (spectra_peaks); empty → named throw.

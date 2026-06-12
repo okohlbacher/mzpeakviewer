@@ -8,49 +8,36 @@
 //       `_computeMeanSpectrumFrom` (reference-axis binning, ±0.5 Da, mean per bin)
 //       and `computeRoiMeanSpectrum` (100-index cap).
 //
-// The live `reader` (mzpeakts MzPeakReader) is the only I/O. Per-spectrum arrays are
-// reconstructed through engine/spectrum.ts `reconstructSpectrum` (the same source-
-// routing the golden spectrum test pins), so the value-parity of the ion image is
-// anchored to the validated spectrum reconstruction. Nothing here imports mzpeakts.
+// The live `reader` (mzpeakts MzPeakReader) is the only I/O. Per-spectrum arrays for
+// the ion image and the mean/ROI traces are harvested DIRECTLY from the DATA-ARRAY
+// source (spectra_data point intensities) via reader/arrays.ts
+// `harvestDataArraysOrNull` — NOT through representation-routed reconstruction. This
+// is the source IV's ion-image path uses (its in-memory index is built from
+// spectra_data, and its legacy getSpectrumArrays tries dataArrays first, then
+// centroids), so a file declared centroid that ALSO carries data arrays produces the
+// same ion image as IV. Nothing here imports mzpeakts.
 
 import type { IonImageStats, ImagingGridWire, SpectrumArrays } from "@mzpeak/contracts";
 import { rebuildCoordMap } from "../adapt/grid";
 import { computeIonImageStats } from "../adapt/ionImage";
 import { adaptSpectrum } from "../adapt/spectrum";
-import { spectrumMeta } from "../reader/fileMeta";
+import { harvestDataArraysOrNull } from "../reader/arrays";
 import type { Reader } from "../reader/openUrl";
-import type { SpectrumRepresentation } from "../reader/types";
-import { reconstructSpectrum, type RawSpectrum } from "./spectrum";
 
 /**
- * Read + reconstruct one spectrum's plain (mz, intensity) arrays via the validated
- * engine/spectrum.ts path. Resolves representation from MS:1000525 (null when
- * unknown) and routes the source exactly like `readEngineSpectrum`. Returns null when
- * the spectrum is absent or has no decodable arrays (caller skips it).
+ * Read one spectrum's plain (mz, intensity) arrays from the DATA-ARRAY source
+ * (spectra_data), with a centroid (spectra_peaks) fallback ONLY when the spectrum
+ * genuinely has no data arrays — exactly IV's ion-image source selection (see
+ * `harvestDataArraysOrNull`). Deliberately NOT representation-routed: it must not
+ * read spectra_peaks for a centroid-declared file that still carries data arrays,
+ * or the ion image would diverge from IV. Returns null when the spectrum is absent
+ * or has no decodable arrays (caller skips it).
  */
 async function readSpectrumArrays(
   reader: Reader,
   index: number,
 ): Promise<{ mz: Float64Array; intensity: Float32Array } | null> {
-  let representation: SpectrumRepresentation = null;
-  try {
-    representation = spectrumMeta(reader, index).representation;
-  } catch {
-    representation = null;
-  }
-  let raw: RawSpectrum | null;
-  try {
-    raw = (await reader.getSpectrum(index)) as RawSpectrum | null;
-  } catch {
-    return null;
-  }
-  if (!raw) return null;
-  try {
-    const recon = reconstructSpectrum(raw, index, representation);
-    return { mz: recon.mz, intensity: recon.intensity };
-  } catch {
-    return null; // empty / undecodable spectrum — contributes nothing
-  }
+  return harvestDataArraysOrNull(reader, index);
 }
 
 /**
@@ -63,8 +50,12 @@ async function readSpectrumArrays(
  *   - bounds are `mzStart = mz - tolDa`, `mzEnd = mz + tolDa`; a point is included
  *     iff `m >= mzStart && m <= mzEnd` — i.e. INCLUSIVE on BOTH ends (IV's
  *     `if (m < mzStart || m > mzEnd) continue` ⇒ keep `[mzStart, mzEnd]`).
- *   - the summed array is the spectrum's INTENSITY array from the data source
- *     (`point.intensity` in IV; here the reconstructed `intensity`, same bytes).
+ *   - the summed array is the spectrum's INTENSITY array read from the DATA-ARRAY
+ *     source (spectra_data point intensities), NOT a representation-routed read.
+ *     IV builds its ion index from spectra_data (`forEachSpectraRowGroup` /
+ *     `pointVecs`), so a centroid-declared file that still carries data arrays sums
+ *     those data-array points — identical bytes to IV (`harvestDataArraysOrNull`).
+ *     Only a spectrum with NO data arrays falls back to its centroid peaks.
  *   - accumulation is per spectrum_index, then mapped onto the grid via the
  *     coord→spectrum map — identical to IV mapping `coordToSpectrumIndex`.
  *
@@ -206,10 +197,10 @@ function finalizeMean(
 }
 
 /**
- * Mean spectrum across pixels. `indices` selects the spectra to average; when
- * omitted, EVERY spectrum on the grid... (see perf note below). Indices are read in
- * ascending order; the global mean is uniformly SAMPLED to `MAX_SAMPLES` (IV) so the
- * full-file mean stays fast — see `engineMeanSpectrum` / `engineRoiSpectrum`.
+ * Mean spectrum across the given `indices` (already de-duped, sorted, and capped by
+ * the caller). The result is a SAMPLED mean over N (= indices.length) of M total
+ * spectra — see `engineMeanSpectrum` / `engineRoiSpectrum` for the honest `id` /
+ * sampling contract. Indices are read in ascending order.
  */
 async function meanSpectrumOver(
   reader: Reader,
@@ -247,49 +238,84 @@ function readerSpectrumCount(reader: Reader): number {
 }
 
 /**
+ * Uniformly subsample `sorted` down to at most `cap` entries, preserving order and
+ * always including the first and last element when `cap >= 2`. When `sorted.length`
+ * is already within the cap the input is returned as-is. Used so a >cap ROI/global
+ * selection contributes a REPRESENTATIVE spread across the whole (sorted) set,
+ * rather than only the first `cap` indices.
+ */
+function uniformSubsample(sorted: number[], cap: number): number[] {
+  const n = sorted.length;
+  if (n <= cap) return sorted;
+  const out: number[] = [];
+  // Even spacing across [0, n-1]; floor keeps indices in range, Set de-dups any
+  // collisions at small caps so the result is <= cap and strictly increasing.
+  const seen = new Set<number>();
+  for (let i = 0; i < cap; i++) {
+    const j = Math.floor((i * (n - 1)) / (cap - 1));
+    if (!seen.has(j)) {
+      seen.add(j);
+      out.push(sorted[j]!);
+    }
+  }
+  return out;
+}
+
+/**
  * Mean spectrum across ALL pixels.
  *
- * PERF NOTE: a true all-pixel mean reads every spectrum, which is slow for large
- * imaging files (IV's worker reads spectra_data.parquet by row group; here each read
- * is an individual `getSpectrum`). Mirroring IV's `_computeMeanSpectrumFrom(null)`,
- * the global mean SAMPLES uniformly down to `MAX_SAMPLES` (300) spectra — the result
- * is a representative mean, not an exact all-pixel sum. The fixture has far fewer than
- * 300 spectra, so the golden test averages every spectrum.
+ * SAMPLED MEAN — HONEST CONTRACT: this is the SAMPLED mean over N of M spectra, not
+ * an exact all-pixel mean. A true all-pixel mean reads every spectrum, which is slow
+ * for large imaging files (IV's worker reads spectra_data.parquet by row group; here
+ * each read is an individual `getSpectrum`). Mirroring IV's
+ * `_computeMeanSpectrumFrom(null)`, the global mean SAMPLES uniformly down to
+ * `MAX_SAMPLES` (300) spectra — the result is a representative mean, not an exact
+ * all-pixel sum. To signal this to consumers WITHOUT a wire-type change (SpectrumArrays
+ * is fixed), the result `id` is `"mean-sampled"`. The fixture has far fewer than 300
+ * spectra, so the golden test averages every spectrum.
+ *
+ * TODO(mean-ui): when the mean/ROI UI lands, report the actual sampled-count N and
+ * the population M (e.g. via a separate side channel) so the UI can show "mean of
+ * N / M spectra" — SpectrumArrays itself stays a fixed wire type.
  */
 export async function engineMeanSpectrum(reader: Reader): Promise<SpectrumArrays> {
   const total = readerSpectrumCount(reader);
   if (total <= 0) {
     return {
       index: -1,
-      id: "mean",
+      id: "mean-sampled",
       mz: new Float64Array(0),
       intensity: new Float32Array(0),
       representation: null,
     };
   }
   // Uniform subsample of [0, total) to at most MAX_SAMPLES indices (IV step subset).
-  let indices: number[];
-  if (total <= MAX_SAMPLES) {
-    indices = Array.from({ length: total }, (_, i) => i);
-  } else {
-    const step = total / MAX_SAMPLES;
-    indices = Array.from({ length: MAX_SAMPLES }, (_, i) => Math.floor(i * step));
-  }
-  return meanSpectrumOver(reader, indices, "mean");
+  const all = Array.from({ length: total }, (_, i) => i);
+  const indices = uniformSubsample(all, MAX_SAMPLES);
+  return meanSpectrumOver(reader, indices, "mean-sampled");
 }
 
 /**
- * Mean spectrum across a SUBSET of spectra (an ROI selection). Caps at `MAX_ROI`
- * (100, IV) and reads in ascending index order. Out-of-range / negative indices are
- * dropped defensively.
+ * Mean spectrum across a SUBSET of spectra (an ROI selection).
+ *
+ * SAMPLED MEAN — HONEST CONTRACT: when the ROI exceeds `MAX_ROI` (100, IV) the
+ * selection is SORTED then UNIFORMLY SUBSAMPLED across the whole sorted set (via
+ * `uniformSubsample`), so the sampled mean is representative of the entire ROI —
+ * NOT just the first 100 indices (the prior `.slice(0, 100)` dropped everything
+ * after the 100th and was arbitrary). The result `id` is `"roi-mean"` so a consumer
+ * can tell this is a derived ROI mean (and, when over-cap, a sampled one).
+ *
+ * TODO(mean-ui): when the ROI UI lands, surface the sampled-count N vs the ROI size
+ * M ("ROI mean of N / M") via a side channel — SpectrumArrays stays a fixed wire type.
  */
 export async function engineRoiSpectrum(
   reader: Reader,
   spectrumIndices: number[],
 ): Promise<SpectrumArrays> {
-  const capped = Array.from(new Set(spectrumIndices))
+  const sorted = Array.from(new Set(spectrumIndices))
     .filter((i) => Number.isInteger(i) && i >= 0)
-    .slice(0, MAX_ROI)
     .sort((a, b) => a - b);
-  return meanSpectrumOver(reader, capped, `roi-mean(${capped.length})`);
+  // Uniform spread across the SORTED ROI when over the cap (not a head slice).
+  const selected = uniformSubsample(sorted, MAX_ROI);
+  return meanSpectrumOver(reader, selected, "roi-mean");
 }

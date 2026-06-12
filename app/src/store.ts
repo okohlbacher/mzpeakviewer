@@ -18,6 +18,15 @@ import type { SpectrumArrays } from "@mzpeak/ui-kit";
 import { engine } from "./engine";
 
 // ---------------------------------------------------------------------------
+// Stale-async race guard — monotonic open-sequence counter.
+// Each openFile call bumps this before any async work. Every async completion
+// handler checks its captured seq against currentOpenSeq and drops the result
+// if stale (i.e. a newer openFile was called while this one was in-flight).
+// ---------------------------------------------------------------------------
+
+let currentOpenSeq = 0;
+
+// ---------------------------------------------------------------------------
 // Store shape
 // ---------------------------------------------------------------------------
 
@@ -131,9 +140,19 @@ export const useStore = create<AppState>((set, get) => ({
   expanded: { advanced: false, imaging: true },
 
   // -------------------------------------------------------------------------
-  // openFile — open a local File through the engine worker
+  // openFile — open a local File through the engine worker.
+  //
+  // STALE-ASYNC RACE GUARD: a monotonic openSeq is bumped before any async
+  // work. Every post-open set(...) captures seq at the start and checks
+  // `seq === currentOpenSeq` before applying; if stale it drops the result.
+  // This prevents file-B being opened while file-A's scanBreakdown or
+  // selectSpectrum(0) is still in-flight from overwriting B's state.
   // -------------------------------------------------------------------------
   openFile: async (file: File) => {
+    // Bump the sequence number BEFORE any async work so in-flight promises
+    // from any previous openFile will see their seq as stale.
+    const seq = ++currentOpenSeq;
+
     set({
       phase: "loading",
       error: null,
@@ -157,6 +176,9 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const bytes = await file.arrayBuffer();
       const opened = await engine.open({ kind: "file", bytes, name: file.name });
+
+      // Stale guard: if a newer openFile was called while we were awaiting, drop.
+      if (seq !== currentOpenSeq) return;
 
       const isImaging = opened.capabilities.imaging.isImaging;
 
@@ -183,21 +205,23 @@ export const useStore = create<AppState>((set, get) => ({
           : [],
       });
 
-      // Kick off the scan-breakdown to populate browse index + stats
-      const caps = opened.capabilities;
-      void engine.scanBreakdown().then(({ stats, browse }) => {
+      // Kick off the scan-breakdown to populate browse index + stats.
+      // FINDING 2: use the authoritative `ticColumn` field from the engine
+      // result rather than guessing from browse.tic values (a valid all-zero
+      // TIC would have been misread as absent).
+      void engine.scanBreakdown().then(({ stats, browse, ticColumn }) => {
+        // Stale guard: drop if a newer openFile started while we were in-flight.
+        if (seq !== currentOpenSeq) return;
         set((s) => ({
           stats: { ...s.stats, ...stats },
           browse,
-          // Update ticColumn from browse if we have a tic column
-          ticColumn: s.ticColumn,
           capabilities: s.capabilities
             ? {
                 ...s.capabilities,
                 chromatograms: {
                   ...s.capabilities.chromatograms,
-                  ticColumn:
-                    browse.tic.some((v) => v > 0) ? "present" : "absent",
+                  // Source ticColumn directly from the engine — not inferred.
+                  ticColumn,
                 },
               }
             : s.capabilities,
@@ -206,17 +230,18 @@ export const useStore = create<AppState>((set, get) => ({
         // Non-fatal: scan breakdown failing doesn't break the core UI
       });
 
-      // Pre-select spectrum 0 if file has spectra
+      // Pre-select spectrum 0 if file has spectra.
+      // The stale guard is also enforced inside selectSpectrum via the engine's
+      // SupersededError / CancelledError handling.
       if (opened.stats && opened.stats.numSpectra > 0) {
+        // Stale guard: only issue the select if we're still the current open.
+        if (seq !== currentOpenSeq) return;
         await get().selectSpectrum(0);
       }
 
-      // Auto-navigate to spectra if it's an LC file (no imaging)
-      if (!isImaging && caps.chromatograms.numChromatograms === 0) {
-        // stay on summary
-      }
-
     } catch (err) {
+      // Stale guard: only apply error state if we're still the current open.
+      if (seq !== currentOpenSeq) return;
       set({
         phase: "error",
         error: err instanceof Error ? err.message : String(err),
@@ -232,18 +257,31 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // -------------------------------------------------------------------------
-  // selectSpectrum — load a spectrum by absolute index
+  // selectSpectrum — load a spectrum by absolute index.
+  // Stale-async guard: capture openSeq at call time; drop the result if a
+  // newer openFile was issued while this request was in-flight.
   // -------------------------------------------------------------------------
   selectSpectrum: async (index: number) => {
+    const seq = currentOpenSeq;
     set({ spectrumLoading: true, selector: { by: "index", index } });
     try {
       const spectrum = await engine.selectSpectrum(index);
+      // Drop if a newer file was opened while we waited.
+      if (seq !== currentOpenSeq) {
+        set({ spectrumLoading: false });
+        return;
+      }
       set({ spectrum, spectrumLoading: false, view: "spectra" });
     } catch (err) {
-      // SupersededError: a newer select was issued — don't overwrite the
-      // newer result that's already been (or will be) set.
+      // SupersededError / CancelledError: a newer select was issued — don't
+      // overwrite the newer result that's already been (or will be) set.
       const name = err instanceof Error ? err.name : "";
       if (name === "SupersededError" || name === "CancelledError") {
+        set({ spectrumLoading: false });
+        return;
+      }
+      // Also drop on stale file seq.
+      if (seq !== currentOpenSeq) {
         set({ spectrumLoading: false });
         return;
       }
@@ -255,14 +293,25 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // -------------------------------------------------------------------------
-  // loadChrom — extract a chromatogram (TIC for now)
+  // loadChrom — extract a chromatogram (TIC for now).
+  // Stale-async guard: drop result if a newer openFile started.
   // -------------------------------------------------------------------------
   loadChrom: async ({ mode }: { mode: "tic" }) => {
+    const seq = currentOpenSeq;
     set({ chromLoading: true });
     try {
       const series = await engine.extractChrom({ mode });
+      // Drop if a newer file was opened while we waited.
+      if (seq !== currentOpenSeq) {
+        set({ chromLoading: false });
+        return;
+      }
       set({ chrom: series, chromLoading: false });
     } catch (err) {
+      if (seq !== currentOpenSeq) {
+        set({ chromLoading: false });
+        return;
+      }
       set({
         chromLoading: false,
         error: err instanceof Error ? err.message : String(err),
