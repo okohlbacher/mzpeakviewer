@@ -80,7 +80,10 @@ export interface AppState {
   /** Open a remote .mzpeak by URL (deep-link / ?file= path). Mirrors openFile. */
   openUrl: (url: string) => Promise<void>;
   setView: (view: View) => void;
-  selectSpectrum: (index: number) => Promise<void>;
+  /** Load a spectrum by index. `route` (default true) switches to the Spectra view
+   *  on success; pass false to load the spectrum without leaving the current view
+   *  (used by the imaging spectrum dock for in-place pixel-pick). */
+  selectSpectrum: (index: number, route?: boolean) => Promise<void>;
   loadChrom: (req: { mode: "tic" }) => Promise<void>;
   dismissNotice: (id: string) => void;
   toggleAccordion: (key: "advanced" | "imaging") => void;
@@ -371,7 +374,7 @@ export const useStore = create<AppState>((set, get) => ({
   // Stale-async guard: capture openSeq at call time; drop the result if a
   // newer openFile was issued while this request was in-flight.
   // -------------------------------------------------------------------------
-  selectSpectrum: async (index: number) => {
+  selectSpectrum: async (index: number, route = true) => {
     const seq = currentOpenSeq;
     set({ spectrumLoading: true, selector: { by: "index", index } });
     try {
@@ -381,7 +384,9 @@ export const useStore = create<AppState>((set, get) => ({
         set({ spectrumLoading: false });
         return;
       }
-      set({ spectrum, spectrumLoading: false, view: "spectra" });
+      // route=true → switch to the Spectra view (default). route=false keeps the
+      // current view so an imaging pixel-pick fills the in-place dock instead.
+      set({ spectrum, spectrumLoading: false, ...(route ? { view: "spectra" as View } : {}) });
     } catch (err) {
       // SupersededError / CancelledError: a newer select was issued — don't
       // overwrite the newer result that's already been (or will be) set.

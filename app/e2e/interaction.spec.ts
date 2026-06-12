@@ -40,7 +40,7 @@ test("full real-click flow: demo → Spectra → Ion image → pixel → spectru
   await expect(page.getByTestId("spectra-view")).toBeVisible();
   await expect(page.locator(".chart-host canvas").first()).toBeVisible({ timeout: 15_000 });
 
-  // Ion image (real clicks) → render → click a pixel → routes back to Spectra.
+  // Ion image (real clicks) → render → click a pixel → spectrum fills the in-place dock.
   await page.getByTestId("nav-tab-ion").click();
   await page.getByLabel("m/z", { exact: true }).fill("800");
   await page.getByLabel("tolerance in Da").fill("5000");
@@ -48,7 +48,8 @@ test("full real-click flow: demo → Spectra → Ion image → pixel → spectru
   await expect(page.getByTestId("imaging-canvas")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("ion-image-max")).not.toHaveText("max 0", { timeout: 30_000 });
   await page.getByTestId("imaging-canvas").click({ position: { x: 8, y: 8 } });
-  await expect(page.getByTestId("spectra-view")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("imaging-spectrum-dock")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="imaging-spectrum-dock"] canvas').first()).toBeVisible({ timeout: 15_000 });
 
   expect(await page.getByTestId("error").count()).toBe(0);
 });

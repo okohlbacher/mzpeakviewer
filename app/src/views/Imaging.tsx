@@ -15,6 +15,7 @@
 import { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import type { ImagingGridWire, IonImageStats, OpticalImageMeta } from "@mzpeak/contracts";
 import { rebuildCoordMap } from "@mzpeak/core";
+import { SpectrumPlot } from "@mzpeak/ui-kit";
 import { useStore } from "../store";
 import { engine } from "../engine";
 import {
@@ -74,7 +75,8 @@ export function Imaging({ mode }: { mode: ImagingMode }) {
       grid={grid}
       tic={tic}
       opticalImages={opticalImages}
-      onPickSpectrum={(idx) => void selectSpectrum(idx)}
+      // route=false: fill the in-place spectrum dock without leaving the imaging view.
+      onPickSpectrum={(idx) => void selectSpectrum(idx, false)}
     />
   );
 }
@@ -94,6 +96,13 @@ function ImagingInner({
 }) {
   const { width, height, originX, originY, presenceMask } = grid;
   const coordMap = useMemo(() => rebuildCoordMap(grid), [grid]);
+
+  // Selected spectrum (filled in-place by pixel-pick; shared with the Spectra view).
+  const spectrum = useStore((s) => s.spectrum);
+  const spectrumLoading = useStore((s) => s.spectrumLoading);
+  // The pixel whose spectrum is in the dock (absolute 1-based IMS coords + index).
+  const [picked, setPicked] = useState<{ x: number; y: number; index: number } | null>(null);
+  const [dockOpen, setDockOpen] = useState(true);
 
   // ── Shared display controls ───────────────────────────────────────────────
   const [colormap, setColormap] = useState<Colormap>("viridis");
@@ -334,7 +343,11 @@ function ImagingInner({
     const hit = toGridCoord(e, e.currentTarget, width, height);
     if (!hit || presenceMask[hit.key] === 0) return;
     const idx = coordMap.get(hit.key);
-    if (idx != null) onPickSpectrum(idx);
+    if (idx != null) {
+      setPicked({ x: hit.x + originX, y: hit.y + originY, index: idx });
+      setDockOpen(true);
+      onPickSpectrum(idx); // fills store.spectrum in-place (route=false)
+    }
   }
 
   const readoutText = useMemo(() => {
@@ -511,6 +524,67 @@ function ImagingInner({
         <p data-testid="imaging-readout" style={{ minHeight: "1.2em", fontSize: "0.8rem", color: "var(--text-muted, #94a3b8)", margin: 0 }}>
           {readoutText}
         </p>
+      )}
+
+      {/* ── Persistent spectrum dock ─────────────────────────────────────────
+          Pixel-pick fills store.spectrum in-place (route=false) and shows it here
+          without leaving the imaging view. The full Spectra view stays in sync. */}
+      {pickable && picked && (
+        <div
+          data-testid="imaging-spectrum-dock"
+          style={{
+            flexShrink: 0,
+            border: "1px solid var(--border-default, #e2e8f0)",
+            borderRadius: 8,
+            background: "var(--surface-card, #fff)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              padding: "0.4rem 0.6rem",
+              borderBottom: dockOpen ? "1px solid var(--border-default, #e2e8f0)" : "none",
+              fontSize: "0.78rem",
+              color: "var(--text-secondary, #475569)",
+            }}
+          >
+            <strong style={{ color: "var(--text-heading, #1e293b)" }}>Spectrum</strong>
+            <span data-testid="imaging-dock-meta" style={{ fontFamily: "var(--font-mono, monospace)", color: "var(--text-muted, #94a3b8)" }}>
+              pixel (x: {picked.x}, y: {picked.y}) · #{picked.index}
+              {spectrumLoading
+                ? " · loading…"
+                : spectrum
+                  ? ` · ${spectrum.mz.length} pts · ${spectrum.representation === "centroid" ? "centroid" : "profile"}`
+                  : ""}
+            </span>
+            <button
+              type="button"
+              onClick={() => setDockOpen((o) => !o)}
+              aria-expanded={dockOpen}
+              data-testid="imaging-dock-toggle"
+              style={{
+                marginLeft: "auto",
+                border: "1px solid var(--border-default, #e2e8f0)",
+                borderRadius: 6,
+                background: "var(--surface-card, #fff)",
+                color: "var(--text-secondary, #475569)",
+                fontSize: "0.75rem",
+                padding: "0.1rem 0.5rem",
+                cursor: "pointer",
+              }}
+            >
+              {dockOpen ? "Collapse" : "Expand"}
+            </button>
+          </div>
+          {dockOpen && (
+            <div className="chart-host" style={{ height: 200, position: "relative" }}>
+              <SpectrumPlot spectrum={spectrum} xicWindow={null} />
+            </div>
+          )}
+        </div>
       )}
     </section>
   );

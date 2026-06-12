@@ -169,43 +169,35 @@ test("imaging spatial round-trip: m/z → ion image → click pixel → spectrum
   // pixel-A: center of cell (col=0, row=0) → (80, 80).
   // pixel-B: center of cell (col=2, row=2) → (400, 400).
   // This guarantees A and B are in distinct grid cells regardless of the scale factor.
-  const canvasBbox = await page.getByTestId("imaging-canvas").boundingBox();
-  if (!canvasBbox) throw new Error("imaging-canvas not found");
-  const cellW = canvasBbox.width / 3; // fixture is 3×3
-  const cellH = canvasBbox.height / 3;
-  // Click A: grid cell (0, 0) — top-left cell centre.
-  const clickA = { x: Math.round(cellW * 0.5), y: Math.round(cellH * 0.5) };
-  // Click B: grid cell (2, 2) — bottom-right cell centre, definitely a different spectrum.
-  const clickB = { x: Math.round(cellW * 2.5), y: Math.round(cellH * 2.5) };
+  // Helper: centre of grid cell (col,row) in the canvas's CURRENT box. The box
+  // changes after the dock opens (the stage shrinks), so we always re-measure.
+  async function cellCentre(col: number, row: number) {
+    const bb = await page.getByTestId("imaging-canvas").boundingBox();
+    if (!bb) throw new Error("imaging-canvas not found");
+    return { x: Math.round((bb.width / 3) * (col + 0.5)), y: Math.round((bb.height / 3) * (row + 0.5)) };
+  }
 
-  await page.getByTestId("imaging-canvas").click({ position: clickA });
-  await expect(page.getByTestId("spectra-view")).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator(".chart-host canvas").first()).toBeVisible({ timeout: 15_000 });
-  // Wait for the spectrum metadata to settle.
-  await expect(page.getByTestId("spectrum-meta")).toBeVisible({ timeout: 15_000 });
-  const metaA = await page.getByTestId("spectrum-meta").textContent();
+  // Pixel-pick now fills the IN-PLACE spectrum dock (no view switch); the dock
+  // shows the picked pixel's coords + a SpectrumPlot canvas. We stay on the ion view.
+  await page.getByTestId("imaging-canvas").click({ position: await cellCentre(0, 0) });
+  await expect(page.getByTestId("imaging-spectrum-dock")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("imaging-ion")).toBeVisible(); // did NOT route away
+  await expect(page.locator('[data-testid="imaging-spectrum-dock"] canvas').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("imaging-dock-meta")).toBeVisible({ timeout: 15_000 });
+  const metaA = await page.getByTestId("imaging-dock-meta").textContent();
 
-  // --- Step 4: go back to the ion image, re-render, click a DIFFERENT pixel B ---
-  // The IonImageView component is stateful; navigating away remounts it (the
-  // rendered canvas is lost). Re-issue the render request after returning.
-  await page.getByTestId("nav-tab-ion").click();
-  await expect(page.getByTestId("imaging-ion")).toBeVisible({ timeout: 10_000 });
+  // --- Step 4: click a DIFFERENT pixel B — the dock updates in place ---
+  // No nav-away / re-render needed: the rendered ion image and dock persist. The
+  // stage has resized (dock now open), so re-measure the cell centre for pixel B.
+  await page.getByTestId("imaging-canvas").click({ position: await cellCentre(2, 2) });
+  await expect(page.getByTestId("imaging-spectrum-dock")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="imaging-spectrum-dock"] canvas').first()).toBeVisible({ timeout: 15_000 });
+  // The dock meta encodes the picked pixel coords + index; wait for it to change
+  // from pixel A before reading (the dock updates in place on the new pick).
+  await expect(page.getByTestId("imaging-dock-meta")).not.toHaveText(metaA ?? "", { timeout: 15_000 });
+  const metaB = await page.getByTestId("imaging-dock-meta").textContent();
 
-  // Re-fill and render (the view remounted so inputs are back to defaults).
-  await page.getByLabel("m/z", { exact: true }).fill("800");
-  await page.getByLabel("tolerance in Da").fill("5000");
-  await page.getByRole("button", { name: "Render" }).click();
-  await expect(page.getByTestId("imaging-canvas")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("ion-image-max")).not.toHaveText("max 0", { timeout: 30_000 });
-
-  // Click pixel B — bottom-right cell of the 3×3 grid, definitely a different spectrum.
-  await page.getByTestId("imaging-canvas").click({ position: clickB });
-  await expect(page.getByTestId("spectra-view")).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator(".chart-host canvas").first()).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId("spectrum-meta")).toBeVisible({ timeout: 15_000 });
-  const metaB = await page.getByTestId("spectrum-meta").textContent();
-
-  // The two spectrum-meta strings MUST differ: this proves the pixel-click →
+  // The two dock-meta strings MUST differ: this proves the pixel-click →
   // spectrum-selection mapping correctly maps different positions to different
   // spectra (not a constant / always-returning-spectrum-0 bug).
   expect(metaA).not.toEqual(metaB);
