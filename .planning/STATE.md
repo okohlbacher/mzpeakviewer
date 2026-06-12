@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: unify-mzpeakiv-mzpeakexplorer
-status: planning
-stopped_at: Shared core in place (one reader submodule + Phase 1 contracts); one-app harvest model adopted
+status: building
+stopped_at: Phase 2 ui-kit done (2 review rounds, green); Phase 3 engine kicked off (skeleton + spike plan)
 last_updated: "2026-06-12"
 last_activity: 2026-06-12
 progress:
   total_phases: 7
-  completed_phases: 0
+  completed_phases: 2
   total_plans: 0
   completed_plans: 0
-  percent: 8
+  percent: 30
 ---
 
 # Project State
@@ -57,20 +57,25 @@ realigned accordingly. See `research/HARMONIZATION-PLAN.md` (revised).
 Useful finding kept from the throwaway copies: both old codebases compile + unit-pass on the
 single converged reader `4067f84` — Phase-0 convergence de-risked.
 
-## Shared core in place
+## Done so far
 
-- `vendor/mzpeakts` submodule @ `4067f84` (aux-arrays + Numpress Linear, one commit).
-- `packages/contracts` shipped (49 tests). Workspace = `packages/*`.
+- **Phase 0/H1** — `vendor/mzpeakts` submodule @ `4067f84` (aux-arrays + Numpress Linear).
+- **Phase 1** — `packages/contracts` (49 tests). Enriched post-Phase-3-maps: `BrowseIndex`,
+  richer `ParquetFooter`/member types, required-nullable `SpectrumArrays.representation`.
+- **Phase 2** — `packages/ui-kit` (19 tests): unified tokens (palette value-equal + Explorer
+  semantic aliases) + IV ds primitives + Explorer SpectrumPlot/ChromPlot/TreeView/reporters/
+  cvTerms; purely presentational; style **closure test** guards parity. Two codex review
+  rounds (reject→reject→green); see `phases/02-shared-ui-kit/NOTES.md`.
 
-## Next actions
+## Next actions (Phase 3 — engine, HIGH risk / long pole)
 
-1. Begin **Phase 2** (`packages/ui-kit`): unify the value-equal tokens (Explorer base + IV
-   imaging extras) + harvest the verified zero-store-ref components (SpectrumPlot/useUplot/
-   chartTheme/uplotZoom, TreeView, `components.tsx` primitives + IV `ds/*`, cvTerms/format)
-   from the read-only sources; parity via captured render fixtures. Containers stay out.
-2. Operator: review `research/ADVERSARIAL-REVIEW-v2-SYNTHESIS.md` and apply the remaining
-   roadmap deltas (Phase 0 → schedule-critical; split Phase 3's Structure/Parquet
-   workerization into a spike; move cancellation/perf/redirect smoke tests earlier).
+Plan: `phases/03-engine-migration/SPIKE-PLAN.md` (+ MAP-iv-worker / MAP-explorer-data).
+1. Build the **parity gate**: capture golden fixtures from the read-only old apps (open/
+   scanBreakdown/selectSpectrum/extractChrom/renderIonImage on a small imaging + LC fixture).
+2. Scaffold `packages/core` worker (base = IV's worker) + the main-thread protocol client;
+   migrate messages in the maps' order (open → selectSpectrum → archive → extractChrom → …).
+3. **Spike** the Structure/Parquet cache-identity redesign before #5/#7 (the reviews' CRITICAL).
+4. Operator: apply remaining roadmap deltas from `ADVERSARIAL-REVIEW-v2-SYNTHESIS.md`.
 2. Land Phase 0 prerequisite (HUPO-PSI/mzpeakts#1 merge → single vendored reader).
 3. Phase 2/3 consume `@mzpeak/contracts`: the engine implements `MESSAGE_POLICY`; both
    shells wire the URL module behind their existing resolvers as a no-op parity check.
