@@ -20,7 +20,10 @@ git submodule update --init vendor/mzpeakts
 echo "[bootstrap] 2/3 — build the vendored reader (parquet-wasm + arrow + dist types)"
 ( cd vendor/mzpeakts/lib && npm ci && npm run build )
 
-echo "[bootstrap] 3/3 — install the workspace"
+echo "[bootstrap] 3/4 — install the workspace"
 npm install
+
+echo "[bootstrap] 4/4 — build @mzpeak/contracts (its dist types feed @mzpeak/core)"
+npm run build -w @mzpeak/contracts
 
 echo "[bootstrap] done. Try: npm test   (the new app/ lands in Phase 4)"

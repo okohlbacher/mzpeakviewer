@@ -1,0 +1,29 @@
+{
+  "name": "@mzpeak/core",
+  "version": "0.0.0",
+  "description": "Phase 3: the ONE Web Worker data engine. Owns the mzpeakts Reader + scheduler + LRU cache in-worker; exposes every read/compute as a typed @mzpeak/contracts message. Consumed as source (the app bundles the worker with the wasm plugins).",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": ["src"],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@mzpeak/contracts": "*",
+    "@zip.js/zip.js": "2.8.26",
+    "apache-arrow": "21.1.0",
+    "arrow-js-ffi": "0.4.3",
+    "hyparquet": "^1.26.0",
+    "hyparquet-compressors": "^1.1.1",
+    "mzpeakts": "file:../../vendor/mzpeakts/lib",
+    "parquet-wasm": "0.7.1"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vitest": "4.1.8"
+  }
+}
