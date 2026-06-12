@@ -1,0 +1,57 @@
+verdict: reject
+
+**CRITICAL**
+
+1. Phase 1 cannot deliver `@mzpeak/contracts` before the repo/workspace decision is made.
+Flaw: the roadmap marks repo home as blocking later, yet Phase 1 already promises a package, and Phase 2 is the first phase that creates the monorepo workspace. Why it matters: the dependency graph `0 → 1 → {2,3}` is false; Phase 1 has an unsatisfied infrastructure dependency. Fix: add a Phase 0.5 workspace/repo-home decision and package scaffold, or move workspace setup into Phase 1.
+Citations: [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:249), [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:253), [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:310), [.planning/ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/ROADMAP.md:23).
+
+2. “Every long read is abortable” is not supported by either source app.
+Flaw: Explorer explicitly documents no `AbortSignal`; IV uses request ids/load generation to drop stale results, not to stop in-flight Parquet/zip reads. Why it matters: Phase 3’s worker boundary promises cancellation semantics the underlying readers do not expose, so stale heavy reads can still consume network, CPU, and memory. Fix: define real cancellation limits per operation: hard abort only where backed by `AbortController`, otherwise cooperative stale-result suppression with bounded chunk points.
+Citations: [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:87), [readScheduler.ts](/Users/kohlbach/Claude/mzPeakExplorer/src/state/readScheduler.ts:15), [store.ts](/Users/kohlbach/Claude/mzPeakExplorer/src/state/store.ts:131), [store.ts](/Users/kohlbach/Claude/mzPeakIV/src/state/store.ts:277), [mzPeakWorker.ts](/Users/kohlbach/Claude/mzPeakIV/src/worker/mzPeakWorker.ts:1406).
+
+3. Phase 3 understates Explorer’s Structure/Parquet migration: the current code is not a thin reader call surface.
+Flaw: Structure depends on `reader.store`, live Parquet handles, Arrow vector type inspection, a WeakMap keyed by reader identity, and dynamic hyparquet imports. Why it matters: moving this behind worker messages is a redesign of cache identity, footer/type metadata, dynamic imports, and value sampling, not just “archiveList/parquetFooter/deepColumn messages.” Fix: split Phase 3 into a Structure/Parquet workerization spike with a concrete protocol and parity fixtures before the general engine migration.
+Citations: [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:263), [archive.ts](/Users/kohlbach/Claude/mzPeakExplorer/src/reader/archive.ts:47), [archive.ts](/Users/kohlbach/Claude/mzPeakExplorer/src/reader/archive.ts:156), [archive.ts](/Users/kohlbach/Claude/mzPeakExplorer/src/reader/archive.ts:209), [parquetDeep.ts](/Users/kohlbach/Claude/mzPeakExplorer/src/reader/parquetDeep.ts:52), [parquetDeep.ts](/Users/kohlbach/Claude/mzPeakExplorer/src/reader/parquetDeep.ts:64), [parquetDeep.ts](/Users/kohlbach/Claude/mzPeakExplorer/src/reader/parquetDeep.ts:195).
+
+4. The roadmap’s imaging-detection parity claim is factually too strong.
+Flaw: it says standardize on IV’s 3-signal `probeIsImaging`, but IV’s live worker fast path gates initial mode only on `metadata.imaging.is_imaging`; if false, it sends `noImaging` and later forces `isImaging: false` even after `computeCapabilities`. Why it matters: files with IMS columns but missing the metadata flag can still be misclassified under the code path the merge intends to adopt. Fix: make Phase 1 define detection phases explicitly: cheap index hint, full 3-signal probe, ambiguous state, and override behavior.
+Citations: [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:122), [.planning/research/SOURCE-ARCHITECTURE.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/SOURCE-ARCHITECTURE.md:25), [mzPeakWorker.ts](/Users/kohlbach/Claude/mzPeakIV/src/worker/mzPeakWorker.ts:262), [mzPeakWorker.ts](/Users/kohlbach/Claude/mzPeakIV/src/worker/mzPeakWorker.ts:284), [mzPeakWorker.ts](/Users/kohlbach/Claude/mzPeakIV/src/worker/mzPeakWorker.ts:309), [stats.ts](/Users/kohlbach/Claude/mzPeakIV/src/reader/stats.ts:227).
+
+**MAJOR**
+
+5. Phase 0 is mislabeled low risk.
+Flaw: it is gated on an external PR/fork decision, while the checked code still diverges: IV throws on Numpress Linear and Explorer carries the local fix. Why it matters: all later phases depend on a reader state that does not exist locally. Fix: reclassify Phase 0 as schedule-critical; name the fallback fork SHA, ownership, and acceptance tests for aux arrays plus Numpress Linear.
+Citations: [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:236), [data.ts](/Users/kohlbach/Claude/mzPeakIV/vendor/mzpeakts/lib/src/data.ts:940), [data.ts](/Users/kohlbach/Claude/mzPeakExplorer/vendor/mzpeakts/lib/src/data.ts:940), [numpress.ts](/Users/kohlbach/Claude/mzPeakExplorer/vendor/mzpeakts/lib/src/numpress.ts:285), [numpress.ts](/Users/kohlbach/Claude/mzPeakIV/vendor/mzpeakts/lib/src/numpress.ts:282).
+
+6. Phase 2’s “presentational only / low risk” claim is unsupported.
+Flaw: Structure, Spectra, and Chromatograms currently import zustand actions or reader-bound helper functions directly. Why it matters: extracting these as ui-kit components requires container/presenter splits and new prop contracts, which depend on the unified store/protocol. Fix: narrow Phase 2 to tokens and already-pure plots, or add explicit container extraction work and raise the risk.
+Citations: [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:253), [StructureTab.tsx](/Users/kohlbach/Claude/mzPeakExplorer/src/ui/StructureTab.tsx:13), [StructureTab.tsx](/Users/kohlbach/Claude/mzPeakExplorer/src/ui/StructureTab.tsx:395), [SpectraTab.tsx](/Users/kohlbach/Claude/mzPeakExplorer/src/ui/SpectraTab.tsx:61), [ChromatogramsTab.tsx](/Users/kohlbach/Claude/mzPeakExplorer/src/ui/ChromatogramsTab.tsx:10).
+
+7. `hasTicColumn` gating is underspecified and may require expensive work.
+Flaw: the roadmap gates Chromatograms on `numChromatograms>0 OR hasTicColumn`, but Explorer’s fast summary only knows `numChromatograms`; TIC-column availability is derived from the later per-spectrum scan rows. Why it matters: the unified sidebar either hides valid TIC views until a scan finishes or forces large metadata scans just to build navigation. Fix: add an `unknown | present | absent` capability state and define when the scan is triggered.
+Citations: [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:106), [summary.ts](/Users/kohlbach/Claude/mzPeakExplorer/src/reader/summary.ts:31), [summary.ts](/Users/kohlbach/Claude/mzPeakExplorer/src/reader/summary.ts:47), [types.ts](/Users/kohlbach/Claude/mzPeakExplorer/src/reader/types.ts:156), [store.ts](/Users/kohlbach/Claude/mzPeakExplorer/src/state/store.ts:865).
+
+8. URL scan semantics can regress through synthesized imaging ids.
+Flaw: unified `scan` is supposed to mean native scan number, but IV fast spectrum paths synthesize `id: scan=${index + 1}`; Explorer’s serializer emits `scan` whenever an id contains `scan=N`. Why it matters: imaging selections can accidentally serialize as native scan links instead of stable `spectrum` or `px`, resolving differently after merge. Fix: make scan provenance explicit in the contract: native scan only, otherwise serialize `spectrum` or `px`.
+Citations: [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:203), [mzPeakWorker.ts](/Users/kohlbach/Claude/mzPeakIV/src/worker/mzPeakWorker.ts:871), [mzPeakWorker.ts](/Users/kohlbach/Claude/mzPeakIV/src/worker/mzPeakWorker.ts:1100), [shareView.ts](/Users/kohlbach/Claude/mzPeakExplorer/src/ui/shareView.ts:39), [shareView.ts](/Users/kohlbach/Claude/mzPeakExplorer/src/ui/shareView.ts:55).
+
+9. Redirect/deploy mechanics conflate production paths and GitHub Pages project paths.
+Flaw: the roadmap says GitHub Pages gets `/IV/index.html` redirecting to `/view/`, but current IV Pages base is `/mzPeakIV/`, and Explorer derives its base from the repo name. Why it matters: a shim at `/IV/` will not cover existing `okohlbacher.github.io/mzPeakIV/` links, and `/view/` is not a GitHub project-page root. Fix: specify separate shims for mzpeak.org paths and GitHub project-page paths, with built-asset base tests.
+Citations: [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:209), [vite.config.ts](/Users/kohlbach/Claude/mzPeakIV/vite.config.ts:7), [deploy.yml](/Users/kohlbach/Claude/mzPeakIV/.github/workflows/deploy.yml:36), [deploy.yml](/Users/kohlbach/Claude/mzPeakExplorer/.github/workflows/deploy.yml:34), [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:294).
+
+10. Large local-file opening is missing from the worker-boundary risk model.
+Flaw: IV currently reads the entire local file into an `ArrayBuffer` on the main thread before transferring it to the worker. Why it matters: a unified viewer for large `.mzpeak` files can hit memory spikes before the worker ever owns the reader. Fix: decide whether `File`/`Blob` is cloneable for the target browsers, or add a chunk/blob-token protocol and memory tests for large local opens.
+Citations: [store.ts](/Users/kohlbach/Claude/mzPeakIV/src/state/store.ts:371), [store.ts](/Users/kohlbach/Claude/mzPeakIV/src/state/store.ts:380), [store.ts](/Users/kohlbach/Claude/mzPeakIV/src/state/store.ts:391), [mzPeakWorker.ts](/Users/kohlbach/Claude/mzPeakIV/src/worker/mzPeakWorker.ts:1397).
+
+**MINOR**
+
+11. The safety harness is scheduled too late for some risks it is supposed to control.
+Flaw: Phase 6 adds worker-cancellation, perf, memory, and redirect tests after Phase 3 and Phase 5 already depend on those properties. Why it matters: failures surface after architecture has hardened. Fix: move minimal cancellation/perf/redirect smoke tests into the phases that introduce those behaviors.
+Citations: [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:261), [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:282), [.planning/research/MERGE-ROADMAP.md](/Users/kohlbach/Claude/mzPeakViewer/.planning/research/MERGE-ROADMAP.md:289).
+
+12. Existing Explorer e2e coverage does not support “e2e green” acceptance as written.
+Flaw: Explorer’s package scripts expose `test` only; no Playwright config/e2e script is present in the checked tree, while IV has Playwright. Why it matters: “both apps e2e green” is not an actionable gate until Explorer e2e infrastructure exists. Fix: add Explorer/unified e2e setup as an explicit deliverable before relying on it.
+Citations: [package.json](/Users/kohlbach/Claude/mzPeakExplorer/package.json:7), [package.json](/Users/kohlbach/Claude/mzPeakIV/package.json:13), [playwright.config.ts](/Users/kohlbach/Claude/mzPeakIV/playwright.config.ts:10).
+
+_Raw codex CLI output, 2026-06-12. Verdict: reject (under-specification + structural corrections; resolved per SYNTHESIS)._

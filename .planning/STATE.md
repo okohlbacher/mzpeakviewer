@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: unify-mzpeakiv-mzpeakexplorer
 status: planning
-stopped_at: Milestone scaffolded from reviewed v2 roadmap
+stopped_at: Phase 1 contracts package delivered (first version); round-2 design review synthesized
 last_updated: "2026-06-12"
 last_activity: 2026-06-12
 progress:
@@ -11,7 +11,7 @@ progress:
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
-  percent: 0
+  percent: 8
 ---
 
 # Project State
@@ -25,9 +25,15 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-Phase: 00 (not started)
-Plan: None
-Status: Planning — milestone scaffolded; phases defined in ROADMAP.md; ready for `/gsd:plan-phase 00`.
+Phase: 01 (Unified Contracts — first version delivered ahead of the Phase-0 gate)
+Plan: None (built directly as the "first version" deliverable; not run through /gsd:plan-phase)
+Status: `@mzpeak/contracts` package shipped — npm workspace + protocol/wire/capability/store
+types + a pure URL grammar module + 49 passing tests + `SPEC.md`. Build, typecheck, and
+tests all green. Phase 0 (reader convergence) is still gated on HUPO-PSI/mzpeakts#1 (OPEN)
+and was intentionally NOT done here — the contracts decouple from the reader, so Phase 1
+could land first. A round-2 design review (codex + vibe) was run on the v2 roadmap; both
+returned `reject` on under-specification, which the contracts resolve — see
+`research/ADVERSARIAL-REVIEW-v2-SYNTHESIS.md`.
 
 ## How this was created
 
@@ -42,6 +48,11 @@ Design synthesized in `~/Claude/mzPeakIV` (where PROC-01 + the source-app analys
 
 ## Next actions
 
-1. Land Phase 0 prerequisite (HUPO-PSI/mzpeakts#1 merge → single vendored reader).
-2. `/gsd:plan-phase 01` for the keystone contracts phase once Phase 0 is green.
-3. Decide whether the source apps are moved into this repo now or after Phase 1.
+1. Operator: review `research/ADVERSARIAL-REVIEW-v2-SYNTHESIS.md` and apply the roadmap
+   deltas (Phase 0 → schedule-critical; split Phase 3's Structure/Parquet workerization
+   into a spike; narrow Phase 2 ui-kit scope; move cancellation/perf/redirect smoke tests
+   earlier; add the `0→2` dependency edge).
+2. Land Phase 0 prerequisite (HUPO-PSI/mzpeakts#1 merge → single vendored reader).
+3. Phase 2/3 consume `@mzpeak/contracts`: the engine implements `MESSAGE_POLICY`; both
+   shells wire the URL module behind their existing resolvers as a no-op parity check.
+4. Decide whether the source apps are moved into this repo now or after Phase 1.

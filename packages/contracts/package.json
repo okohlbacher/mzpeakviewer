@@ -1,0 +1,26 @@
+{
+  "name": "@mzpeak/contracts",
+  "version": "0.0.0",
+  "description": "Phase-1 keystone: the wire protocol, store/view-state, capability model, and URL grammar the unified mzPeak viewer is built against. Types + a pure URL module + tests. No reader, no engine, no UI.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./url": {
+      "types": "./dist/url/index.d.ts",
+      "import": "./dist/url/index.js"
+    }
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  }
+}

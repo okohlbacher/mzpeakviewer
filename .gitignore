@@ -1,5 +1,6 @@
 node_modules/
 dist/
+*.tsbuildinfo
 *.log
 .DS_Store
 .planning/phases/**/*CODEX-ROUND*.log
