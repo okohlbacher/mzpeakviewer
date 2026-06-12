@@ -25,7 +25,7 @@ export type CapabilityInput = {
   ticColumn: Presence;
   /** Embedded optical image count. */
   opticalCount: number;
-  layout: "point" | "chunked" | "mixed";
+  layout: "point" | "chunked" | "mixed" | "unknown";
   encodings: string[];
   unsupported: UnsupportedFinding[];
 };

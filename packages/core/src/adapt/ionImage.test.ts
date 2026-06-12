@@ -38,4 +38,22 @@ describe("computeIonImageStats", () => {
     expect(stats.min).toBe(4);
     expect(stats.max).toBe(8);
   });
+
+  it("with a presenceMask: a PRESENT pixel of intensity 0 counts toward min (IV parity)", () => {
+    // pixel 0 present & zero, pixel 1 present & 5, pixel 2 ABSENT & 99 (garbage).
+    const img = new Float32Array([0, 5, 99]);
+    const mask = new Uint8Array([1, 1, 0]);
+    const stats = computeIonImageStats(img, mask);
+    expect(stats.min).toBe(0); // present 0 included — NOT excluded as background
+    expect(stats.max).toBe(5); // absent 99 excluded
+    expect(stats.nonzeroCount).toBe(1); // only the present, non-zero pixel
+  });
+
+  it("with an all-absent presenceMask → safe zeros", () => {
+    expect(computeIonImageStats(new Float32Array([3, 4]), new Uint8Array([0, 0]))).toEqual({
+      nonzeroCount: 0,
+      min: 0,
+      max: 0,
+    });
+  });
 });

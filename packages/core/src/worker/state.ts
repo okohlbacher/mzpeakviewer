@@ -51,9 +51,12 @@ export function setActive(handle: ReaderHandle): void {
   state.active = handle;
 }
 
+/** Close the file. Bumps the generation so any in-flight work that captured the old
+ *  gen is dropped by `isStale()` and can't post into the closed session (review C2). */
 export function closeActive(): void {
   state.active = null;
   state.cancelled.clear();
+  state.gen++;
 }
 
 /** True if `gen` is no longer the current generation (work should be abandoned). */

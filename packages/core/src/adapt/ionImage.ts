@@ -15,29 +15,32 @@ import type { IonImageStats } from "@mzpeak/contracts";
 /**
  * Compute the {nonzeroCount, min, max} summary over an ion-image raster.
  *
- * - `nonzeroCount`: count of finite cells whose value !== 0.
- * - `min`/`max`: minimum/maximum over the finite, nonzero cells.
- * - All-zero / empty input → {nonzeroCount: 0, min: 0, max: 0} (no Infinity leaks).
+ * When a `presenceMask` is given this EXACTLY mirrors IV's `computeIonImageStats`
+ * (src/compute/ionImage.ts:134): cells with `presenceMask[k] === 0` are ABSENT and
+ * skipped, so a *present* pixel with a legitimate 0 intensity still counts toward
+ * min/max (review: dropping the mask was a real semantic bug — a present-with-zero
+ * pixel was wrongly treated as absent). `nonzeroCount` counts present finite cells
+ * with value !== 0.
  *
- * Zero-valued cells are excluded from min/max because in an MSI ion image a 0 is an
- * absent/background pixel, not a meaningful low: clipping the display range to the
- * nonzero span is what the renderer wants. Non-finite cells (NaN/Infinity) are
- * skipped entirely.
+ * Without a mask (no grid context) it falls back to treating 0 as absent/background
+ * and excludes it from min/max. All-absent / empty input → {0, 0, 0} (no ±Infinity).
  */
-export function computeIonImageStats(img: Float32Array): IonImageStats {
+export function computeIonImageStats(img: Float32Array, presenceMask?: Uint8Array): IonImageStats {
   let nonzeroCount = 0;
   let min = Infinity;
   let max = -Infinity;
-  for (let i = 0; i < img.length; i++) {
+  const n = presenceMask ? Math.min(img.length, presenceMask.length) : img.length;
+  for (let i = 0; i < n; i++) {
+    if (presenceMask && presenceMask[i] === 0) continue; // absent pixel
     const v = img[i]!; // Float32Array index in-bounds → always a number
-    if (!Number.isFinite(v) || v === 0) continue; // skip absent/zero + non-finite
-    nonzeroCount++;
+    if (!Number.isFinite(v)) continue;
+    if (!presenceMask && v === 0) continue; // no mask: treat background 0 as absent
+    if (v !== 0) nonzeroCount++;
     if (v < min) min = v;
     if (v > max) max = v;
   }
-  // No nonzero finite cells → safe zeros (not ±Infinity).
-  if (nonzeroCount === 0) {
-    return { nonzeroCount: 0, min: 0, max: 0 };
+  if (!Number.isFinite(min)) {
+    return { nonzeroCount: 0, min: 0, max: 0 }; // no present finite cells → safe zeros
   }
   return { nonzeroCount, min, max };
 }

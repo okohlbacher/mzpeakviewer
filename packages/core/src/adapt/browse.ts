@@ -27,10 +27,15 @@ export type BrowseRow = {
 
 /**
  * Columnarize Browse rows into the wire `BrowseIndex` — parallel arrays of length
- * `rows.length`, order preserved. `rt` carries NaN where `time` is absent (the wire
- * contract: "Float32Array; NaN where absent"); a missing `msLevel`/`tic` coerces to
- * 0 (typed-array slots cannot hold null). Index `i` of every array is spectrum `i`.
+ * `rows.length`, order preserved. Absence sentinels (review: 0 collides with real
+ * values — a valid msLevel 0 / TIC 0 must be distinguishable from missing metadata):
+ *   - `rt`  (Float32): NaN where `time` is absent.
+ *   - `tic` (Float32): NaN where absent (NOT 0 — 0 is a real empty-spectrum TIC).
+ *   - `msLevel` (Int16): {@link MSLEVEL_ABSENT} (-1) where absent (out of the valid
+ *      ≥1 range, so the MS-level filter can exclude it). Index `i` = spectrum `i`.
  */
+export const MSLEVEL_ABSENT = -1;
+
 export function buildBrowseIndex(rows: BrowseRow[]): BrowseIndex {
   const n = rows.length;
   const id: string[] = new Array(n);
@@ -41,9 +46,9 @@ export function buildBrowseIndex(rows: BrowseRow[]): BrowseIndex {
   let i = 0;
   for (const r of rows) {
     id[i] = r.id;
-    msLevel[i] = r.msLevel ?? 0;
+    msLevel[i] = r.msLevel ?? MSLEVEL_ABSENT;
     rt[i] = r.time == null ? NaN : r.time;
-    tic[i] = r.tic ?? 0;
+    tic[i] = r.tic == null ? NaN : r.tic;
     i++;
   }
 

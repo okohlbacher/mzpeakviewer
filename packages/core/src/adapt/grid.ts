@@ -25,7 +25,15 @@ import type { ImagingGridWire } from "@mzpeak/contracts";
 export type GridInput = {
   width: number;
   height: number;
-  /** Min coords (1-based IMS positions). Default to 0 when the grid is 0-based / absent. */
+  /**
+   * IV's `ImagingGrid.coordinateBase` (src/imaging/types.ts:41) — the absolute IMS
+   * position of local cell 0 (read from geometry, typically 1). The Map keys are
+   * already 0-based local (`y0*width+x0`, after subtracting coordinateBase), so the
+   * shell adds `coordinateBase` to recover absolute IMS coords. REQUIRED — defaulting
+   * it to 0 silently offset every pixel by one (review).
+   */
+  coordinateBase: number;
+  /** Explicit per-axis min coords; default to `coordinateBase` when absent. */
   originX?: number;
   originY?: number;
   /** Sparse coord→spectrum lookup. Key = y0*width + x0 (row-major, 0-based). */
@@ -37,7 +45,8 @@ export type GridInput = {
 /**
  * Flatten IV's grid into the transfer-safe `ImagingGridWire`. The Map is unrolled
  * into two parallel Int32Arrays (`coordKey[i]` ↔ `spectrumIndex[i]`); the dense
- * `presenceMask` passes through unchanged. `originX`/`originY` default to 0.
+ * `presenceMask` passes through unchanged. `originX`/`originY` carry `coordinateBase`
+ * so the shell maps local cells back to absolute IMS positions.
  *
  * The output is structured-clone- and transfer-safe (no Map, no class instances):
  * the three typed arrays can be transferred across the worker boundary.
@@ -61,8 +70,8 @@ export function flattenGrid(input: GridInput): ImagingGridWire {
   return {
     width: input.width,
     height: input.height,
-    originX: input.originX ?? 0,
-    originY: input.originY ?? 0,
+    originX: input.originX ?? input.coordinateBase,
+    originY: input.originY ?? input.coordinateBase,
     coordKey,
     spectrumIndex,
     presenceMask: input.presenceMask,

@@ -11,8 +11,7 @@ function makeInput(overrides: Partial<GridInput> = {}): GridInput {
   return {
     width: 3,
     height: 2,
-    originX: 1,
-    originY: 1,
+    coordinateBase: 1,
     coordToSpectrumIndex: new Map<number, number>([
       [0, 10],
       [2, 20],
@@ -43,10 +42,18 @@ describe("flattenGrid", () => {
     expect(Array.from(wire.presenceMask)).toEqual([1, 0, 1, 0, 1, 0]);
   });
 
-  it("defaults originX/originY to 0 when absent", () => {
-    const wire = flattenGrid(makeInput({ originX: undefined, originY: undefined }));
-    expect(wire.originX).toBe(0);
-    expect(wire.originY).toBe(0);
+  it("origin carries coordinateBase (1-based grids: base 1; not silently 0)", () => {
+    expect(flattenGrid(makeInput({ coordinateBase: 1 })).originX).toBe(1);
+    expect(flattenGrid(makeInput({ coordinateBase: 1 })).originY).toBe(1);
+    const base0 = flattenGrid(makeInput({ coordinateBase: 0 }));
+    expect(base0.originX).toBe(0);
+    expect(base0.originY).toBe(0);
+  });
+
+  it("explicit originX/Y override coordinateBase", () => {
+    const wire = flattenGrid(makeInput({ coordinateBase: 1, originX: 5, originY: 7 }));
+    expect(wire.originX).toBe(5);
+    expect(wire.originY).toBe(7);
   });
 
   it("accepts an array of entries as well as a Map", () => {

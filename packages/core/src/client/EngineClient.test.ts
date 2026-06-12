@@ -10,7 +10,7 @@ import type {
   IonImageStats,
   CapabilityModel,
 } from "@mzpeak/contracts";
-import { EngineClient, EngineError, type WorkerLike } from "./EngineClient";
+import { EngineClient, EngineError, SupersededError, EngineClosedError, type WorkerLike } from "./EngineClient";
 
 // ---------------------------------------------------------------------------
 // Fake worker — records every postMessage (payload + transfer list) and lets the
@@ -249,5 +249,81 @@ describe("EngineClient", () => {
     // The envelope (type/requestId) is stripped.
     expect("type" in result).toBe(false);
     expect("requestId" in result).toBe(false);
+  });
+
+  it("(g) a superseded selectSpectrum REJECTS (no pending-forever leak)", async () => {
+    const fw = new FakeWorker();
+    const client = new EngineClient(fw);
+    fw.push({ type: "ready" });
+
+    const pOld = client.selectSpectrum(10);
+    const pNew = client.selectSpectrum(11); // supersedes pOld immediately
+    await expect(pOld).rejects.toBeInstanceOf(SupersededError);
+
+    const newSelectId = (fw.sent[1].msg as any).selectId;
+    fw.push({ type: "spectrumResult", selectId: newSelectId, spectrum: spectrum(11) });
+    await expect(pNew).resolves.toMatchObject({ index: 11 });
+  });
+
+  it("(h) close() rejects every pending Promise with EngineClosedError", async () => {
+    const fw = new FakeWorker();
+    const client = new EngineClient(fw);
+    fw.push({ type: "ready" });
+
+    const pReq = client.scanBreakdown();
+    const pSel = client.selectSpectrum(3);
+    client.close();
+    await expect(pReq).rejects.toBeInstanceOf(EngineClosedError);
+    await expect(pSel).rejects.toBeInstanceOf(EngineClosedError);
+    expect((fw.last().msg as any).type).toBe("close");
+  });
+
+  it("(i) a selectId-correlated error rejects the right select", async () => {
+    const fw = new FakeWorker();
+    const client = new EngineClient(fw);
+    fw.push({ type: "ready" });
+
+    const p = client.selectSpectrum(7);
+    const selectId = (fw.last().msg as any).selectId;
+    fw.push({ type: "error", selectId, class: "parse", message: "bad spectrum" });
+    await expect(p).rejects.toMatchObject({ class: "parse", message: "bad spectrum" });
+  });
+
+  it("(j) a new open supersedes a pending open", async () => {
+    const fw = new FakeWorker();
+    const client = new EngineClient(fw);
+    fw.push({ type: "ready" });
+
+    const p1 = client.open({ kind: "url", url: "a.mzpeak" });
+    const p2 = client.open({ kind: "url", url: "b.mzpeak" });
+    await expect(p1).rejects.toBeInstanceOf(SupersededError);
+
+    const openId = (fw.last().msg as any).requestId;
+    fw.push({
+      type: "opened",
+      requestId: openId,
+      capabilities: CAPS,
+      manifest: [],
+      fileMeta: null,
+      stats: null,
+      grid: null,
+      tic: null,
+      opticalImages: [],
+      fileSize: null,
+      mixedRepresentationWarning: null,
+    });
+    await expect(p2).resolves.toBeDefined();
+  });
+
+  it("(k) an unattributed error surfaces on the 'error' event channel", () => {
+    const fw = new FakeWorker();
+    const client = new EngineClient(fw);
+    fw.push({ type: "ready" });
+
+    const seen = vi.fn();
+    client.on("error", seen);
+    fw.push({ type: "error", class: "internal", message: "wasm init failed" });
+    expect(seen).toHaveBeenCalledOnce();
+    expect(seen.mock.calls[0]![0]).toMatchObject({ class: "internal", message: "wasm init failed" });
   });
 });

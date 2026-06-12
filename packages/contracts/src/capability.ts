@@ -98,7 +98,8 @@ export type CapabilityModel = {
   chromatograms: ChromatogramCapability;
   optical: OpticalCapability;
   /** Storage layout + encodings (diagnostics; carried from both readers). */
-  layout: "point" | "chunked" | "mixed";
+  /** "unknown" when the reader can't classify the layout (review: Explorer emits it). */
+  layout: "point" | "chunked" | "mixed" | "unknown";
   encodings: string[];
   /** Findings the reader could not fully support (surfaced, never silently dropped). */
   unsupported: { code: string; label: string }[];

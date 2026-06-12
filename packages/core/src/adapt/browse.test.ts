@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { buildBrowseIndex, type BrowseRow } from "./browse";
+import { buildBrowseIndex, MSLEVEL_ABSENT, type BrowseRow } from "./browse";
 
 const rows: BrowseRow[] = [
   { id: "scan=1", msLevel: 1, time: 0.5, tic: 100 },
   { id: "scan=2", msLevel: 2, time: null, tic: 200 }, // absent rt → NaN
-  { id: "scan=3", msLevel: null, time: 1.5, tic: null }, // absent msLevel/tic → 0
+  { id: "scan=3", msLevel: null, time: 1.5, tic: null }, // absent msLevel → -1, tic → NaN
 ];
 
 describe("buildBrowseIndex", () => {
@@ -22,7 +22,7 @@ describe("buildBrowseIndex", () => {
   it("preserves order and id strings", () => {
     const idx = buildBrowseIndex(rows);
     expect(idx.id).toEqual(["scan=1", "scan=2", "scan=3"]);
-    expect(Array.from(idx.msLevel)).toEqual([1, 2, 0]);
+    expect(Array.from(idx.msLevel)).toEqual([1, 2, MSLEVEL_ABSENT]);
   });
 
   it("an absent-rt row columnarizes to NaN", () => {
@@ -32,11 +32,17 @@ describe("buildBrowseIndex", () => {
     expect(idx.rt[2]).toBeCloseTo(1.5);
   });
 
-  it("absent msLevel/tic coerce to 0 (typed slots cannot hold null)", () => {
+  it("absence sentinels: missing msLevel → -1, missing tic → NaN (distinct from real 0)", () => {
     const idx = buildBrowseIndex(rows);
-    expect(idx.msLevel[2]).toBe(0);
-    expect(idx.tic[2]).toBe(0);
+    expect(idx.msLevel[2]).toBe(MSLEVEL_ABSENT);
+    expect(Number.isNaN(idx.tic[2]!)).toBe(true);
     expect(idx.tic[0]).toBe(100);
+  });
+
+  it("a real TIC of 0 is preserved (not collapsed to the absent sentinel)", () => {
+    const idx = buildBrowseIndex([{ id: "s", msLevel: 1, time: 0, tic: 0 }]);
+    expect(idx.tic[0]).toBe(0);
+    expect(Number.isNaN(idx.tic[0]!)).toBe(false);
   });
 
   it("empty input yields empty parallel arrays", () => {

@@ -147,7 +147,10 @@ export type WorkerResponse =
   | { type: "opticalImageSkipped"; archivePath: string; gen: number }
   // control --------------------------------------------------------------
   | { type: "cancelled"; cancelId: number }
-  | { type: "error"; requestId?: number; class: ReaderErrorClass; message: string; findings?: UnsupportedFinding[] };
+  // `requestId` correlates a request-failure; `selectId` correlates a selectSpectrum
+  // failure (selects are selectId-keyed, not requestId-keyed). Neither set = a global
+  // error (e.g. open/WASM init) the client surfaces on its error channel (review).
+  | { type: "error"; requestId?: number; selectId?: number; class: ReaderErrorClass; message: string; findings?: UnsupportedFinding[] };
 
 // ---------------------------------------------------------------------------
 // Per-message policy (the machine-readable clone/transfer/cancellation contract)

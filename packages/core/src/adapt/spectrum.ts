@@ -43,14 +43,16 @@ function mapRepresentation(raw: string | null | undefined): SpectrumRepresentati
   return null;
 }
 
-/** Coerce array-like → Float64Array without copying when it already is one. */
+// Coerce array-like → typed array, ALWAYS copying. Even when the input already is the
+// target type we copy: the result buffer is TRANSFERRED to the main thread, and the
+// reader/cache may still hold the source buffer — returning it by reference would let
+// the worker transfer (detach) a buffer it still references (review: transfer-after-
+// alias corruption). The copy is the price of a safe transfer; spectra transfer once.
 function toF64(a: ArrayLike<number>): Float64Array {
-  return a instanceof Float64Array ? a : Float64Array.from(a);
+  return a instanceof Float64Array ? a.slice() : Float64Array.from(a);
 }
-
-/** Coerce array-like → Float32Array without copying when it already is one. */
 function toF32(a: ArrayLike<number>): Float32Array {
-  return a instanceof Float32Array ? a : Float32Array.from(a);
+  return a instanceof Float32Array ? a.slice() : Float32Array.from(a);
 }
 
 /** Reshape extracted spectrum fields into the wire `SpectrumArrays`. */

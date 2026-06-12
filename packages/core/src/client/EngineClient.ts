@@ -115,6 +115,22 @@ export class CancelledError extends Error {
   }
 }
 
+/** A select/open Promise that was superseded by a newer one (latest-wins). */
+export class SupersededError extends Error {
+  constructor(what: string) {
+    super(`${what} superseded by a newer request`);
+    this.name = "SupersededError";
+  }
+}
+
+/** A pending Promise rejected because the session was closed. */
+export class EngineClosedError extends Error {
+  constructor() {
+    super("Engine session closed");
+    this.name = "EngineClosedError";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Event types — the unsolicited / streaming responses a consumer can subscribe
 // to. These never resolve a single request, so they're delivered via `on(...)`.
@@ -129,6 +145,8 @@ export type EngineEventMap = {
   opticalImageResult: Extract<WorkerResponse, { type: "opticalImageResult" }>;
   opticalImageError: Extract<WorkerResponse, { type: "opticalImageError" }>;
   opticalImageSkipped: Extract<WorkerResponse, { type: "opticalImageSkipped" }>;
+  /** A global/unattributed engine error (no requestId/selectId — e.g. WASM init). */
+  error: Extract<WorkerResponse, { type: "error" }>;
 };
 
 export type EngineEventType = keyof EngineEventMap;
@@ -192,6 +210,8 @@ export class EngineClient {
   private nextSelectId = 1;
   /** The latest selectId we've sent — older spectrumResults are stale-dropped. */
   private latestSelectId = 0;
+  /** requestId of the in-flight `open`, if any (a new open supersedes it). 0 = none. */
+  private openRequestId = 0;
 
   /** requestId → pending resolver (requestId-correlated requests). */
   private readonly pendingByRequestId = new Map<number, PendingResolver>();
@@ -267,14 +287,34 @@ export class EngineClient {
   // Typed convenience methods.
   // -------------------------------------------------------------------------
 
-  /** Open a file (transfers `bytes`) or URL. Resolves with the opened payload. */
+  /**
+   * Open a file (transfers `bytes`) or URL. Resolves with the opened payload. The
+   * engine is single-open: a new open SUPERSEDES any in-flight open (its Promise
+   * rejects with SupersededError, and a buffered-but-unsent open is removed from the
+   * outbox so two opens can't both run on the worker — review M6).
+   */
   open(source: OpenSource): Promise<OpenedResult> {
-    return this.request<OpenedResult>((requestId) => ({ type: "open", requestId, source }));
+    if (this.openRequestId !== 0) this.supersedeRequest(this.openRequestId);
+    const p = this.request<OpenedResult>((requestId) => {
+      this.openRequestId = requestId;
+      return { type: "open", requestId, source };
+    });
+    // Clear the tracked open once it settles (success or failure).
+    void p.then(
+      () => { this.openRequestId = 0; },
+      () => { this.openRequestId = 0; },
+    );
+    return p;
   }
 
-  /** Close the active reader. Fire-and-forget (no correlated response). */
+  /**
+   * Close the active reader. Rejects every pending request/select Promise with
+   * EngineClosedError — after close the worker drops in-flight work, so awaiting
+   * callers must not hang (review C2).
+   */
   close(): void {
     this.send({ type: "close" });
+    this.rejectAllPending(() => new EngineClosedError());
   }
 
   /** Push caching policy to the worker. Fire-and-forget. */
@@ -283,12 +323,16 @@ export class EngineClient {
   }
 
   /**
-   * Select a spectrum by index. Correlated by a monotonic selectId; a response
-   * older than the latest select is dropped (stale-drop). Resolves with the
-   * spectrum arrays; a superseded call's Promise never resolves (it's stale by
-   * design) — callers treat selectSpectrum as latest-wins.
+   * Select a spectrum by index. Correlated by a monotonic selectId; latest-wins. A
+   * new select SUPERSEDES any pending select (its Promise rejects with
+   * SupersededError) so no awaiting caller hangs and no resolver leaks (review C1/C5).
    */
   selectSpectrum(index: number): Promise<SpectrumArrays> {
+    // Supersede any pending select(s) — there should be at most one, but clear all.
+    for (const [sid, pending] of this.pendingBySelectId) {
+      this.pendingBySelectId.delete(sid);
+      pending.reject(new SupersededError("selectSpectrum"));
+    }
     const selectId = this.nextSelectId++;
     this.latestSelectId = selectId;
     return new Promise<SpectrumArrays>((resolve, reject) => {
@@ -413,14 +457,31 @@ export class EngineClient {
   /** Terminate the underlying worker (if it supports it) and clear all pending. */
   terminate(): void {
     this.worker.terminate?.();
-    for (const p of this.pendingByRequestId.values()) {
-      p.reject(new Error("EngineClient terminated"));
-    }
-    for (const p of this.pendingBySelectId.values()) {
-      p.reject(new Error("EngineClient terminated"));
-    }
+    this.rejectAllPending(() => new Error("EngineClient terminated"));
+    this.outbox = [];
+  }
+
+  /** Reject + clear every pending request/select Promise, and drop buffered sends. */
+  private rejectAllPending(makeErr: () => Error): void {
+    for (const p of this.pendingByRequestId.values()) p.reject(makeErr());
+    for (const p of this.pendingBySelectId.values()) p.reject(makeErr());
     this.pendingByRequestId.clear();
     this.pendingBySelectId.clear();
+    this.openRequestId = 0;
+    // Drop buffered-but-unsent requests too (their Promises are now rejected).
+    this.outbox = [];
+  }
+
+  /** Supersede one in-flight request: reject its Promise + drop it from the outbox. */
+  private supersedeRequest(requestId: number): void {
+    const pending = this.pendingByRequestId.get(requestId);
+    if (pending) {
+      this.pendingByRequestId.delete(requestId);
+      pending.reject(new SupersededError("open"));
+    }
+    this.outbox = this.outbox.filter(
+      (e) => (e.req as { requestId?: number }).requestId !== requestId,
+    );
   }
 
   /** The requestId that the NEXT requestId-carrying request will use (for tests). */
@@ -486,31 +547,43 @@ export class EngineClient {
 
   private onError(msg: Extract<WorkerResponse, { type: "error" }>): void {
     const err = new EngineError(msg.class, msg.message, msg.findings, msg.requestId);
+    // requestId-correlated failure.
     if (msg.requestId !== undefined) {
       const pending = this.pendingByRequestId.get(msg.requestId);
       if (pending) {
         this.pendingByRequestId.delete(msg.requestId);
+        if (msg.requestId === this.openRequestId) this.openRequestId = 0;
         pending.reject(err);
         return;
       }
     }
-    // Unattributed error — fan out to any error subscribers if present; otherwise
-    // it's a global engine error the consumer must observe via its own channel.
-    // (We don't reject everything: a global error shouldn't tear down unrelated
-    // in-flight requests unless the worker says so.)
+    // selectId-correlated failure (selects aren't requestId-keyed — review C1).
+    if (msg.selectId !== undefined) {
+      const pending = this.pendingBySelectId.get(msg.selectId);
+      if (pending) {
+        this.pendingBySelectId.delete(msg.selectId);
+        pending.reject(err);
+        return;
+      }
+    }
+    // Unattributed → a global engine error (e.g. WASM init). Surface it on the
+    // `error` event channel rather than silently dropping it (review).
+    this.emit("error", msg);
   }
 
   private onSpectrumResult(
     msg: Extract<WorkerResponse, { type: "spectrumResult" }>,
   ): void {
-    // Stale-drop: ignore a spectrumResult older than the latest select (MESSAGE_POLICY).
-    if (MESSAGE_POLICY.selectSpectrum.cancellation === "stale-drop") {
-      if (msg.selectId < this.latestSelectId) {
-        this.pendingBySelectId.delete(msg.selectId);
-        return;
-      }
-    }
     const pending = this.pendingBySelectId.get(msg.selectId);
+    // Stale-drop: a spectrumResult older than the latest select. Reject (not silently
+    // drop) its resolver so the awaiting caller unblocks and nothing leaks (review C1).
+    if (MESSAGE_POLICY.selectSpectrum.cancellation === "stale-drop" && msg.selectId < this.latestSelectId) {
+      if (pending) {
+        this.pendingBySelectId.delete(msg.selectId);
+        pending.reject(new SupersededError("selectSpectrum"));
+      }
+      return;
+    }
     if (pending) {
       this.pendingBySelectId.delete(msg.selectId);
       pending.resolve(msg.spectrum);

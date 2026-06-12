@@ -20,12 +20,14 @@ describe("adaptSpectrum", () => {
     expect(s.id).toBe("scan=8");
   });
 
-  it("passes already-typed arrays through without re-copying", () => {
+  it("COPIES already-typed arrays (transfer-safe — never aliases the reader's buffer)", () => {
     const mz = new Float64Array([1, 2]);
     const intensity = new Float32Array([3, 4]);
     const s = adaptSpectrum({ ...base, mz, intensity });
-    expect(s.mz).toBe(mz);
-    expect(s.intensity).toBe(intensity);
+    expect(s.mz).not.toBe(mz); // distinct buffer, so transferring s.mz can't detach mz
+    expect(s.intensity).not.toBe(intensity);
+    expect(Array.from(s.mz)).toEqual([1, 2]); // ...but value-equal
+    expect(Array.from(s.intensity)).toEqual([3, 4]);
   });
 
   it("maps MS:1000128 → profile", () => {
