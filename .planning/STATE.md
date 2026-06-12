@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: unify-mzpeakiv-mzpeakexplorer
 status: planning
-stopped_at: Phase 1 contracts package delivered (first version); round-2 design review synthesized
+stopped_at: Step H harmonization (H1 one reader + H2 both apps ingested, all green); Phase 1 contracts shipped
 last_updated: "2026-06-12"
 last_activity: 2026-06-12
 progress:
@@ -46,14 +46,24 @@ Design synthesized in `~/Claude/mzPeakIV` (where PROC-01 + the source-app analys
 - mzpeakts post-merge: single submodule (recommended).
 - Phase 7 (extra deep-link capabilities `ch=`/`roi=`/`px=`): in or backlog.
 
+## Step H — harmonization (DONE except e2e)
+
+Operator chose copy-snapshot + run-now-on-fork-pin (HARMONIZATION-PLAN §6).
+- **H1 ✅** one `vendor/mzpeakts` submodule @ `4067f84` (aux-arrays + Numpress Linear).
+- **H2 ✅** both apps ingested (`apps/iv` @a5ec7c6, `apps/explorer` @f0723b0), rewired to
+  the one reader; workspace = `packages/* + apps/*`. typecheck + unit + prod build green
+  for both (Explorer 48, IV 150, contracts 49). Commit `141b853`.
+- **H3 ⏳** remaining: port IV's Playwright harness to `apps/explorer` so "both apps e2e
+  green" is an actionable parity gate (review codex #12). Then Step H is fully closed.
+
 ## Next actions
 
-0. Operator: pick the ingestion mechanics + Step-H timing in
-   `research/HARMONIZATION-PLAN.md` §6 (recommended: copy-snapshot at recorded SHA; run
-   Step H now on the mzpeakts fork-pin fallback). Step H = bring both apps into `apps/iv`
-   + `apps/explorer`, one `vendor/mzpeakts` submodule, both green — the coherent pre-refactor
-   baseline that gives every later phase a parity oracle.
-1. Operator: review `research/ADVERSARIAL-REVIEW-v2-SYNTHESIS.md` and apply the roadmap
+1. Close H3: add Explorer e2e (reuse `apps/iv/e2e` + a shared fixture), run both apps' e2e.
+2. Begin **Phase 2** (`packages/ui-kit`): unify the value-equal tokens (Explorer base +
+   IV imaging extras) + lift the verified zero-store-ref components (SpectrumPlot/useUplot/
+   chartTheme, TreeView, components primitives + IV ds/*, cvTerms/format); both apps import
+   from `@mzpeak/ui-kit`; snapshot/e2e parity gate. (Tabs stay in the apps — container line.)
+3. Operator: review `research/ADVERSARIAL-REVIEW-v2-SYNTHESIS.md` and apply the roadmap
    deltas (Phase 0 → schedule-critical; split Phase 3's Structure/Parquet workerization
    into a spike; narrow Phase 2 ui-kit scope; move cancellation/perf/redirect smoke tests
    earlier; add the `0→2` dependency edge).
