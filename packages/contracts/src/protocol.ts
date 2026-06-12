@@ -21,6 +21,7 @@ import type {
   Manifest,
   FileMeta,
   FileStats,
+  BrowseIndex,
   SpectrumArrays,
   IonImageStats,
   ImagingGridWire,
@@ -120,7 +121,8 @@ export type WorkerResponse =
     }
   // spectrum mz/intensity buffers TRANSFERRED; selectId echoed for ordering.
   | { type: "spectrumResult"; spectrum: SpectrumArrays; selectId: number }
-  | { type: "scanBreakdownResult"; requestId: number; stats: FileStats }
+  // stats = aggregates; browse = the per-spectrum columnar index (typed arrays transfer).
+  | { type: "scanBreakdownResult"; requestId: number; stats: FileStats; browse: BrowseIndex }
   | { type: "meanSpectrumResult"; requestId: number; spectrum: SpectrumArrays }
   | { type: "chromResult"; requestId: number; series: ChromatogramSeries }
   | { type: "archiveListResult"; requestId: number; members: ArchiveMemberList }
@@ -196,7 +198,7 @@ export const MESSAGE_POLICY: Record<RequestType, MessagePolicy> = {
   cancel: { cancellation: "none", transfersResult: false, paged: false },
   // Rapid clicks: stale spectra are dropped by selectId, not hard-aborted.
   selectSpectrum: { cancellation: "stale-drop", transfersResult: true, paged: false },
-  scanBreakdown: { cancellation: "stale-drop", transfersResult: false, paged: false },
+  scanBreakdown: { cancellation: "stale-drop", transfersResult: true, paged: false },
   meanSpectrum: { cancellation: "stale-drop", transfersResult: true, paged: false },
   roiSpectrum: { cancellation: "stale-drop", transfersResult: true, paged: false },
   // Chromatogram extraction streams row groups → abortable at chunk boundaries.

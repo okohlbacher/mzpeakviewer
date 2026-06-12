@@ -38,6 +38,24 @@ export type FileStats = {
   instrument?: string | null;
 };
 
+/**
+ * Per-spectrum browse index — columnar + transferable. The whole Browse list, the
+ * MS-level filter, the cheap per-spectrum TIC, and `scan`/`spectrum` deep-link
+ * resolution all read this (Phase-3 map, HIGH: it has no other wire carrier; it is
+ * NOT derivable from `FileStats` aggregates). Parallel arrays, length = numSpectra;
+ * the typed arrays transfer (a 10⁵-spectrum file is ~MBs, never structured-cloned).
+ */
+export type BrowseIndex = {
+  /** Native spectrum id strings (carry the native scan number when present). */
+  id: string[];
+  /** MS level per spectrum (1, 2, …). */
+  msLevel: Int16Array;
+  /** Retention time in seconds; NaN where absent. */
+  rt: Float32Array;
+  /** Per-spectrum total ion current. */
+  tic: Float32Array;
+};
+
 /** Profile vs centroid — the plot branches on this (peak labels, fill vs needles). */
 export type SpectrumRepresentation = "profile" | "centroid" | null;
 
@@ -95,15 +113,45 @@ export type ChromatogramSeries = {
   intensity: Float32Array;
 };
 
-/** Parquet footer summary for the Structure tab. */
+/** One column's footer-level metadata (what the Structure tab renders per column). */
+export type ParquetColumn = {
+  name: string;
+  /** Physical parquet type (e.g. INT64, BYTE_ARRAY, DOUBLE). */
+  type: string;
+  /** Logical/converted type (e.g. STRING, TIMESTAMP), when present. */
+  logicalType?: string | null;
+  /** Total values across row groups. */
+  numValues?: number | null;
+  /** Null count, when the footer carries it. */
+  nullCount?: number | null;
+  /** Compression codec (e.g. SNAPPY, ZSTD, UNCOMPRESSED). */
+  codec?: string | null;
+  compressedBytes?: number | null;
+  uncompressedBytes?: number | null;
+  /** Stringified footer min/max, when present. */
+  min?: string | null;
+  max?: string | null;
+};
+
+/** Parquet footer summary for the Structure tab (Phase-3 map: enriched per-column). */
 export type ParquetFooter = {
   archivePath: string;
   numRows: number;
   numRowGroups: number;
-  columns: { name: string; type: string; logicalType?: string | null }[];
+  columns: ParquetColumn[];
+  /** Writer signature from the footer (e.g. "parquet-mr", "mzpeak-rs"), when present. */
+  createdBy?: string | null;
 };
 
-/** A page of a deeply-read parquet column. */
+/**
+ * A page of a deeply-read parquet column — actual VALUES for the Structure preview.
+ *
+ * SPIKE (Phase-3 / review CRITICAL): Explorer today overloads "deepColumn" to return
+ * footer STATISTICS and "sampleColumn" to return a numeric HISTOGRAM — neither lines
+ * up with paged values here. The Structure/Parquet workerization spike must reconcile
+ * the three operations (footer stats → ParquetFooter columns above; paged values →
+ * ColumnPage; histogram → ColumnSample.histogram) before the engine implements them.
+ */
 export type ColumnPage = {
   archivePath: string;
   column: string;
@@ -114,17 +162,27 @@ export type ColumnPage = {
   hasMore: boolean;
 };
 
-/** A small bounded sample of a column (for Structure previews). */
+/** A small bounded sample of a column (for Structure previews + numeric histogram). */
 export type ColumnSample = {
   archivePath: string;
   column: string;
   preview: string[];
   totalRows: number;
+  /** Optional numeric histogram bins (Explorer's sampleColumn output). */
+  histogram?: number[] | null;
 };
 
 /** Archive member list for the Structure tab (richer than Manifest). */
 export type ArchiveMemberList = {
-  members: { path: string; bytes: number; compressedBytes: number; isParquet: boolean }[];
+  members: {
+    path: string;
+    bytes: number;
+    compressedBytes: number;
+    isParquet: boolean;
+    /** Logical role from mzpeak_index.json (e.g. "spectra_data", "metadata"). */
+    kind?: string | null;
+    isDirectory?: boolean;
+  }[];
 };
 
 /** SDRF/ISA study metadata (Explorer Summary ▸ Study). Opaque to the wire. */
