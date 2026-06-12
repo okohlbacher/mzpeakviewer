@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+.planning/phases/**/*CODEX-ROUND*.log
+.planning/**/*.local.md
+test/data/*.mzpeak
+public/static/*.mzpeak
+!test/data/example.mzpeak
