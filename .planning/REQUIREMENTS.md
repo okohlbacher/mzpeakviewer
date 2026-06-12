@@ -1,4 +1,4 @@
-# mzpeak-viewer — Requirements
+# mzpeakviewer — Requirements
 
 Requirement IDs mapped to phases in [ROADMAP.md](ROADMAP.md). Derived from the
 synthesized, adversarially-reviewed design at [research/MERGE-ROADMAP.md](research/MERGE-ROADMAP.md).

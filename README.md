@@ -1,4 +1,4 @@
-# mzpeak-viewer
+# mzpeakviewer
 
 > **Planning stage** — this monorepo will host the unified [mzPeak](https://github.com/HUPO-PSI/mzPeak)
 > viewer that merges **mzPeakIV** (imaging/MSI) and **mzPeakExplorer** (general

@@ -1,4 +1,4 @@
-# mzpeak-viewer — Unified mzPeak Viewer
+# mzpeakviewer — Unified mzPeak Viewer
 
 ## What This Is
 

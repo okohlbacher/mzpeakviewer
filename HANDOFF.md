@@ -1,4 +1,4 @@
-# mzpeak-viewer — Handoff Package
+# mzpeakviewer — Handoff Package
 
 > **Start here.** This repository is the planning + handoff home for the **unified
 > mzPeak viewer** — the merge of **mzPeakIV** (imaging/MSI) and **mzPeakExplorer**
@@ -100,7 +100,7 @@ rejected by both reviewers for a circular dependency. See MERGE-ROADMAP.md §0.
 | Decision | Choice | Note |
 |---|---|---|
 | Go/no-go on the merge | **Go** | operator, 2026-06-12 |
-| Repo home | **Fresh monorepo `mzpeak-viewer`** | this repo |
+| Repo home | **Fresh monorepo `mzpeakviewer`** | this repo |
 | Harness method | **Scaffold GSD phases directly from v2** | (vs running /gsd:new-milestone) |
 | App URL | keep **`/view/`** unified + `/IV/` redirect shim | best link stability (recommended; confirm at Phase 5/6) |
 | Workspace tool | **npm workspaces** | recommended; confirm at Phase 2 |
@@ -135,7 +135,7 @@ submodule. Until merged, Phase 0 can pin the fork commit as a fallback.
 
 ## 8. Push / remote policy (HARD RULE — repeated from CLAUDE.md)
 
-The sole authorized push target is **`github.com/okohlbacher/mzpeak-viewer`** (this
+The sole authorized push target is **`github.com/okohlbacher/mzpeakviewer`** (this
 repo's `origin`). Never push to any other remote (fork/mirror/other org) without an
 explicit operator "yes" naming the exact target. Source repos keep their own
 single-remote policies.

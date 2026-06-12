@@ -307,7 +307,7 @@ already folded into Phases 4–5.
 
 ## 5. Decisions for the operator (blocking where noted)
 
-1. **[BLOCKING] Repo home:** fresh monorepo `mzpeak-viewer`, or restructure the
+1. **[BLOCKING] Repo home:** fresh monorepo `mzpeakviewer`, or restructure the
    mzPeakExplorer repo in place (UI base)? Determines where Phase-1+ work and the
    GSD milestone live. *Recommend: restructure Explorer in place as the workspace
    root (it's the UI base; preserves the resolver's `/view/` URL + issue history).*

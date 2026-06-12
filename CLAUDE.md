@@ -1,4 +1,4 @@
-# mzpeak-viewer
+# mzpeakviewer
 
 Monorepo for the **unified mzPeak viewer** — the merge of mzPeakIV (imaging) and
 mzPeakExplorer (general explorer) into one app where the imaging (MSI) layer
@@ -13,12 +13,12 @@ that passed a dual adversarial review (codex + vibe). No application code yet.
 
 ## Push / Remote Policy (HARD RULE)
 
-**The ONLY authorized push target is `github.com/okohlbacher/mzpeak-viewer`** (this
+**The ONLY authorized push target is `github.com/okohlbacher/mzpeakviewer`** (this
 repo's `origin`). Pushing there for committed work, when the operator has asked to
 push, is fine. Pushing to ANY other remote/repo (a fork, a different org/user, a new
 remote, a mirror) is prohibited by default — even if named or supplied; warn and
 require an explicit, interactive operator "yes" for that specific push first. Before
-any push, verify the resolved remote is `okohlbacher/mzpeak-viewer`.
+any push, verify the resolved remote is `okohlbacher/mzpeakviewer`.
 
 The source repos retain their own policies: mzPeakIV → only `okohlbacher/mzPeakIV`;
 mzPeakExplorer → only `okohlbacher/mzPeakExplorer`. Do not push merge work to

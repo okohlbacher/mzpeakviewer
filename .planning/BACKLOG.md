@@ -1,4 +1,4 @@
-# mzpeak-viewer — Consolidated Backlog
+# mzpeakviewer — Consolidated Backlog
 
 Backlog for the merged app, consolidating both source projects. **Phase work
 (Phases 0–6 in ROADMAP.md) is NOT repeated here** — this is the post-parity /

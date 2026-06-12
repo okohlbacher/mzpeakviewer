@@ -1,4 +1,4 @@
-# mzpeak-viewer — Roadmap
+# mzpeakviewer — Roadmap
 
 **Granularity:** coarse (7 phases, contracts-first)
 **Project mode:** mvp (vertical slices — each phase ships a demonstrable, reviewable capability)
