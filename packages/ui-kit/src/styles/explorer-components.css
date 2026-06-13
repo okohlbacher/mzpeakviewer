@@ -12,13 +12,20 @@
 }
 .tree-node {
   padding-left: 1rem;
-  border-left: 1px dotted var(--border-default);
+  /* Solid level rail (was a faint dotted border) — makes nesting legible. */
+  border-left: 1px solid var(--border-soft);
 }
 .tree-row {
   display: flex;
   align-items: baseline;
   gap: 0.4rem;
   cursor: default;
+  border-radius: var(--radius-xs);
+  padding: 0 0.25rem;
+}
+/* Leaf hover affordance (previously only expandable rows highlighted). */
+.tree-row:hover {
+  background: var(--surface-sunken);
 }
 .tree-row.expandable {
   cursor: pointer;
@@ -31,6 +38,34 @@
   display: inline-block;
   color: var(--text-muted);
   flex-shrink: 0;
+}
+/* Per-row copy button — revealed on hover/focus, no layout shift otherwise. */
+.tree-copy {
+  margin-left: 0.35rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 0 0.25rem;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast, 120ms) ease;
+}
+.tree-row:hover .tree-copy,
+.tree-copy:focus-visible {
+  opacity: 1;
+}
+.tree-copy:hover {
+  color: var(--accent);
+  border-color: var(--border-strong);
+}
+/* Search-match highlight. */
+.tree-hit {
+  background: var(--warning-band, rgba(255, 200, 0, 0.25));
+  color: inherit;
+  border-radius: 2px;
 }
 .tree-key {
   color: var(--syntax-key);

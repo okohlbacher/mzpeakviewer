@@ -18,7 +18,7 @@ import { engineExtractChrom, type ChromContext } from "../engine/chrom";
 import { engineRenderIonImage, engineMeanSpectrum, engineRoiSpectrum } from "../engine/imaging";
 import { engineRenderMultiChannel } from "../engine/multichannel";
 import { engineGetOpticalImage } from "../engine/optical";
-import { engineArchiveList, engineParquetFooter, engineSampleColumn, clearStructureCache } from "../engine/structure";
+import { engineArchiveList, engineArchiveMemberBytes, engineParquetFooter, engineSampleColumn, clearStructureCache } from "../engine/structure";
 import { UnsupportedEncodingError, CorruptFileError } from "../reader/errors";
 import { buffersOf, type Respond } from "./respond";
 
@@ -175,6 +175,19 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
       case "parquetFooter": {
         const footer = await engineParquetFooter(requireActive(ctx).reader, req.archivePath);
         respond({ type: "parquetFooterResult", requestId: req.requestId, footer });
+        return;
+      }
+
+      case "archiveMemberBytes": {
+        const { archivePath, bytes, truncated } = await engineArchiveMemberBytes(
+          requireActive(ctx).reader,
+          req.archivePath,
+          req.maxBytes,
+        );
+        respond(
+          { type: "archiveMemberBytesResult", requestId: req.requestId, archivePath, bytes, truncated },
+          [bytes],
+        );
         return;
       }
 

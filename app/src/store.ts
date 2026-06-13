@@ -67,6 +67,9 @@ export interface AppState {
   selector: { by: "index"; index: number } | null;
   /** Spectra-view MS-level filter (null = all). Only levels present in the file. */
   msLevelFilter: number | null;
+  /** Transient: Structure → "view index.json" jump asks the Metadata view to scroll
+   *  to + highlight its Manifest section. The Metadata view clears it once consumed. */
+  metadataReveal: "manifest" | null;
   /** The current spectrum arrays (null until one is selected) */
   spectrum: SpectrumArrays | null;
   spectrumLoading: boolean;
@@ -90,6 +93,9 @@ export interface AppState {
   openUrl: (url: string) => Promise<void>;
   setView: (view: View) => void;
   setMsLevelFilter: (level: number | null) => void;
+  /** Structure → "view index.json": switch to the Metadata view and ask it to scroll
+   *  to + highlight its Manifest section. Pass null (from Metadata) to clear once done. */
+  setMetadataReveal: (section: "manifest" | null) => void;
   /** Store the latest single-channel ion image (rendered in the Ion view) so the
    *  Overlay view can composite it. Pass (null, null) to clear. */
   setIonImage: (image: Float32Array | null, stats: IonImageStats | null) => void;
@@ -149,6 +155,7 @@ export const useStore = create<AppState>((set, get) => ({
   // spectrum
   selector: null,
   msLevelFilter: null,
+  metadataReveal: null,
   spectrum: null,
   spectrumLoading: false,
 
@@ -197,6 +204,7 @@ export const useStore = create<AppState>((set, get) => ({
       view: "summary",
       selector: null,
       msLevelFilter: null,
+      metadataReveal: null,
       spectrum: null,
       browse: null,
       chrom: null,
@@ -331,6 +339,7 @@ export const useStore = create<AppState>((set, get) => ({
       view: "summary",
       selector: null,
       msLevelFilter: null,
+      metadataReveal: null,
       spectrum: null,
       browse: null,
       chrom: null,
@@ -413,6 +422,11 @@ export const useStore = create<AppState>((set, get) => ({
 
   setMsLevelFilter: (level: number | null) => {
     set({ msLevelFilter: level });
+  },
+
+  setMetadataReveal: (section: "manifest" | null) => {
+    // Switch to the Metadata view when a reveal is requested; clear-only otherwise.
+    set(section ? { metadataReveal: section, view: "metadata" as View } : { metadataReveal: null });
   },
 
   setIonImage: (image: Float32Array | null, stats: IonImageStats | null) => {

@@ -143,6 +143,28 @@ export async function engineArchiveList(reader: Reader): Promise<ArchiveMemberLi
   return { members };
 }
 
+/**
+ * Read the raw bytes of a single archive member (e.g. `mzpeak_index.json`) via the
+ * reader's range-reading `store.open()`. Capped at `maxBytes` — if the member is larger
+ * the result is truncated and `truncated: true` is returned (a guard against a
+ * pathologically large member exhausting worker memory; the manifest is normally tiny).
+ */
+export async function engineArchiveMemberBytes(
+  reader: Reader,
+  archivePath: string,
+  maxBytes: number,
+): Promise<{ archivePath: string; bytes: ArrayBuffer; truncated: boolean }> {
+  const store = readerStore(reader);
+  const rb = store?.open ? await store.open(archivePath) : undefined;
+  if (!rb) throw new Error(`archive member not found: ${archivePath}`);
+  const size = num(rb.size);
+  const cap = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : size;
+  const truncated = size > cap;
+  const end = truncated ? cap : size;
+  const bytes = await rb.slice(0, end).arrayBuffer();
+  return { archivePath, bytes, truncated };
+}
+
 // ── Footer decode (hyparquet) with the archivePath-keyed cache ───────────────────
 
 // SPIKE cache: keyed by archivePath, NOT by Reader identity (see file header).

@@ -63,12 +63,43 @@ test("Structure (real clicks): list members → inspect a parquet footer", async
   await page.getByTestId("accordion-advanced").click();
   await page.getByTestId("nav-tab-structure").click();
   await expect(page.getByTestId("structure-view")).toBeVisible();
-  // Members listed; click the first parquet member → its footer columns render.
-  const parquetBtn = page.locator('[data-testid="structure-members"] button:not([disabled])').first();
+  // Members listed; click the first PARQUET member → its footer columns render.
+  // (mzpeak_index.json is now also clickable — a redirect, not a footer — so target
+  //  parquet members explicitly via data-parquet.)
+  const parquetBtn = page.locator('[data-testid="structure-members"] button[data-parquet="true"]').first();
   await expect(parquetBtn).toBeVisible({ timeout: 15_000 });
   await parquetBtn.click();
   await expect(page.getByTestId("structure-footer")).toBeVisible({ timeout: 20_000 });
   expect(await page.getByTestId("structure-error").count()).toBe(0);
+});
+
+test("Structure → mzpeak_index.json redirects to the Metadata manifest (+ download enabled)", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTestId("load-demo-btn").click();
+  await expect(page.getByTestId("is-imaging")).toHaveText("yes", { timeout: 45_000 });
+
+  await page.getByTestId("accordion-advanced").click();
+  await page.getByTestId("nav-tab-structure").click();
+  await expect(page.getByTestId("structure-view")).toBeVisible();
+
+  // Click the pinned manifest entry → lands on the Metadata view's Manifest section.
+  await page.getByTestId("structure-manifest").click();
+  await expect(page.getByTestId("metadata-view")).toBeVisible();
+  await expect(page.getByTestId("metadata-manifest")).toBeVisible();
+  // The raw mzpeak_index.json loaded → Download is enabled and the JSON tree renders.
+  await expect(page.getByTestId("manifest-download")).toBeEnabled({ timeout: 15_000 });
+  await expect(page.getByTestId("metadata-manifest").locator(".tree").first()).toBeVisible();
+  expect(await page.getByTestId("manifest-error").count()).toBe(0);
+
+  // Advanced sub-tabs switch between Metadata and Structure.
+  await page.getByTestId("advanced-subtab-structure").click();
+  await expect(page.getByTestId("structure-view")).toBeVisible();
+  await page.getByTestId("advanced-subtab-metadata").click();
+  await expect(page.getByTestId("metadata-view")).toBeVisible();
+
+  // Metadata search filters the trees without error.
+  await page.getByTestId("metadata-search").fill("run");
+  await expect(page.getByTestId("metadata-view")).toBeVisible();
 });
 
 test("idle start page: demo cards + dropzone + URL field, and a demo loads", async ({ page }) => {

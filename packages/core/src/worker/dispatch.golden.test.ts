@@ -73,12 +73,29 @@ describe("worker dispatch — real imaging fixture", () => {
   });
 
   it("an unimplemented message errors with class 'unsupported'", async () => {
-    // studyMeta/deepColumn/archiveMemberBytes aren't wired yet → fail loud, not silent.
+    // studyMeta/deepColumn aren't wired yet → fail loud, not silent.
     const res = await run(ctx, { type: "studyMeta", requestId: 9 });
     expect(res.type).toBe("error");
     if (res.type !== "error") return;
     expect(res.class).toBe("unsupported");
     expect(res.requestId).toBe(9);
+  });
+
+  it("archiveMemberBytes returns the raw bytes of mzpeak_index.json", async () => {
+    const res = await run(ctx, {
+      type: "archiveMemberBytes",
+      archivePath: "mzpeak_index.json",
+      maxBytes: 256 * 1024 * 1024,
+      requestId: 12,
+    });
+    expect(res.type).toBe("archiveMemberBytesResult");
+    if (res.type !== "archiveMemberBytesResult") return;
+    expect(res.archivePath).toBe("mzpeak_index.json");
+    expect(res.truncated).toBe(false);
+    expect(res.bytes.byteLength).toBeGreaterThan(0);
+    // It must be valid JSON (the manifest).
+    const text = new TextDecoder().decode(res.bytes);
+    expect(() => JSON.parse(text)).not.toThrow();
   });
 
   it("archiveList + parquetFooter are wired: footer for a real parquet member", async () => {

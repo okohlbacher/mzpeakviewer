@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { engine } from "../engine";
 import type { ArchiveMemberList, ParquetFooter } from "@mzpeak/contracts";
+import { AdvancedTabs } from "./AdvancedTabs";
 
 type Member = ArchiveMemberList["members"][number];
 
@@ -35,6 +36,7 @@ function orderMembers(members: Member[]): Member[] {
 
 export function Structure() {
   const phase = useStore((s) => s.phase);
+  const setMetadataReveal = useStore((s) => s.setMetadataReveal);
   const [members, setMembers] = useState<Member[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [footer, setFooter] = useState<ParquetFooter | null>(null);
@@ -66,28 +68,33 @@ export function Structure() {
   }
 
   return (
-    <div data-testid="structure-view" style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start" }}>
+    <div data-testid="structure-view">
+      <AdvancedTabs />
+      <div style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start" }}>
       <div style={{ minWidth: 280 }}>
         <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.5rem" }}>Archive members</h2>
         {error && <p data-testid="structure-error" style={{ color: "var(--danger, #c00)" }}>{error}</p>}
         <ul data-testid="structure-members" style={{ listStyle: "none", margin: 0, padding: 0, fontFamily: "var(--font-mono, monospace)", fontSize: "var(--text-sm, 0.85rem)" }}>
           {orderMembers(members).map((m) => {
             const manifest = isManifest(m.path);
+            // Manifest → jump to the Metadata view's JSON section; parquet → footer; else inert.
+            const clickable = m.isParquet || manifest;
             return (
               <li key={m.path}>
                 <button
-                  onClick={() => void pick(m)}
-                  disabled={!m.isParquet}
-                  title={m.kind ?? undefined}
+                  onClick={() => (manifest ? setMetadataReveal("manifest") : void pick(m))}
+                  disabled={!clickable}
+                  title={manifest ? "View mzpeak_index.json in Metadata" : (m.kind ?? undefined)}
                   data-testid={manifest ? "structure-manifest" : undefined}
+                  data-parquet={m.isParquet ? "true" : undefined}
                   style={{
                     display: "flex", width: "100%", justifyContent: "space-between", gap: "0.75rem", alignItems: "center",
                     padding: "0.25rem 0.4rem", border: "none", borderRadius: "var(--radius-sm, 4px)",
                     background: selected === m.path
                       ? "var(--surface-panel, #f1f5f9)"
                       : manifest ? "var(--accent-subtle, #f2f4fe)" : "transparent",
-                    color: m.isParquet ? "var(--text-link, #2563eb)" : "var(--text-body, #353c43)",
-                    cursor: m.isParquet ? "pointer" : "default", textAlign: "left",
+                    color: clickable ? "var(--text-link, #2563eb)" : "var(--text-body, #353c43)",
+                    cursor: clickable ? "pointer" : "default", textAlign: "left",
                   }}
                 >
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "0.4rem" }}>
@@ -98,7 +105,10 @@ export function Structure() {
                     )}
                     {m.path}
                   </span>
-                  <span style={{ color: "var(--text-muted, #94a3b8)", flexShrink: 0 }}>{fmtBytes(m.bytes)}</span>
+                  <span style={{ color: "var(--text-muted, #94a3b8)", flexShrink: 0, display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                    {manifest && <span style={{ color: "var(--accent, #3b54da)", fontFamily: "var(--font-sans)", fontSize: "0.7rem" }}>View JSON →</span>}
+                    {fmtBytes(m.bytes)}
+                  </span>
                 </button>
               </li>
             );
@@ -141,6 +151,7 @@ export function Structure() {
         ) : (
           <p style={{ color: "var(--text-muted, #94a3b8)" }}>Select a parquet member to inspect its columns.</p>
         )}
+      </div>
       </div>
     </div>
   );
