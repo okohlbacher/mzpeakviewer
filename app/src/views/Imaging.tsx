@@ -757,6 +757,7 @@ function LayersPanel({
   colormap: Colormap;
   opticalPending: boolean;
 }) {
+  // Adjacent swap (keyboard arrows on the drag handle — the accessible fallback).
   function move(i: number, dir: -1 | 1) {
     setOrder((o) => {
       const j = i + dir;
@@ -766,10 +767,28 @@ function LayersPanel({
       return next;
     });
   }
-  const reorderBtn: React.CSSProperties = {
-    width: 18, height: 16, lineHeight: "14px", padding: 0, fontSize: "0.7rem",
+  // Move item `from` → position `to` (drag-and-drop drop).
+  function moveTo(from: number, to: number) {
+    if (from === to) return;
+    setOrder((o) => {
+      const next = o.slice();
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item!);
+      return next;
+    });
+  }
+
+  // Drag-and-drop transient state: which row is being dragged, and the row the
+  // pointer is currently over (for the insertion indicator).
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+
+  const handleStyle: React.CSSProperties = {
+    display: "flex", alignItems: "center", justifyContent: "center",
+    width: 18, alignSelf: "stretch", padding: 0, fontSize: "0.9rem", lineHeight: 1,
     border: "1px solid var(--border-strong, #c5ccd3)", borderRadius: 3,
-    background: "var(--surface, #fff)", color: "var(--text-body, #353c43)", cursor: "pointer",
+    background: "var(--surface-sunken, #f4f6f8)", color: "var(--text-muted, #6b757e)",
+    cursor: "grab", userSelect: "none", touchAction: "none",
   };
   return (
     <div
@@ -786,29 +805,65 @@ function LayersPanel({
       {order.map((key, i) => {
         const c = cfg[key];
         const has = avail[key];
+        const dragging = dragIndex === i;
+        const dropTarget = overIndex === i && dragIndex !== null && dragIndex !== i;
         return (
           <div
             key={key}
             data-testid={`overlay-layer-${key}`}
+            // The whole row is a drop target; only the handle starts a drag, so the
+            // opacity slider stays draggable on its own.
+            onDragOver={(e) => {
+              if (dragIndex === null) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              if (overIndex !== i) setOverIndex(i);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (dragIndex !== null) moveTo(dragIndex, i);
+              setDragIndex(null);
+              setOverIndex(null);
+            }}
             style={{
               display: "flex", flexDirection: "column", gap: "0.3rem",
               padding: "0.4rem", marginBottom: "0.35rem",
               border: "1px solid var(--border-soft, #e3e7eb)", borderRadius: 6,
+              borderTop: dropTarget ? "2px solid var(--accent, #3b54da)" : undefined,
               background: has ? "var(--surface, #fff)" : "var(--surface-sunken, #f4f6f8)",
-              opacity: has ? 1 : 0.7,
+              opacity: dragging ? 0.4 : has ? 1 : 0.7,
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-              {/* Reorder */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                <button type="button" aria-label={`Move ${LAYER_LABEL[key]} up`} title="Move up"
-                  data-testid={`overlay-layer-${key}-up`}
-                  disabled={i === 0} onClick={() => move(i, -1)}
-                  style={{ ...reorderBtn, opacity: i === 0 ? 0.35 : 1 }}>▲</button>
-                <button type="button" aria-label={`Move ${LAYER_LABEL[key]} down`} title="Move down"
-                  data-testid={`overlay-layer-${key}-down`}
-                  disabled={i === order.length - 1} onClick={() => move(i, 1)}
-                  style={{ ...reorderBtn, opacity: i === order.length - 1 ? 0.35 : 1 }}>▼</button>
+              {/* Drag handle — drag to reorder; arrow keys move it (keyboard fallback). */}
+              <div
+                role="button"
+                tabIndex={0}
+                draggable
+                aria-label={`Reorder ${LAYER_LABEL[key]} — drag, or use arrow keys`}
+                title="Drag to reorder (or focus + ↑/↓)"
+                data-testid={`overlay-layer-${key}-handle`}
+                onDragStart={(e) => {
+                  setDragIndex(i);
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", String(i));
+                }}
+                onDragEnd={() => {
+                  setDragIndex(null);
+                  setOverIndex(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    move(i, -1);
+                  } else if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    move(i, 1);
+                  }
+                }}
+                style={handleStyle}
+              >
+                ⠿
               </div>
               {/* Visibility */}
               <input
