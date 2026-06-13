@@ -54,9 +54,11 @@ export type EngineFile = {
 
 function toBlob(bytes: ArrayBuffer | Uint8Array): Blob {
   // mzpeakts reads via zip.js BlobReader; wrap the bytes in a Blob (node-proven path).
+  // Pass the typed-array VIEW directly — do NOT `.slice()` it: a slice copies the whole
+  // file, doubling peak memory (a 3.5 GB input → ~7 GB transient → OOM). The Blob shares
+  // the existing buffer; in the worker the bytes are transferred in and owned here.
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  // Copy into a fresh ArrayBuffer-backed view so the BlobPart type is satisfied.
-  return new Blob([u8.slice().buffer]);
+  return new Blob([u8 as unknown as BlobPart]);
 }
 
 /** Parse embedded optical-image descriptors from the index metadata.imaging block. */
@@ -83,25 +85,71 @@ function parseOpticalImages(imagingMeta: unknown): OpticalImageMeta[] {
   return out;
 }
 
-/** Read the per-spectrum total ion current from the metadata table (NaN when absent). */
+/** A minimal view over the top-level `spectra` Arrow Struct vector (promoted columns). */
+type SpectraStruct = {
+  length: number;
+  getChild(name: string): { get(i: number): unknown } | null;
+};
+
+/**
+ * Bulk-read the promoted per-spectrum TIC column (MS:1000285) once, vectorized — the
+ * same columnar discipline the grid build uses (scanCoords.fromPromotedColumns). This
+ * replaces the old per-pixel `sm.get(index)` record materialization, which made imaging
+ * open O(spectrum-count) with a huge constant (I-05: a 34,840-pixel file never finished).
+ * Returns `null` when the promoted column isn't available (caller falls back per-record).
+ */
+function readAllTics(reader: Reader): Float64Array | null {
+  const sm = reader.spectrumMetadata as unknown as
+    | { spectra?: SpectraStruct | null; length?: number }
+    | null
+    | undefined;
+  const spectra = sm?.spectra;
+  if (!spectra || typeof spectra.getChild !== "function") return null;
+  const ticCol = spectra.getChild(TIC_COL);
+  if (!ticCol) return null;
+  const n = sm?.length ?? spectra.length ?? 0;
+  const tics = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const v = ticCol.get(i);
+    tics[i] = typeof v === "number" && Number.isFinite(v) ? v : NaN;
+  }
+  return tics;
+}
+
+/**
+ * Read one spectrum's TIC from the metadata table (NaN when absent). GUARDED: some
+ * vendor metadata rows throw inside the reader's record materialization (see
+ * stats.ts safeRecord) — a single bad row must NOT abort the whole imaging open, so a
+ * throw degrades to NaN (that pixel stays 0). Only the per-record FALLBACK path; the
+ * fast path is the vectorized `readAllTics`.
+ */
 function readSpectrumTic(reader: Reader, index: number): number {
   const sm = reader.spectrumMetadata;
   if (!sm) return NaN;
-  const rec = sm.get(index);
-  const meta = (rec.meta ?? {}) as Record<string, unknown>;
-  const v = meta[TIC_COL];
-  return typeof v === "number" && Number.isFinite(v) ? v : NaN;
+  try {
+    const rec = sm.get(index);
+    const meta = (rec.meta ?? {}) as Record<string, unknown>;
+    const v = meta[TIC_COL];
+    return typeof v === "number" && Number.isFinite(v) ? v : NaN;
+  } catch {
+    return NaN;
+  }
 }
 
 /**
  * Build a dense per-pixel TIC keyed `y0*width+x0` (IV buildGridFast semantics): for
  * each filled grid cell, look up the spectrum's total ion current. Cells with no
- * spectrum or no TIC value stay 0.
+ * spectrum or no TIC value stay 0. Uses the vectorized column read when available
+ * (fast), falling back to a guarded per-record read otherwise.
  */
 function buildTic(reader: Reader, grid: ImagingGrid): Float32Array {
   const tic = new Float32Array(grid.width * grid.height);
+  const allTics = readAllTics(reader);
   for (const [key, spectrumIndex] of grid.coordToSpectrumIndex) {
-    const v = readSpectrumTic(reader, spectrumIndex);
+    const v =
+      allTics && spectrumIndex >= 0 && spectrumIndex < allTics.length
+        ? allTics[spectrumIndex]!
+        : readSpectrumTic(reader, spectrumIndex);
     if (Number.isFinite(v) && key >= 0 && key < tic.length) tic[key] = v;
   }
   return tic;

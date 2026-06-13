@@ -8,17 +8,15 @@ import type {
   Capabilities,
   FileStats,
   ManifestEntry,
-  SpectrumRepresentation,
 } from "./types";
 
 // ── CV accession constants ────────────────────────────────────────────────────
 
-// MS:1000511 = ms level
-const MS_LEVEL_ACCESSION = "MS_1000511_ms_level";
-// MS:1000525 = spectrum representation (MS:1000128 profile / MS:1000127 centroid)
-const REPR_ACCESSION = "MS_1000525_spectrum_representation";
-const REPR_PROFILE = "MS:1000128";
-const REPR_CENTROID = "MS:1000127";
+// NOTE (I-05 perf): the per-spectrum aggregates that used MS-level / representation
+// CV accessions (ms level, spectrum representation) moved OUT of the blocking open
+// path into the async engineScanBreakdown (scanBreakdown.ts), which derives the SAME
+// mzRange / msLevels / representationCounts via the faster columnar `scanSpectra`.
+// computeStats below is now O(1).
 
 // IMS:1000050 = position x; IMS:1000051 = position y (imaging-mzpeak-spec v0.3)
 // Promoted column names in the scan table (authoritative path).
@@ -32,13 +30,6 @@ const IMS_POS_Y_ACC = "IMS:1000051";
 const BF_POINT = "point";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Map raw MS:1000525 value to the SpectrumRepresentation enum. */
-function toRepresentation(raw: unknown): SpectrumRepresentation {
-  if (raw === REPR_PROFILE) return "profile";
-  if (raw === REPR_CENTROID) return "centroid";
-  return null;
-}
 
 /**
  * Safely read a promoted column value from a spectrum record's `meta` bag.
@@ -62,78 +53,48 @@ function metaValue(meta: unknown, colName: string): unknown {
  * - `msLevels` — unique sorted MS levels read from the spectrum metadata table.
  * - `representationCounts` — profile vs centroid counts (R-02b).
  */
+/**
+ * Read a spectrum-metadata record, tolerating reader exceptions on unusual vendor
+ * metadata layouts. Some files (e.g. Thermo-centroid, Bruker-PASEF) carry spectrum
+ * param columns the vendored reader's `Param.fromArrow` (metadata.ts) can't parse —
+ * it assumes a struct column and calls `.getChild` on a null / non-struct vector,
+ * throwing a TypeError. A single unreadable record must degrade gracefully (the file
+ * still opens with whatever IS derivable) rather than crashing the whole open.
+ * Returns `null` for a record that throws.
+ */
+function safeRecord<T>(sm: { get(i: number): T }, i: number): T | null {
+  try {
+    return sm.get(i);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compute the O(1) per-file stats available at open WITHOUT a per-spectrum scan.
+ *
+ * I-05 PERF: this used to iterate `sm.get(i)` for EVERY spectrum (materializing a full
+ * record per row) to derive mzRange / msLevels / representationCounts — minutes on a
+ * 30k-spectrum file, and it BLOCKED the open ("ready"). That work is entirely redundant
+ * with `engineScanBreakdown`, which derives the same aggregates (plus rtRange +
+ * instrument) via the faster columnar `scanSpectra`, runs ASYNC after "ready", and is
+ * merged into the store. So the blocking open now reports only the cheap counts; the
+ * ranges/levels/representation fill in a moment later. Views render the null/empty
+ * stats gracefully until then.
+ */
 export function computeStats(
   reader: Reader,
   manifest: ManifestEntry[],
 ): FileStats {
   const sm = reader.spectrumMetadata;
   const n = sm?.length ?? 0;
-
-  const msLevelsSet = new Set<number>();
-  const perLevel: Record<number, number> = {};
-  let mzMin: number | null = null;
-  let mzMax: number | null = null;
-  let profileCount = 0;
-  let centroidCount = 0;
-
-  for (let i = 0; i < n; i++) {
-    // Use the metadata table directly (already loaded eagerly; no signal I/O).
-    // We rely on the `spectra` Arrow vector for promoted columns, accessed via
-    // the public `get(i)` API which returns a plain Spectrum record.
-    const rec = sm!.get(i);
-
-    // MS level
-    const rawMeta = rec.meta ?? {};
-    const msLevelRaw =
-      (rawMeta as Record<string, unknown>)[MS_LEVEL_ACCESSION];
-    const msLevel =
-      typeof msLevelRaw === "number"
-        ? msLevelRaw
-        : rec.msLevel != null
-          ? Number(rec.msLevel)
-          : null;
-    if (msLevel !== null && !isNaN(msLevel)) {
-      msLevelsSet.add(msLevel);
-      perLevel[msLevel] = (perLevel[msLevel] ?? 0) + 1;
-    }
-
-    // Representation (R-02b)
-    const reprRaw =
-      (rawMeta as Record<string, unknown>)[REPR_ACCESSION] ??
-      (rec.isProfile ? REPR_PROFILE : undefined);
-    const repr = toRepresentation(reprRaw);
-    if (repr === "profile") profileCount++;
-    else if (repr === "centroid") centroidCount++;
-
-    // m/z range from scan-window CV params on scans, if present.
-    if (rec.scans && rec.scans.length > 0) {
-      for (const scan of rec.scans) {
-        const scanMeta = scan.meta ?? {};
-        // IMS scan windows use column names derived from CV accessions:
-        // MS:1000501 = scan window lower limit; MS:1000500 = upper limit.
-        const lowerRaw = scanMeta[
-          "MS_1000501_scan_window_lower_limit_unit_MS_1000040"
-        ] as number | undefined;
-        const upperRaw = scanMeta[
-          "MS_1000500_scan_window_upper_limit_unit_MS_1000040"
-        ] as number | undefined;
-        if (typeof lowerRaw === "number" && isFinite(lowerRaw)) {
-          if (mzMin === null || lowerRaw < mzMin) mzMin = lowerRaw;
-        }
-        if (typeof upperRaw === "number" && isFinite(upperRaw)) {
-          if (mzMax === null || upperRaw > mzMax) mzMax = upperRaw;
-        }
-      }
-    }
-  }
-
   return {
     numSpectra: n,
     numEntities: manifest.length,
-    mzRange: mzMin !== null && mzMax !== null ? [mzMin, mzMax] : null,
-    msLevels: Array.from(msLevelsSet).sort((a, b) => a - b),
-    spectraPerLevel: perLevel,
-    representationCounts: { profile: profileCount, centroid: centroidCount },
+    mzRange: null, // → filled by engineScanBreakdown (async, off the open path)
+    msLevels: [], // → engineScanBreakdown
+    spectraPerLevel: {}, // → engineScanBreakdown
+    representationCounts: { profile: 0, centroid: 0 }, // → engineScanBreakdown
   };
 }
 
@@ -241,7 +202,8 @@ export function probeIsImaging(reader: Reader): boolean {
   // Source 1: check first few spectra for promoted IMS position columns on scans.
   const probeLimit = Math.min(sm.length, 5);
   for (let i = 0; i < probeLimit; i++) {
-    const rec = sm.get(i);
+    const rec = safeRecord(sm, i);
+    if (!rec) continue;
 
     // Check promoted columns in the scan records' meta bag.
     if (rec.scans && rec.scans.length > 0) {
@@ -294,8 +256,8 @@ export function probeImagingSignals(reader: Reader): ImagingSignalName[] {
   if (sm && sm.length > 0) {
     const probeLimit = Math.min(sm.length, 5);
     for (let i = 0; i < probeLimit; i++) {
-      const rec = sm.get(i);
-      if (!rec.scans || rec.scans.length === 0) continue;
+      const rec = safeRecord(sm, i);
+      if (!rec || !rec.scans || rec.scans.length === 0) continue;
       for (const scan of rec.scans) {
         const scanMeta = scan.meta ?? {};
         // Source 1: promoted IMS position columns on scans.

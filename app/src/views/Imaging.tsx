@@ -580,8 +580,27 @@ function ImagingInner({
             </button>
           </div>
           {dockOpen && (
-            <div className="chart-host" style={{ height: 200, position: "relative" }}>
-              <SpectrumPlot spectrum={spectrum} xicWindow={null} />
+            <div className="chart-host" style={{ height: 200, position: "relative" }} aria-live="polite">
+              {/* Only plot the spectrum that matches the picked pixel — while a newer
+                  pick is loading, store.spectrum still holds the PREVIOUS pixel's
+                  spectrum, so plotting it under the new coords would be misleading. */}
+              {spectrum && spectrum.index === picked.index ? (
+                <SpectrumPlot spectrum={spectrum} xicWindow={null} />
+              ) : (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "var(--text-muted, #94a3b8)",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  Loading spectrum for pixel ({picked.x}, {picked.y})…
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -21,18 +21,13 @@ import type { ManifestEntry, UnsupportedFinding } from "./types";
 
 // ── Unsupported encoding accessions (R-03a) ───────────────────────────────────
 
-/** MS-Numpress Linear Prediction encoding — MS:1002312 */
-const NUMPRESS_LINEAR = "MS:1002312";
-/** MS-Numpress Positive Integer Compression — MS:1002313 */
-const NUMPRESS_PIC = "MS:1002313";
-/** MS-Numpress Short Logged Float encoding — MS:1002314 */
-const NUMPRESS_SLOF = "MS:1002314";
-
-const NUMPRESS_ACCESSIONS = new Map<string, string>([
-  [NUMPRESS_LINEAR, "MS-Numpress Linear Prediction (MS:1002312)"],
-  [NUMPRESS_PIC, "MS-Numpress Positive Integer Compression (MS:1002313)"],
-  [NUMPRESS_SLOF, "MS-Numpress Short Logged Float (MS:1002314)"],
-]);
+// MS-Numpress encodings the bundled mzpeakts reader CANNOT decode (rejected at open).
+// As of this change ALL THREE Numpress variants are decoded by the vendored reader —
+// Linear (MS:1002312) + SLOF (MS:1002314) + PIC (MS:1002313), via numpress.ts
+// `decodeLinear`/`decodeSlof`/`decodePic` wired into data.ts (main axis + secondary).
+// So the Numpress gate is now empty; this map remains for the auxiliary-array /
+// directory-storage findings (and any future genuinely-undecodable encoding).
+const NUMPRESS_ACCESSIONS = new Map<string, string>([]);
 
 // ── detectUnsupported ─────────────────────────────────────────────────────────
 

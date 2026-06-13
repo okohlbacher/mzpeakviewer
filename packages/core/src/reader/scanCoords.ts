@@ -124,9 +124,13 @@ function fromPromotedColumns(reader: Reader): CoordResult | null {
     const y = toCoordNumber(yCol.get(i));
     if (x === null || y === null) continue; // skip null cells
 
-    const joined = srcCol ? toCoordNumber(srcCol.get(i)) : i;
+    let joined = srcCol ? toCoordNumber(srcCol.get(i)) : i;
+    if (joined === null) joined = i;
+    // source_index is file-provided; reject non-integer / negative values rather than
+    // letting a bogus index drive out-of-range TIC / spectrum reads downstream.
+    if (!Number.isInteger(joined) || joined < 0) continue;
     coords.push({ x, y });
-    spectrumIndices.push(joined === null ? i : joined);
+    spectrumIndices.push(joined);
   }
 
   return coords.length ? { coords, spectrumIndices, strategy: "promoted-columns" } : null;
@@ -168,7 +172,14 @@ function fromCvParams(reader: Reader): CoordResult | null {
   const spectrumIndices: number[] = [];
 
   for (let i = 0; i < n; i++) {
-    const rec = sm.get(i) as SpectrumRecord | undefined;
+    // GUARDED: some vendor metadata rows throw inside the reader's record
+    // materialization (see stats.ts safeRecord) — skip a bad row, don't abort open.
+    let rec: SpectrumRecord | undefined;
+    try {
+      rec = sm.get(i) as SpectrumRecord | undefined;
+    } catch {
+      continue;
+    }
     const scans = rec?.scans;
     if (!scans || scans.length === 0) continue;
 
@@ -212,7 +223,12 @@ function fromIdParse(reader: Reader): CoordResult | null {
   const spectrumIndices: number[] = [];
 
   for (let i = 0; i < n; i++) {
-    const rec = sm.get(i) as SpectrumRecord | undefined;
+    let rec: SpectrumRecord | undefined;
+    try {
+      rec = sm.get(i) as SpectrumRecord | undefined; // GUARDED (see fromCvParams)
+    } catch {
+      continue;
+    }
     const id = typeof rec?.id === "string" ? rec.id : "";
     if (!id) continue;
     const mx = ID_X_RE.exec(id);
