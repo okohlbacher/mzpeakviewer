@@ -20,7 +20,7 @@ capability-gated nav with per-view headers, and a richer Summary.
 |------|-------|--------|-------|----------------|--------|
 | A | Quick wins (low-risk, data + layout) | ~1–2 days | T-01, T-02, T-05 | Enriched real-fixture demo cards live; every view has a header; ui-kit token comment fixed; build + e2e green. | ✅ DONE (commit `f07b1d0`) |
 | B | Spectrum dock (marquee UX) | ~2–4 days | T-03 | On an imaging view, clicking a present pixel renders its spectrum in a dock below the heatmap in-place, while the full Spectra view still works. | ✅ DONE (commit `04516af`) |
-| C | Summary + nav polish | ~3–5 days | T-04, T-06 | Summary shows metric tiles + capability cards + a TIC thumbnail; nav rows carry icons; contrast spike resolved. | ⏳ pending (T-04, T-06, SP-1) |
+| C | Summary + nav polish | ~3–5 days | T-04, T-06 | Summary shows metric tiles + capability cards + a TIC thumbnail; nav rows carry icons; contrast spike resolved. | ✅ DONE (commit `b0d5af1`; SP-1 verified ~7.2:1, passes AA) |
 
 ## Tasks
 
