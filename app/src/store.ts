@@ -232,7 +232,20 @@ export const useStore = create<AppState>((set, get) => ({
             : s.capabilities,
         }));
       }).catch(() => {
-        // Non-fatal: scan breakdown failing doesn't break the core UI
+        // Non-fatal: scan breakdown failing doesn't break the core UI, but the
+        // detailed stats (m/z range, MS levels, per-pixel TIC) won't fill in — surface
+        // a dismissible notice rather than leaving the partial open-time stats silent.
+        if (seq !== currentOpenSeq) return;
+        set((s) => ({
+          notices: [
+            ...s.notices.filter((n) => n.id !== "scan-breakdown"),
+            {
+              id: "scan-breakdown",
+              severity: "warning" as const,
+              message: "Detailed stats (m/z range, MS levels) couldn’t be computed for this file.",
+            },
+          ],
+        }));
       });
 
       // Pre-select spectrum 0 if file has spectra.
