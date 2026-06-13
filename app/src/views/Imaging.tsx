@@ -103,6 +103,8 @@ function ImagingInner({
   // The pixel whose spectrum is in the dock (absolute 1-based IMS coords + index).
   const [picked, setPicked] = useState<{ x: number; y: number; index: number } | null>(null);
   const [dockOpen, setDockOpen] = useState(true);
+  // Keyboard cursor cell (0-based local) for accessible pixel picking without a mouse.
+  const [kbCell, setKbCell] = useState<{ x: number; y: number } | null>(null);
 
   // ── Shared display controls ───────────────────────────────────────────────
   const [colormap, setColormap] = useState<Colormap>("viridis");
@@ -338,16 +340,46 @@ function ImagingInner({
   function onLeave() {
     setReadout(null);
   }
-  function onClick(e: React.MouseEvent<HTMLCanvasElement>) {
-    if (!pickable) return;
-    const hit = toGridCoord(e, e.currentTarget, width, height);
-    if (!hit || presenceMask[hit.key] === 0) return;
-    const idx = coordMap.get(hit.key);
+  // Pick the cell at local (x0,y0) — shared by mouse click and keyboard Enter.
+  function pickCell(x0: number, y0: number) {
+    const key = y0 * width + x0;
+    if (presenceMask[key] === 0) return; // no-data cell
+    const idx = coordMap.get(key);
     if (idx != null) {
-      setPicked({ x: hit.x + originX, y: hit.y + originY, index: idx });
+      setPicked({ x: x0 + originX, y: y0 + originY, index: idx });
       setDockOpen(true);
       onPickSpectrum(idx); // fills store.spectrum in-place (route=false)
     }
+  }
+
+  function onClick(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!pickable) return;
+    const hit = toGridCoord(e, e.currentTarget, width, height);
+    if (!hit) return;
+    pickCell(hit.x, hit.y);
+  }
+
+  // Keyboard pixel picking (a11y): arrows move a cursor cell, Enter/Space picks it.
+  function onCanvasKeyDown(e: React.KeyboardEvent<HTMLCanvasElement>) {
+    if (!pickable) return;
+    const cur = kbCell ?? { x: Math.floor(width / 2), y: Math.floor(height / 2) };
+    let { x, y } = cur;
+    switch (e.key) {
+      case "ArrowLeft": x = Math.max(0, x - 1); break;
+      case "ArrowRight": x = Math.min(width - 1, x + 1); break;
+      case "ArrowUp": y = Math.max(0, y - 1); break;
+      case "ArrowDown": y = Math.min(height - 1, y + 1); break;
+      case "Enter":
+      case " ":
+        e.preventDefault();
+        pickCell(cur.x, cur.y);
+        return;
+      default:
+        return;
+    }
+    e.preventDefault();
+    setKbCell({ x, y });
+    setReadout({ x, y, key: y * width + x });
   }
 
   const readoutText = useMemo(() => {
@@ -489,8 +521,12 @@ function ImagingInner({
               onMouseMove={onMove}
               onMouseLeave={onLeave}
               onClick={onClick}
+              onKeyDown={onCanvasKeyDown}
+              onFocus={() => pickable && kbCell == null && setKbCell({ x: Math.floor(width / 2), y: Math.floor(height / 2) })}
+              onBlur={() => setKbCell(null)}
+              tabIndex={pickable ? 0 : -1}
               data-testid="imaging-canvas"
-              aria-label={`${mode} image. ${pickable ? "Click a pixel to inspect its spectrum." : ""}`}
+              aria-label={`${mode} image, ${width} by ${height} pixels.${pickable ? " Use arrow keys to move the cursor and Enter to inspect a pixel's spectrum, or click a pixel." : ""}`}
               style={{
                 ...canvasSizeStyle,
                 imageRendering: "pixelated",
