@@ -11,6 +11,8 @@ export function Spectra() {
   const spectrumLoading = useStore((s) => s.spectrumLoading);
   const selector = useStore((s) => s.selector);
   const selectSpectrum = useStore((s) => s.selectSpectrum);
+  const msLevelFilter = useStore((s) => s.msLevelFilter);
+  const setMsLevelFilter = useStore((s) => s.setMsLevelFilter);
 
   const [inputVal, setInputVal] = useState("");
 
@@ -36,22 +38,40 @@ export function Spectra() {
 
   const currentIndex = selector?.index ?? 0;
 
-  // Build select options from browse index if available, else a simple range.
+  // MS-level filter (only levels actually present in the file populate the dropdown;
+  // filled by scanBreakdown). Filtering needs the per-spectrum browse.msLevel column.
+  const availableLevels = stats.msLevels ?? [];
+  const allIndices = browse
+    ? Array.from(browse.msLevel, (_, i) => i)
+    : Array.from({ length: numSpectra }, (_, i) => i);
+  const filteredIndices =
+    msLevelFilter == null || !browse
+      ? allIndices
+      : allIndices.filter((i) => browse.msLevel[i] === msLevelFilter);
+
+  // When the active filter excludes the current spectrum, jump to the first match.
+  function applyFilter(level: number | null) {
+    setMsLevelFilter(level);
+    if (level != null && browse && browse.msLevel[currentIndex] !== level) {
+      const first = allIndices.find((i) => browse.msLevel[i] === level);
+      if (first != null) void selectSpectrum(first);
+    }
+  }
+
+  // Build select options from the (filtered) browse index, else a simple range.
   // Cap at 1000 options to avoid huge dropdowns on large files.
   const MAX_OPTS = 1000;
-  let selectOptions: SelectOption[];
-  if (browse && browse.id.length <= MAX_OPTS) {
-    selectOptions = browse.id.map((id, i) => ({
-      value: String(i),
-      label: `#${i} ${id}`,
-    }));
-  } else {
-    const cap = Math.min(numSpectra, MAX_OPTS);
-    selectOptions = Array.from({ length: cap }, (_, i) => ({
-      value: String(i),
-      label: `Spectrum ${i}`,
-    }));
-  }
+  const optIndices = filteredIndices.slice(0, MAX_OPTS);
+  const selectOptions: SelectOption[] = optIndices.map((i) => ({
+    value: String(i),
+    label: browse ? `#${i} ${browse.id[i]}` : `Spectrum ${i}`,
+  }));
+
+  // Prev/Next step WITHIN the filtered set.
+  const filterPos = filteredIndices.indexOf(currentIndex);
+  const prevIdx = filterPos > 0 ? filteredIndices[filterPos - 1]! : null;
+  const nextIdx =
+    filterPos >= 0 && filterPos < filteredIndices.length - 1 ? filteredIndices[filterPos + 1]! : null;
 
   function commitInput() {
     const v = Number(inputVal.trim());
@@ -61,7 +81,7 @@ export function Spectra() {
     setInputVal("");
   }
 
-  const hasLargeFile = numSpectra > MAX_OPTS;
+  const hasLargeFile = filteredIndices.length > MAX_OPTS;
 
   return (
     <div
@@ -77,6 +97,24 @@ export function Spectra() {
           flexWrap: "wrap",
         }}
       >
+        {/* MS-level filter — only levels present in the file appear (filled by scanBreakdown). */}
+        {availableLevels.length > 0 && (
+          <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
+            MS level
+            <Select
+              data-testid="ms-level-filter"
+              value={msLevelFilter == null ? "all" : String(msLevelFilter)}
+              onChange={(val) => applyFilter(val === "all" ? null : Number(val))}
+              options={[
+                { value: "all", label: "All" },
+                ...availableLevels.map((l) => ({ value: String(l), label: `MS${l}` })),
+              ]}
+              ariaLabel="Filter spectra by MS level"
+              size="sm"
+            />
+          </label>
+        )}
+
         {hasLargeFile ? (
           <>
             <label
@@ -135,8 +173,8 @@ export function Spectra() {
         <Button
           variant="ghost"
           size="sm"
-          disabled={currentIndex <= 0 || spectrumLoading}
-          onClick={() => void selectSpectrum(currentIndex - 1)}
+          disabled={prevIdx == null || spectrumLoading}
+          onClick={() => prevIdx != null && void selectSpectrum(prevIdx)}
           aria-label="Previous spectrum"
           data-testid="spectrum-prev"
         >
@@ -145,8 +183,8 @@ export function Spectra() {
         <Button
           variant="ghost"
           size="sm"
-          disabled={currentIndex >= numSpectra - 1 || spectrumLoading}
-          onClick={() => void selectSpectrum(currentIndex + 1)}
+          disabled={nextIdx == null || spectrumLoading}
+          onClick={() => nextIdx != null && void selectSpectrum(nextIdx)}
           aria-label="Next spectrum"
           data-testid="spectrum-next"
         >

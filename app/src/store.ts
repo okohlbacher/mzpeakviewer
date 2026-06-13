@@ -58,6 +58,8 @@ export interface AppState {
   // spectrum selection
   /** How the active spectrum was chosen */
   selector: { by: "index"; index: number } | null;
+  /** Spectra-view MS-level filter (null = all). Only levels present in the file. */
+  msLevelFilter: number | null;
   /** The current spectrum arrays (null until one is selected) */
   spectrum: SpectrumArrays | null;
   spectrumLoading: boolean;
@@ -80,6 +82,7 @@ export interface AppState {
   /** Open a remote .mzpeak by URL (deep-link / ?file= path). Mirrors openFile. */
   openUrl: (url: string) => Promise<void>;
   setView: (view: View) => void;
+  setMsLevelFilter: (level: number | null) => void;
   /** Load a spectrum by index. `route` (default true) switches to the Spectra view
    *  on success; pass false to load the spectrum without leaving the current view
    *  (used by the imaging spectrum dock for in-place pixel-pick). */
@@ -128,6 +131,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   // spectrum
   selector: null,
+  msLevelFilter: null,
   spectrum: null,
   spectrumLoading: false,
 
@@ -172,6 +176,7 @@ export const useStore = create<AppState>((set, get) => ({
       fileSize: null,
       view: "summary",
       selector: null,
+      msLevelFilter: null,
       spectrum: null,
       browse: null,
       chrom: null,
@@ -302,6 +307,7 @@ export const useStore = create<AppState>((set, get) => ({
       fileSize: null,
       view: "summary",
       selector: null,
+      msLevelFilter: null,
       spectrum: null,
       browse: null,
       chrom: null,
@@ -380,6 +386,10 @@ export const useStore = create<AppState>((set, get) => ({
   // -------------------------------------------------------------------------
   setView: (view: View) => {
     set({ view });
+  },
+
+  setMsLevelFilter: (level: number | null) => {
+    set({ msLevelFilter: level });
   },
 
   // -------------------------------------------------------------------------

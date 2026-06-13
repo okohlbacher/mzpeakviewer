@@ -39,6 +39,8 @@ import type { ImagingGrid } from "../reader/imagingTypes";
 
 // MS:1000285 = total ion current (promoted column name in the spectrum meta bag).
 const TIC_COL = "MS_1000285_total_ion_current_unit_MS_1000131";
+// MS:1000511 = ms level (promoted column) — used to restrict the TIC to MS1 spectra.
+const MS_LEVEL_COL = "MS_1000511_ms_level";
 
 /** What the engine `open` returns. The live reader stays in-process. */
 export type EngineFile = {
@@ -117,6 +119,30 @@ function readAllTics(reader: Reader): Float64Array | null {
 }
 
 /**
+ * Bulk-read the promoted per-spectrum MS-level column (MS:1000511) vectorized, so the
+ * imaging TIC can be restricted to MS1. `0` for an absent/non-finite level (treated as
+ * "unannotated", which the MS1 fallback handles). Returns `null` when the column is
+ * absent (caller then doesn't filter).
+ */
+function readAllMsLevels(reader: Reader): Int16Array | null {
+  const sm = reader.spectrumMetadata as unknown as
+    | { spectra?: SpectraStruct | null; length?: number }
+    | null
+    | undefined;
+  const spectra = sm?.spectra;
+  if (!spectra || typeof spectra.getChild !== "function") return null;
+  const col = spectra.getChild(MS_LEVEL_COL);
+  if (!col) return null;
+  const n = sm?.length ?? spectra.length ?? 0;
+  const levels = new Int16Array(n);
+  for (let i = 0; i < n; i++) {
+    const v = col.get(i);
+    levels[i] = typeof v === "number" && Number.isFinite(v) ? v : 0;
+  }
+  return levels;
+}
+
+/**
  * Read one spectrum's TIC from the metadata table (NaN when absent). GUARDED: some
  * vendor metadata rows throw inside the reader's record materialization (see
  * stats.ts safeRecord) — a single bad row must NOT abort the whole imaging open, so a
@@ -141,11 +167,32 @@ function readSpectrumTic(reader: Reader, index: number): number {
  * each filled grid cell, look up the spectrum's total ion current. Cells with no
  * spectrum or no TIC value stay 0. Uses the vectorized column read when available
  * (fast), falling back to a guarded per-record read otherwise.
+ *
+ * MS1-ONLY: the TIC aggregates MS1 spectra only — a pixel whose spectrum is MS2/MSn is
+ * left at 0. FALLBACK: if the grid declares NO MS1 spectrum at all (a misannotated /
+ * level-0 file), every pixel contributes (mirrors the LC chrom `ticRows` rule).
  */
 function buildTic(reader: Reader, grid: ImagingGrid): Float32Array {
   const tic = new Float32Array(grid.width * grid.height);
   const allTics = readAllTics(reader);
+  const allLevels = readAllMsLevels(reader);
+  // Does any grid spectrum carry MS level 1? If not, don't filter (fallback).
+  let hasMs1 = false;
+  if (allLevels) {
+    for (const [, si] of grid.coordToSpectrumIndex) {
+      if (si >= 0 && si < allLevels.length && allLevels[si] === 1) {
+        hasMs1 = true;
+        break;
+      }
+    }
+  }
+  const ms1Only = allLevels != null && hasMs1;
   for (const [key, spectrumIndex] of grid.coordToSpectrumIndex) {
+    if (
+      ms1Only &&
+      !(spectrumIndex >= 0 && spectrumIndex < allLevels!.length && allLevels![spectrumIndex] === 1)
+    )
+      continue; // skip non-MS1 pixels when the file carries MS1 data
     const v =
       allTics && spectrumIndex >= 0 && spectrumIndex < allTics.length
         ? allTics[spectrumIndex]!

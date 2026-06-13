@@ -28,6 +28,7 @@ import { Chromatograms } from "./views/Chromatograms";
 import { Metadata } from "./views/Metadata";
 import { Structure } from "./views/Structure";
 import { Imaging } from "./views/Imaging";
+import { GridView } from "./views/GridView";
 import { Idle } from "./views/Idle";
 import { ShareButton } from "./ShareButton";
 
@@ -174,7 +175,6 @@ function Sidebar() {
     depth?: number;
   }) {
     const isActive = view === id;
-    const isPlaceholder = id === "grid";
     return (
       <button
         ref={(el) => setTabRef(id, el)}
@@ -187,7 +187,7 @@ function Sidebar() {
         // FINDING 4: visible focus ring class; pseudo-selector styles injected
         // via the <style> tag in the sidebar (inline styles can't cover :focus-visible).
         className="mzpeak-tab-btn"
-        disabled={!ready && !isPlaceholder}
+        disabled={!ready}
         onClick={(e) => handleTabActivate(id, e)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") handleTabActivate(id, e);
@@ -216,18 +216,6 @@ function Sidebar() {
       >
         <NavIcon id={id} />
         {label}
-        {id === "grid" ? (
-          <span
-            style={{
-              marginLeft: "auto",
-              fontSize: "var(--text-xs, 0.75rem)",
-              color: "var(--text-muted, #94a3b8)",
-              fontStyle: "italic",
-            }}
-          >
-            soon
-          </span>
-        ) : null}
       </button>
     );
   }
@@ -450,26 +438,6 @@ function MiniRow({ k, v }: { k: string; v: ReactNode }) {
 // Grid inspector placeholder (the imaging modes live in views/Imaging.tsx)
 // ---------------------------------------------------------------------------
 
-function GridPlaceholder() {
-  return (
-    <div
-      data-testid="grid-placeholder"
-      style={{
-        padding: "2rem",
-        border: "1px dashed var(--border-default, #e2e8f0)",
-        borderRadius: "var(--radius-md, 6px)",
-        color: "var(--text-muted, #94a3b8)",
-        textAlign: "center",
-        maxWidth: 480,
-      }}
-    >
-      <p style={{ margin: 0, fontWeight: "var(--weight-medium, 500)" }}>Grid</p>
-      <p style={{ margin: "0.25rem 0 0", fontSize: "var(--text-sm, 0.875rem)" }}>
-        Imaging grid inspector — coming in a later slice.
-      </p>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // TopBar
@@ -733,7 +701,7 @@ function ViewRouter() {
       {view === "multi" && <Imaging mode="multi" />}
       {view === "optical" && <Imaging mode="optical" />}
       {view === "overlay" && <Imaging mode="overlay" />}
-      {view === "grid" && <GridPlaceholder />}
+      {view === "grid" && <GridView />}
     </div>
   );
 }
