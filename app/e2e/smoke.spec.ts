@@ -179,6 +179,10 @@ test("imaging spatial round-trip: m/z → ion image → click pixel → spectrum
 
   // Pixel-pick now fills the IN-PLACE spectrum dock (no view switch); the dock
   // shows the picked pixel's coords + a SpectrumPlot canvas. We stay on the ion view.
+  // Pixel A: top-left cell. Pixel B: top-RIGHT cell — both in the always-visible top
+  // row so the dock opening (which shrinks/scrolls the stage) can't make the click
+  // target unstable, while still being distinct cells → distinct spectra.
+  await page.getByTestId("imaging-canvas").scrollIntoViewIfNeeded();
   await page.getByTestId("imaging-canvas").click({ position: await cellCentre(0, 0) });
   await expect(page.getByTestId("imaging-spectrum-dock")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("imaging-ion")).toBeVisible(); // did NOT route away
@@ -189,7 +193,8 @@ test("imaging spatial round-trip: m/z → ion image → click pixel → spectrum
   // --- Step 4: click a DIFFERENT pixel B — the dock updates in place ---
   // No nav-away / re-render needed: the rendered ion image and dock persist. The
   // stage has resized (dock now open), so re-measure the cell centre for pixel B.
-  await page.getByTestId("imaging-canvas").click({ position: await cellCentre(2, 2) });
+  await page.getByTestId("imaging-canvas").scrollIntoViewIfNeeded();
+  await page.getByTestId("imaging-canvas").click({ position: await cellCentre(2, 0) });
   await expect(page.getByTestId("imaging-spectrum-dock")).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('[data-testid="imaging-spectrum-dock"] canvas').first()).toBeVisible({ timeout: 15_000 });
   // The dock meta encodes the picked pixel coords + index; wait for it to change

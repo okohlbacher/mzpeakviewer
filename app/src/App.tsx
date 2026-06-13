@@ -35,6 +35,39 @@ import { ShareButton } from "./ShareButton";
 // Sidebar
 // ---------------------------------------------------------------------------
 
+// Small line-icon per nav view (decorative; aria-hidden). Keeps the dense-
+// instrument feel — 15px, 1.7 stroke, currentColor so it tints with the row.
+const NAV_ICON_PATHS: Record<View, string> = {
+  summary: "M4 5h16M4 10h16M4 15h10",
+  spectra: "M3 18 7 6l3 12 3-16 3 16 2-8h2",
+  chromatograms: "M3 17c3 0 3-8 6-8s3 6 6 6 3-4 6-4",
+  metadata: "M4 5h16v6H4zM4 15h10",
+  structure: "M4 6h16M4 12h16M4 18h16M9 4v16",
+  overview: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
+  ion: "M12 3v4M12 17v4M3 12h4M17 12h4M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
+  multi: "M5 7h4v10H5zM10 7h4v10h-4zM15 7h4v10h-4z",
+  optical: "M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6",
+  overlay: "M12 3 3 8l9 5 9-5-9-5zM3 14l9 5 9-5",
+  grid: "M4 4h16v16H4zM10 4v16M16 4v16M4 10h16M4 16h16",
+};
+
+function NavIcon({ id }: { id: View }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ width: 15, height: 15, marginRight: "0.5rem", flexShrink: 0, opacity: 0.85 }}
+    >
+      <path d={NAV_ICON_PATHS[id]} />
+    </svg>
+  );
+}
+
 function Sidebar() {
   const phase = useStore((s) => s.phase);
   const view = useStore((s) => s.view);
@@ -181,6 +214,7 @@ function Sidebar() {
           transition: "background 0.1s, color 0.1s",
         }}
       >
+        <NavIcon id={id} />
         {label}
         {id === "grid" ? (
           <span

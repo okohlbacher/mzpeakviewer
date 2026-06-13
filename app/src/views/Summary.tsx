@@ -1,6 +1,10 @@
-// Summary view — file stats, capability readout, and imaging block.
+// Summary view — metric tiles + TIC thumbnail, then file stats, capability
+// readout, and imaging block.
+import { useEffect, useRef } from "react";
+import type { ImagingGridWire } from "@mzpeak/contracts";
 import { useStore } from "../store";
 import { StatRow, Badge, Panel } from "@mzpeak/ui-kit";
+import { rasterizeTic } from "./render";
 
 function fmtBytes(b: number | null | undefined): string {
   if (b == null) return "—";
@@ -23,6 +27,8 @@ export function Summary() {
   const fileSize = useStore((s) => s.fileSize);
   const manifest = useStore((s) => s.manifest);
   const opticalImages = useStore((s) => s.opticalImages);
+  const grid = useStore((s) => s.grid);
+  const ticColumn = useStore((s) => s.ticColumn);
 
   if (phase === "idle") {
     return (
@@ -75,6 +81,19 @@ export function Summary() {
       data-testid="summary-view"
       style={{ display: "flex", flexDirection: "column", gap: "1rem", maxWidth: 720 }}
     >
+      {/* Metric tiles + TIC thumbnail (imaging) */}
+      <div data-testid="summary-tiles" style={{ display: "flex", gap: "0.75rem", alignItems: "stretch", flexWrap: "wrap" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "0.6rem", flex: 1, minWidth: 240 }}>
+          <MetricTile label="Spectra" value={stats.numSpectra.toLocaleString()} />
+          <MetricTile label="m/z range" value={stats.mzRange ? `${fmtRange(stats.mzRange, 0)}` : "—"} unit={stats.mzRange ? "Th" : undefined} />
+          <MetricTile label="Layout" value={caps.layout} />
+          <MetricTile label="Imaging" value={imaging.isImaging ? "yes" : "no"} accent={imaging.isImaging} />
+        </div>
+        {imaging.isImaging && grid && ticColumn && (
+          <TicThumbnail grid={grid} tic={ticColumn} />
+        )}
+      </div>
+
       {/* File section */}
       <Panel title="File" defaultOpen testid="summary-file-panel">
         <StatRow label="Name" value={fileName ?? "—"} testid="summary-filename" />
@@ -255,6 +274,84 @@ export function Summary() {
           </div>
         </Panel>
       )}
+    </div>
+  );
+}
+
+/** A compact metric tile (value + label) for the Summary header row. */
+function MetricTile({ label, value, unit, accent }: { label: string; value: string; unit?: string; accent?: boolean }) {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--border-default, #e2e8f0)",
+        borderRadius: 8,
+        background: "var(--surface-card, #fff)",
+        padding: "0.6rem 0.75rem",
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.15rem",
+        minWidth: 0,
+      }}
+    >
+      <span
+        style={{
+          fontFamily: "var(--font-mono, monospace)",
+          fontSize: "1.15rem",
+          fontWeight: "var(--weight-semibold, 600)",
+          color: accent ? "var(--blue-600, #3b54da)" : "var(--text-heading, #1e293b)",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {value}
+        {unit ? <span style={{ fontSize: "0.7rem", color: "var(--text-muted, #94a3b8)", marginLeft: 3 }}>{unit}</span> : null}
+      </span>
+      <span style={{ fontSize: "var(--text-xs, 0.7rem)", color: "var(--text-muted, #94a3b8)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        {label}
+      </span>
+    </div>
+  );
+}
+
+/** Small per-pixel-TIC heatmap thumbnail for imaging files (reuses rasterizeTic). */
+function TicThumbnail({ grid, tic }: { grid: ImagingGridWire; tic: Float32Array }) {
+  const ref = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    canvas.width = grid.width;
+    canvas.height = grid.height;
+    const rgba = rasterizeTic(tic, grid, "viridis", false);
+    const img = ctx.createImageData(grid.width, grid.height);
+    img.data.set(rgba);
+    ctx.putImageData(img, 0, 0);
+  }, [grid, tic]);
+
+  const MAX = 110;
+  const scale = Math.max(1, Math.floor(MAX / Math.max(grid.width, grid.height)));
+  return (
+    <div
+      data-testid="summary-tic-thumb"
+      style={{
+        border: "1px solid var(--border-default, #e2e8f0)",
+        borderRadius: 8,
+        background: "var(--ink, #0e1216)",
+        padding: "0.5rem",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "0.3rem",
+      }}
+    >
+      <canvas
+        ref={ref}
+        aria-label="Total-ion-current thumbnail"
+        style={{ width: grid.width * scale, height: grid.height * scale, imageRendering: "pixelated", borderRadius: 2 }}
+      />
+      <span style={{ fontSize: "var(--text-xs, 0.7rem)", color: "var(--text-muted, #94a3b8)" }}>TIC overview</span>
     </div>
   );
 }
