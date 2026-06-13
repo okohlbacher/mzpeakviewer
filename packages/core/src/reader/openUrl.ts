@@ -9,6 +9,7 @@
 // mzpeakts import allowed — kept in the Worker module to stay within the
 // reader/ encapsulation boundary.
 import { MzPeakReader, ZipStorage } from "mzpeakts";
+import { HttpReader } from "@zip.js/zip.js";
 import { detectUnsupported } from "./capability";
 import { UnsupportedEncodingError } from "./errors";
 
@@ -62,12 +63,25 @@ export async function openReaderFromStore(
  * Open a `.mzpeak` from a URL (HTTP range requests via zip.js). Eagerly loads
  * metadata; signal arrays are read lazily on demand. The boundary into the
  * vendored WASM reader. Runs the capability gate before returning.
+ *
+ * `forceRangeRequests: true` is REQUIRED for the data.mzpeak.org / BunnyCDN host:
+ * its 206 Partial Content responses carry a correct `Content-Range` but OMIT the
+ * `Accept-Ranges` header, so zip.js's default probe concludes ranges are
+ * unsupported and throws "HTTP range unsupported" — even though ranges work. We
+ * force range mode rather than trust the (missing) advertisement header. This
+ * mirrors the Explorer reader (reader/explorer/open.ts); the vendored
+ * `MzPeakReader.fromUrl()` builds an unforced `HttpRangeReader`, so we construct
+ * the store ourselves instead of using it.
  * @deprecated Use ZipStorage.fromUrl() for the fast path + openReaderFromStore()
  * for lazy full init. This function reads all metadata eagerly.
  */
 export async function openUrl(url: string | URL): Promise<Reader> {
   // boundary: mzpeakts/parquet-wasm — opening untrusted file bytes over HTTP.
-  const reader = await MzPeakReader.fromUrl(url);
+  const httpReader = new HttpReader(String(url), {
+    useRangeHeader: true,
+    forceRangeRequests: true,
+  });
+  const reader = await MzPeakReader.fromStore(new ZipStorage(httpReader));
   return capabilityGate(reader);
 }
 
