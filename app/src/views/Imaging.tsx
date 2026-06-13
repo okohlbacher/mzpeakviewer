@@ -13,7 +13,7 @@
 // ./render; this file owns the canvas, controls, and engine round-trips.
 
 import { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
-import type { ImagingGridWire, IonImageStats, OpticalImageMeta } from "@mzpeak/contracts";
+import type { ImagingGridWire, OpticalImageMeta } from "@mzpeak/contracts";
 import { rebuildCoordMap } from "@mzpeak/core";
 import { SpectrumPlot } from "@mzpeak/ui-kit";
 import { useStore } from "../store";
@@ -53,8 +53,44 @@ function blit(ctx: CanvasRenderingContext2D, rgba: Uint8ClampedArray, w: number,
   ctx.putImageData(img, 0, 0);
 }
 
-const CHANNEL_COLORS = ["#ef4444", "#22c55e", "#3b82f6"] as const; // R / G / B
+/** Stretch a decoded optical image (native size) onto the grid box (w×h) and read
+ *  back its RGBA so it can be alpha-composited alongside the data layers. */
+function opticalToGrid(decoded: DecodedOptical, w: number, h: number): Uint8ClampedArray | null {
+  const src = document.createElement("canvas");
+  src.width = decoded.width;
+  src.height = decoded.height;
+  const sctx = src.getContext("2d");
+  if (!sctx) return null;
+  blit(sctx, decoded.rgba, decoded.width, decoded.height);
+  const dst = document.createElement("canvas");
+  dst.width = w;
+  dst.height = h;
+  const dctx = dst.getContext("2d");
+  if (!dctx) return null;
+  dctx.imageSmoothingEnabled = false;
+  dctx.drawImage(src, 0, 0, w, h);
+  return new Uint8ClampedArray(dctx.getImageData(0, 0, w, h).data);
+}
+
+// mzPeakIV's false-colour channel tokens (--channel-r/g/b).
+const CHANNEL_COLORS = ["#e53935", "#43a047", "#1e88e5"] as const; // R / G / B
 const CHANNEL_LABELS = ["Red", "Green", "Blue"] as const;
+
+/** Overlay layer identities, ordered top→bottom in the layers panel. */
+type LayerKey = "ion" | "rgb" | "tic" | "optical";
+const LAYER_LABEL: Record<LayerKey, string> = {
+  ion: "Ion image",
+  rgb: "RGB channels",
+  tic: "TIC",
+  optical: "Optical",
+};
+/** Where each empty layer's data comes from — shown as a hint when unavailable. */
+const LAYER_HINT: Record<LayerKey, string> = {
+  ion: "render in the Ion image view",
+  rgb: "render in the RGB channels view",
+  tic: "no per-pixel TIC in this file",
+  optical: "no embedded optical image",
+};
 
 export function Imaging({ mode }: { mode: ImagingMode }) {
   const grid = useStore((s) => s.grid);
@@ -111,10 +147,13 @@ function ImagingInner({
   const [logScale, setLogScale] = useState(false);
 
   // ── Ion-image state ───────────────────────────────────────────────────────
+  // The rendered ion image + RGB composite live in the store (not local state) so
+  // they persist across tab switches and the Overlay view can composite them.
   const [mz, setMz] = useState("");
   const [tol, setTol] = useState("0.5");
-  const [ionImage, setIonImage] = useState<Float32Array | null>(null);
-  const [ionStats, setIonStats] = useState<IonImageStats | null>(null);
+  const ionImage = useStore((s) => s.ionImage);
+  const ionStats = useStore((s) => s.ionStats);
+  const setIonImageStore = useStore((s) => s.setIonImage);
 
   // ── Multi-channel (RGB) state ─────────────────────────────────────────────
   const [channels, setChannels] = useState<{ mz: string; tol: string }[]>([
@@ -122,7 +161,19 @@ function ImagingInner({
     { mz: "", tol: "0.5" },
     { mz: "", tol: "0.5" },
   ]);
-  const [multi, setMulti] = useState<(Float32Array | null)[] | null>(null);
+  const multi = useStore((s) => s.multiChannel);
+  const setMultiChannelStore = useStore((s) => s.setMultiChannel);
+
+  // ── Overlay layer ordering (top→bottom) + per-layer visibility/opacity ─────
+  // mzPeakIV blends a *fixed* optical→TIC→RGB→ion stack; here the order is
+  // user-controllable. Default mirrors mzPeakIV (ion on top, optical at the back).
+  const [layerOrder, setLayerOrder] = useState<LayerKey[]>(["ion", "rgb", "tic", "optical"]);
+  const [layerCfg, setLayerCfg] = useState<Record<LayerKey, { visible: boolean; opacity: number }>>({
+    ion: { visible: true, opacity: 0.8 },
+    rgb: { visible: true, opacity: 1 },
+    tic: { visible: true, opacity: 0.7 },
+    optical: { visible: true, opacity: 1 },
+  });
 
   // ── Optical state ─────────────────────────────────────────────────────────
   const hasOptical = opticalImages.length > 0;
@@ -132,9 +183,6 @@ function ImagingInner({
   const [decoded, setDecoded] = useState<Record<string, DecodedOptical>>({});
   const [opticalErr, setOpticalErr] = useState<Record<string, string>>({});
   const opticalGen = useRef(0);
-
-  // ── Overlay opacity ───────────────────────────────────────────────────────
-  const [overlayAlpha, setOverlayAlpha] = useState(0.6);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -181,12 +229,10 @@ function ImagingInner({
     setError(null);
     try {
       const res = await engine.renderIonImage(mzNum, tolNum);
-      setIonImage(res.ionImage);
-      setIonStats(res.stats);
+      setIonImageStore(res.ionImage, res.stats);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      setIonImage(null);
-      setIonStats(null);
+      setIonImageStore(null, null);
     } finally {
       setBusy(false);
     }
@@ -208,10 +254,10 @@ function ImagingInner({
     setError(null);
     try {
       const images = await engine.renderMultiChannel(reqs);
-      setMulti(images);
+      setMultiChannelStore(images);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      setMulti(null);
+      setMultiChannelStore(null);
     } finally {
       setBusy(false);
     }
@@ -247,31 +293,42 @@ function ImagingInner({
       canvas.height = decodedOptical.height;
       blit(ctx, decodedOptical.rgba, decodedOptical.width, decodedOptical.height);
     } else if (mode === "overlay") {
-      // Base = ion image (or TIC if no ion rendered yet) at grid resolution; then
-      // the optical image is drawn on top, stretched to the grid box, at overlayAlpha.
+      // Composite all available layers in the user-defined stacking order. Each
+      // layer is alpha-over'd (premultiplied) bottom→top onto the dark stage —
+      // the same blend mzPeakIV uses, but with a reorderable stack.
       canvas.width = width;
       canvas.height = height;
-      const base = ionImage
-        ? rasterizeImage(ionImage, grid, { colormap, percentile: 0.99, logScale })
-        : tic
-          ? rasterizeTic(tic, grid, colormap, logScale)
-          : null;
-      if (base) blit(ctx, base, width, height);
-      else ctx.clearRect(0, 0, width, height);
-      if (decodedOptical) {
-        const off = document.createElement("canvas");
-        off.width = decodedOptical.width;
-        off.height = decodedOptical.height;
-        const octx = off.getContext("2d");
-        if (octx) {
-          blit(octx, decodedOptical.rgba, decodedOptical.width, decodedOptical.height);
-          ctx.save();
-          ctx.globalAlpha = overlayAlpha;
-          ctx.imageSmoothingEnabled = false;
-          ctx.drawImage(off, 0, 0, width, height);
-          ctx.restore();
+      const n = width * height;
+      const out = new Uint8ClampedArray(n * 4);
+      for (let i = 0; i < n; i++) {
+        const o = i * 4;
+        out[o] = 14; out[o + 1] = 18; out[o + 2] = 22; out[o + 3] = 255; // --ink
+      }
+      const rasterizeLayer = (key: LayerKey): Uint8ClampedArray | null => {
+        if (key === "tic") return tic ? rasterizeTic(tic, grid, colormap, logScale) : null;
+        if (key === "ion") return ionImage ? rasterizeImage(ionImage, grid, { colormap, percentile: 0.99, logScale }) : null;
+        if (key === "rgb") return multi ? rasterizeMultiChannel(multi, grid, null, false) : null;
+        if (key === "optical") return decodedOptical ? opticalToGrid(decodedOptical, width, height) : null;
+        return null;
+      };
+      // layerOrder is top→bottom; paint bottom→top.
+      for (let li = layerOrder.length - 1; li >= 0; li--) {
+        const key = layerOrder[li]!;
+        const cfg = layerCfg[key];
+        if (!cfg.visible || cfg.opacity <= 0) continue;
+        const rgba = rasterizeLayer(key);
+        if (!rgba) continue;
+        const a = cfg.opacity;
+        for (let i = 0; i < n; i++) {
+          const o = i * 4;
+          const la = a * (rgba[o + 3]! / 255);
+          const inv = 1 - la;
+          out[o] = rgba[o]! * la + out[o]! * inv;
+          out[o + 1] = rgba[o + 1]! * la + out[o + 1]! * inv;
+          out[o + 2] = rgba[o + 2]! * la + out[o + 2]! * inv;
         }
       }
+      blit(ctx, out, width, height);
     }
   }, [
     mode,
@@ -279,7 +336,8 @@ function ImagingInner({
     ionImage,
     multi,
     decodedOptical,
-    overlayAlpha,
+    layerOrder,
+    layerCfg,
     grid,
     width,
     height,
@@ -397,7 +455,7 @@ function ImagingInner({
     (mode === "ion" && !!ionImage) ||
     (mode === "multi" && !!multi) ||
     (mode === "optical" && !!decodedOptical) ||
-    (mode === "overlay" && (!!ionImage || !!tic || !!decodedOptical));
+    (mode === "overlay" && (!!ionImage || !!multi || !!tic || !!decodedOptical));
 
   const showColormapControls = mode === "overview" || mode === "ion" || mode === "overlay";
 
@@ -457,13 +515,6 @@ function ImagingInner({
                 </option>
               ))}
             </select>
-          </Field>
-        )}
-
-        {mode === "overlay" && (
-          <Field label={`Optical opacity (${Math.round(overlayAlpha * 100)}%)`}>
-            <input type="range" min={0} max={1} step={0.05} value={overlayAlpha} aria-label="optical opacity"
-              onChange={(e) => setOverlayAlpha(Number(e.target.value))} style={{ width: 140 }} />
           </Field>
         )}
 
@@ -540,8 +591,21 @@ function ImagingInner({
           )}
         </div>
 
-        {/* Legend for single-channel modes */}
-        {showColormapControls && hasContent && (
+        {/* Overlay → layers panel; single-channel modes → colormap legend. */}
+        {mode === "overlay" ? (
+          <LayersPanel
+            order={layerOrder}
+            setOrder={setLayerOrder}
+            cfg={layerCfg}
+            setCfg={setLayerCfg}
+            avail={{ ion: !!ionImage, rgb: !!multi, tic: !!tic, optical: !!decodedOptical }}
+            colormap={colormap}
+            // optical is embedded but still decoding → show a "decoding" hint, not "none".
+            opticalPending={
+              hasOptical && !decodedOptical && !(selectedOpticalPath && opticalErr[selectedOpticalPath])
+            }
+          />
+        ) : showColormapControls && hasContent ? (
           <div style={{ fontSize: "0.75rem", color: "var(--text-muted, #94a3b8)", display: "flex", flexDirection: "column", alignItems: "center" }}>
             <div aria-hidden style={{ width: 18, height: 200, background: colormapGradientCss(colormap, "0deg"), borderRadius: 2, border: "1px solid var(--border, #334155)" }} />
             {mode === "ion" && ionStats && (
@@ -552,7 +616,7 @@ function ImagingInner({
               </div>
             )}
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* ── Hover / pick readout ─────────────────────────────────────────── */}
@@ -662,6 +726,128 @@ function EmptyState({ mode, hasOptical, opticalErr }: { mode: ImagingMode; hasOp
     <p data-testid="imaging-empty" style={{ color: "var(--text-muted, #94a3b8)", fontSize: "0.85rem", textAlign: "center", maxWidth: 360 }}>
       {msg}
     </p>
+  );
+}
+
+/** A small colour swatch identifying a layer's visual encoding. */
+function layerSwatch(key: LayerKey, colormap: Colormap): string {
+  if (key === "rgb") return `linear-gradient(90deg, ${CHANNEL_COLORS[0]}, ${CHANNEL_COLORS[1]}, ${CHANNEL_COLORS[2]})`;
+  if (key === "optical") return "linear-gradient(135deg, #6b757e, #dde2e7)";
+  return colormapGradientCss(colormap, "90deg"); // tic / ion → active colormap
+}
+
+/** Reorderable layer-stack widget for the Overlay view. Mirrors mzPeakIV's blend
+ *  controls but adds drag-free up/down reordering, per-layer visibility, and a
+ *  data-availability state. Layers are listed top→bottom (front of the stack
+ *  first), matching the painting order on the canvas. */
+function LayersPanel({
+  order,
+  setOrder,
+  cfg,
+  setCfg,
+  avail,
+  colormap,
+  opticalPending,
+}: {
+  order: LayerKey[];
+  setOrder: React.Dispatch<React.SetStateAction<LayerKey[]>>;
+  cfg: Record<LayerKey, { visible: boolean; opacity: number }>;
+  setCfg: React.Dispatch<React.SetStateAction<Record<LayerKey, { visible: boolean; opacity: number }>>>;
+  avail: Record<LayerKey, boolean>;
+  colormap: Colormap;
+  opticalPending: boolean;
+}) {
+  function move(i: number, dir: -1 | 1) {
+    setOrder((o) => {
+      const j = i + dir;
+      if (j < 0 || j >= o.length) return o;
+      const next = o.slice();
+      [next[i], next[j]] = [next[j]!, next[i]!];
+      return next;
+    });
+  }
+  const reorderBtn: React.CSSProperties = {
+    width: 18, height: 16, lineHeight: "14px", padding: 0, fontSize: "0.7rem",
+    border: "1px solid var(--border-strong, #c5ccd3)", borderRadius: 3,
+    background: "var(--surface, #fff)", color: "var(--text-body, #353c43)", cursor: "pointer",
+  };
+  return (
+    <div
+      data-testid="overlay-layers"
+      style={{
+        width: 248, flexShrink: 0, alignSelf: "stretch",
+        border: "1px solid var(--border-hairline, #dde2e7)", borderRadius: 8,
+        background: "var(--surface, #fff)", padding: "0.6rem", overflowY: "auto",
+      }}
+    >
+      <div style={{ fontSize: "0.62rem", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted, #6b757e)", marginBottom: "0.5rem" }}>
+        Layers
+      </div>
+      {order.map((key, i) => {
+        const c = cfg[key];
+        const has = avail[key];
+        return (
+          <div
+            key={key}
+            data-testid={`overlay-layer-${key}`}
+            style={{
+              display: "flex", flexDirection: "column", gap: "0.3rem",
+              padding: "0.4rem", marginBottom: "0.35rem",
+              border: "1px solid var(--border-soft, #e3e7eb)", borderRadius: 6,
+              background: has ? "var(--surface, #fff)" : "var(--surface-sunken, #f4f6f8)",
+              opacity: has ? 1 : 0.7,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+              {/* Reorder */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                <button type="button" aria-label={`Move ${LAYER_LABEL[key]} up`} title="Move up"
+                  data-testid={`overlay-layer-${key}-up`}
+                  disabled={i === 0} onClick={() => move(i, -1)}
+                  style={{ ...reorderBtn, opacity: i === 0 ? 0.35 : 1 }}>▲</button>
+                <button type="button" aria-label={`Move ${LAYER_LABEL[key]} down`} title="Move down"
+                  data-testid={`overlay-layer-${key}-down`}
+                  disabled={i === order.length - 1} onClick={() => move(i, 1)}
+                  style={{ ...reorderBtn, opacity: i === order.length - 1 ? 0.35 : 1 }}>▼</button>
+              </div>
+              {/* Visibility */}
+              <input
+                type="checkbox" checked={c.visible} disabled={!has}
+                aria-label={`${LAYER_LABEL[key]} visible`}
+                data-testid={`overlay-layer-${key}-visible`}
+                onChange={(e) => setCfg((s) => ({ ...s, [key]: { ...s[key], visible: e.target.checked } }))}
+                style={{ accentColor: "var(--accent, #3b54da)" }}
+              />
+              {/* Swatch */}
+              <span aria-hidden style={{ width: 22, height: 14, borderRadius: 3, background: layerSwatch(key, colormap), border: "1px solid var(--border-strong, #c5ccd3)", flexShrink: 0 }} />
+              {/* Label */}
+              <span style={{ fontSize: "0.8rem", fontWeight: 500, color: "var(--text-body, #353c43)", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {LAYER_LABEL[key]}
+              </span>
+            </div>
+            {has ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", paddingLeft: "1.4rem" }}>
+                <input
+                  type="range" min={0} max={100} step={1} value={Math.round(c.opacity * 100)}
+                  disabled={!c.visible}
+                  aria-label={`${LAYER_LABEL[key]} opacity`}
+                  data-testid={`overlay-layer-${key}-opacity`}
+                  onChange={(e) => setCfg((s) => ({ ...s, [key]: { ...s[key], opacity: Number(e.target.value) / 100 } }))}
+                  style={{ flex: 1, accentColor: "var(--accent, #3b54da)", opacity: c.visible ? 1 : 0.4 }}
+                />
+                <span style={{ fontFamily: "var(--font-mono, monospace)", fontSize: "0.68rem", color: "var(--text-muted, #6b757e)", minWidth: 30, textAlign: "right" }}>
+                  {Math.round(c.opacity * 100)}%
+                </span>
+              </div>
+            ) : (
+              <span style={{ paddingLeft: "1.4rem", fontSize: "0.68rem", color: "var(--text-faint, #9aa4ad)" }}>
+                {key === "optical" && opticalPending ? "decoding optical…" : LAYER_HINT[key]}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

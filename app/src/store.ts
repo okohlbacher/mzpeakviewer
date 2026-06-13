@@ -11,6 +11,7 @@ import type {
   OpticalImageMeta,
   ChromatogramSeries,
   BrowseIndex,
+  IonImageStats,
 } from "@mzpeak/contracts";
 import { showChromatograms } from "@mzpeak/contracts";
 import type { View } from "@mzpeak/contracts";
@@ -52,6 +53,12 @@ export interface AppState {
   fileName: string | null;
   fileSize: number | null;
 
+  // imaging layer products — lifted out of the Imaging view so they persist across
+  // tab switches and the Overlay view can composite them as stackable layers.
+  ionImage: Float32Array | null;
+  ionStats: IonImageStats | null;
+  multiChannel: (Float32Array | null)[] | null;
+
   // navigation
   view: View;
 
@@ -83,6 +90,11 @@ export interface AppState {
   openUrl: (url: string) => Promise<void>;
   setView: (view: View) => void;
   setMsLevelFilter: (level: number | null) => void;
+  /** Store the latest single-channel ion image (rendered in the Ion view) so the
+   *  Overlay view can composite it. Pass (null, null) to clear. */
+  setIonImage: (image: Float32Array | null, stats: IonImageStats | null) => void;
+  /** Store the latest RGB multi-channel images (rendered in the RGB view). */
+  setMultiChannel: (images: (Float32Array | null)[] | null) => void;
   /** Load a spectrum by index. `route` (default true) switches to the Spectra view
    *  on success; pass false to load the spectrum without leaving the current view
    *  (used by the imaging spectrum dock for in-place pixel-pick). */
@@ -125,6 +137,11 @@ export const useStore = create<AppState>((set, get) => ({
   opticalImages: [],
   fileName: null,
   fileSize: null,
+
+  // imaging layer products
+  ionImage: null,
+  ionStats: null,
+  multiChannel: null,
 
   // navigation
   view: "summary",
@@ -172,6 +189,9 @@ export const useStore = create<AppState>((set, get) => ({
       grid: null,
       ticColumn: null,
       opticalImages: [],
+      ionImage: null,
+      ionStats: null,
+      multiChannel: null,
       fileName: file.name,
       fileSize: null,
       view: "summary",
@@ -303,6 +323,9 @@ export const useStore = create<AppState>((set, get) => ({
       grid: null,
       ticColumn: null,
       opticalImages: [],
+      ionImage: null,
+      ionStats: null,
+      multiChannel: null,
       fileName: displayName,
       fileSize: null,
       view: "summary",
@@ -390,6 +413,14 @@ export const useStore = create<AppState>((set, get) => ({
 
   setMsLevelFilter: (level: number | null) => {
     set({ msLevelFilter: level });
+  },
+
+  setIonImage: (image: Float32Array | null, stats: IonImageStats | null) => {
+    set({ ionImage: image, ionStats: stats });
+  },
+
+  setMultiChannel: (images: (Float32Array | null)[] | null) => {
+    set({ multiChannel: images });
   },
 
   // -------------------------------------------------------------------------

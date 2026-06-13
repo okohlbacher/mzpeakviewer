@@ -15,6 +15,24 @@ function fmtBytes(n: number | null | undefined): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** The mzpeak manifest — always pinned to the top of the member list. */
+function isManifest(path: string): boolean {
+  return path.split("/").pop()?.toLowerCase() === "mzpeak_index.json";
+}
+
+/** Manifest first (it's the archive's table of contents), then the original order
+ *  preserved (stable). */
+function orderMembers(members: Member[]): Member[] {
+  return members
+    .map((m, i) => ({ m, i }))
+    .sort((a, b) => {
+      const ra = isManifest(a.m.path) ? 0 : 1;
+      const rb = isManifest(b.m.path) ? 0 : 1;
+      return ra - rb || a.i - b.i;
+    })
+    .map((x) => x.m);
+}
+
 export function Structure() {
   const phase = useStore((s) => s.phase);
   const [members, setMembers] = useState<Member[]>([]);
@@ -53,25 +71,38 @@ export function Structure() {
         <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.5rem" }}>Archive members</h2>
         {error && <p data-testid="structure-error" style={{ color: "var(--danger, #c00)" }}>{error}</p>}
         <ul data-testid="structure-members" style={{ listStyle: "none", margin: 0, padding: 0, fontFamily: "var(--font-mono, monospace)", fontSize: "var(--text-sm, 0.85rem)" }}>
-          {members.map((m) => (
-            <li key={m.path}>
-              <button
-                onClick={() => void pick(m)}
-                disabled={!m.isParquet}
-                title={m.kind ?? undefined}
-                style={{
-                  display: "flex", width: "100%", justifyContent: "space-between", gap: "0.75rem",
-                  padding: "0.25rem 0.4rem", border: "none", borderRadius: "var(--radius-sm, 4px)",
-                  background: selected === m.path ? "var(--surface-panel, #f1f5f9)" : "transparent",
-                  color: m.isParquet ? "var(--text-link, #2563eb)" : "var(--text-muted, #94a3b8)",
-                  cursor: m.isParquet ? "pointer" : "default", textAlign: "left",
-                }}
-              >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.path}</span>
-                <span style={{ color: "var(--text-muted, #94a3b8)", flexShrink: 0 }}>{fmtBytes(m.bytes)}</span>
-              </button>
-            </li>
-          ))}
+          {orderMembers(members).map((m) => {
+            const manifest = isManifest(m.path);
+            return (
+              <li key={m.path}>
+                <button
+                  onClick={() => void pick(m)}
+                  disabled={!m.isParquet}
+                  title={m.kind ?? undefined}
+                  data-testid={manifest ? "structure-manifest" : undefined}
+                  style={{
+                    display: "flex", width: "100%", justifyContent: "space-between", gap: "0.75rem", alignItems: "center",
+                    padding: "0.25rem 0.4rem", border: "none", borderRadius: "var(--radius-sm, 4px)",
+                    background: selected === m.path
+                      ? "var(--surface-panel, #f1f5f9)"
+                      : manifest ? "var(--accent-subtle, #f2f4fe)" : "transparent",
+                    color: m.isParquet ? "var(--text-link, #2563eb)" : "var(--text-body, #353c43)",
+                    cursor: m.isParquet ? "pointer" : "default", textAlign: "left",
+                  }}
+                >
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                    {manifest && (
+                      <span style={{ fontFamily: "var(--font-sans)", fontSize: "0.62rem", fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--accent, #3b54da)", background: "var(--gray-0, #fff)", border: "1px solid var(--accent, #3b54da)", borderRadius: 3, padding: "0 0.3rem", flexShrink: 0 }}>
+                        manifest
+                      </span>
+                    )}
+                    {m.path}
+                  </span>
+                  <span style={{ color: "var(--text-muted, #94a3b8)", flexShrink: 0 }}>{fmtBytes(m.bytes)}</span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </div>
 
