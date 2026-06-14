@@ -12,6 +12,7 @@ import type {
   ChromatogramSeries,
   BrowseIndex,
   IonImageStats,
+  ChannelAssignment,
 } from "@mzpeak/contracts";
 import { showChromatograms } from "@mzpeak/contracts";
 import type { View } from "@mzpeak/contracts";
@@ -58,6 +59,9 @@ export interface AppState {
   ionImage: Float32Array | null;
   ionStats: IonImageStats | null;
   multiChannel: (Float32Array | null)[] | null;
+
+  // SDRF/ISA isobaric channel assignments for the open run (empty for label-free).
+  channels: ChannelAssignment[];
 
   // navigation
   view: View;
@@ -149,6 +153,9 @@ export const useStore = create<AppState>((set, get) => ({
   ionStats: null,
   multiChannel: null,
 
+  // sdrf channels
+  channels: [],
+
   // navigation
   view: "summary",
 
@@ -199,6 +206,7 @@ export const useStore = create<AppState>((set, get) => ({
       ionImage: null,
       ionStats: null,
       multiChannel: null,
+      channels: [],
       fileName: file.name,
       fileSize: null,
       view: "summary",
@@ -281,6 +289,11 @@ export const useStore = create<AppState>((set, get) => ({
         }));
       });
 
+      // Resolve isobaric (TMT/iTRAQ) channels for the run (off the critical path).
+      void engine.studyMeta().then((s) => {
+        if (seq === currentOpenSeq) set({ channels: s.channels });
+      }).catch(() => {});
+
       // Pre-select spectrum 0 if file has spectra.
       // The stale guard is also enforced inside selectSpectrum via the engine's
       // SupersededError / CancelledError handling.
@@ -334,6 +347,7 @@ export const useStore = create<AppState>((set, get) => ({
       ionImage: null,
       ionStats: null,
       multiChannel: null,
+      channels: [],
       fileName: displayName,
       fileSize: null,
       view: "summary",
@@ -398,6 +412,11 @@ export const useStore = create<AppState>((set, get) => ({
         .catch(() => {
           // Non-fatal: scan breakdown failing doesn't break the core UI
         });
+
+      // Resolve isobaric (TMT/iTRAQ) channels for the run (off the critical path).
+      void engine.studyMeta().then((s) => {
+        if (seq === currentOpenSeq) set({ channels: s.channels });
+      }).catch(() => {});
 
       // Pre-select spectrum 0 if file has spectra.
       if (opened.stats && opened.stats.numSpectra > 0) {

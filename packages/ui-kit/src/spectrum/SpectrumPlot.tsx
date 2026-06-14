@@ -44,7 +44,19 @@ function toSeries(s: SpectrumArrays | null): uPlot.AlignedData {
   return [xs, ys];
 }
 
-export type ReporterMarker = { mz: number; label: string; matched: boolean };
+export type ReporterMarker = {
+  /** Expected reporter m/z (vertical guide). */
+  mz: number;
+  label: string;
+  matched: boolean;
+  /** Per-channel color (shared with the channel pills). */
+  color?: string;
+  /** Matched peak position (m/z, intensity) for the dot, when matched. */
+  peakMz?: number | null;
+  peakInt?: number | null;
+  /** Emphasized channel (clicked pill): bigger dot + ring + always-on label. */
+  active?: boolean;
+};
 
 export function SpectrumPlot({
   spectrum,
@@ -131,6 +143,15 @@ export function SpectrumPlot({
     u.setScale("x", { min: zoom[0], max: zoom[1] });
   }, [zoom, spectrum]);
 
+  // Redraw the reporter overlay when the highlighted channel changes (so selecting a
+  // different pill at the same zoom re-emphasizes the right peak).
+  const activeSig = (reporters ?? []).map((r) => (r.active ? `${r.mz}` : "")).join("|");
+  useEffect(() => {
+    // Redraw the overlay only (no path/axis recalc) so the highlight refreshes without
+    // re-ranging the x-scale and clobbering a channel-zoom set in the same commit.
+    plotRef.current?.redraw(false, false);
+  }, [activeSig]);
+
   return <div ref={hostRef} className="chart-host" />;
 }
 
@@ -183,19 +204,46 @@ function drawReporterMarkers(u: uPlot, reporters: ReporterMarker[] | undefined) 
   ctx.save();
   for (const r of reporters) {
     if (r.mz < xmin || r.mz > xmax) continue;
+    const color = r.color ?? (r.matched ? STAGE.marker : STAGE.axis);
     const x = u.valToPos(r.mz, "x", true);
+    // Guide at the expected reporter m/z — solid + bold for the highlighted channel.
     ctx.beginPath();
-    ctx.setLineDash([3, 3]);
-    ctx.globalAlpha = r.matched ? 0.55 : 0.3;
-    ctx.strokeStyle = r.matched ? STAGE.marker : STAGE.axis;
+    ctx.setLineDash(r.active ? [] : [3, 3]);
+    ctx.globalAlpha = r.active ? 0.85 : r.matched ? 0.5 : 0.25;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = r.active ? 1.5 : 1;
     ctx.moveTo(x, top);
     ctx.lineTo(x, bottom);
     ctx.stroke();
-    if (span <= 25) {
-      ctx.setLineDash([]);
+    ctx.setLineDash([]);
+    ctx.lineWidth = 1;
+    // Dot on the matched reporter peak (at its m/z + intensity); enlarged + ringed when active.
+    if (r.matched && r.peakMz != null && r.peakInt != null) {
+      const px = u.valToPos(r.peakMz, "x", true);
+      const py = u.valToPos(r.peakInt, "y", true);
       ctx.globalAlpha = 1;
-      ctx.font = "10px IBM Plex Mono, monospace";
-      ctx.fillStyle = r.matched ? STAGE.marker : STAGE.axis;
+      if (r.active) {
+        ctx.beginPath();
+        ctx.arc(px, py, 8, 0, Math.PI * 2);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(px, py, r.active ? 5 : 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = STAGE.pointFill ?? "#fff";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    // Channel label: when zoomed into the reporter region (≤25 Da), or always for the
+    // highlighted channel.
+    if (span <= 25 || r.active) {
+      ctx.globalAlpha = 1;
+      ctx.font = `${r.active ? "bold " : ""}10px IBM Plex Mono, monospace`;
+      ctx.fillStyle = color;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       ctx.fillText(r.label, x, top + 2);

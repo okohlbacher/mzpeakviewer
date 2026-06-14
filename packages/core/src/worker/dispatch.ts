@@ -19,6 +19,7 @@ import { engineRenderIonImage, engineMeanSpectrum, engineRoiSpectrum } from "../
 import { engineRenderMultiChannel } from "../engine/multichannel";
 import { engineGetOpticalImage } from "../engine/optical";
 import { engineArchiveList, engineArchiveMemberBytes, engineParquetFooter, engineSampleColumn, clearStructureCache } from "../engine/structure";
+import { engineStudyMeta } from "../engine/studyMeta";
 import { UnsupportedEncodingError, CorruptFileError } from "../reader/errors";
 import { buffersOf, type Respond } from "./respond";
 
@@ -194,6 +195,12 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
       case "sampleColumn": {
         const sample = await engineSampleColumn(requireActive(ctx).reader, req.archivePath, req.column, req.n);
         respond({ type: "sampleColumnResult", requestId: req.requestId, sample });
+        return;
+      }
+
+      case "studyMeta": {
+        const study = await engineStudyMeta(requireActive(ctx).reader);
+        respond({ type: "studyMetaResult", requestId: req.requestId, study });
         return;
       }
 

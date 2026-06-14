@@ -73,12 +73,19 @@ describe("worker dispatch — real imaging fixture", () => {
   });
 
   it("an unimplemented message errors with class 'unsupported'", async () => {
-    // studyMeta/deepColumn aren't wired yet → fail loud, not silent.
-    const res = await run(ctx, { type: "studyMeta", requestId: 9 });
+    // deepColumn (paged column values) isn't wired yet → fail loud, not silent.
+    const res = await run(ctx, { type: "deepColumn", archivePath: "spectra_data.parquet", column: "mz", offset: 0, limit: 10, requestId: 9 });
     expect(res.type).toBe("error");
     if (res.type !== "error") return;
     expect(res.class).toBe("unsupported");
     expect(res.requestId).toBe(9);
+  });
+
+  it("studyMeta is wired (returns channels, possibly empty)", async () => {
+    const res = await run(ctx, { type: "studyMeta", requestId: 21 });
+    expect(res.type).toBe("studyMetaResult");
+    if (res.type !== "studyMetaResult") return;
+    expect(Array.isArray(res.study.channels)).toBe(true);
   });
 
   it("archiveMemberBytes returns the raw bytes of mzpeak_index.json", async () => {

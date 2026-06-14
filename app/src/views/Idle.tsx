@@ -69,6 +69,8 @@ export function Idle() {
   // Per-card download state: which demo is downloading + its progress (null = unknown).
   const [dl, setDl] = useState<{ id: string; pct: number | null } | null>(null);
   const [dlErr, setDlErr] = useState<string | null>(null);
+  // Abort handle for the in-flight download (so the progress bar's ✕ can cancel it).
+  const dlAbort = useRef<AbortController | null>(null);
 
   const loading = phase === "loading";
 
@@ -86,8 +88,10 @@ export function Idle() {
   async function downloadAndOpen(d: Demo) {
     setDlErr(null);
     setDl({ id: d.id, pct: null });
+    const ctrl = new AbortController();
+    dlAbort.current = ctrl;
     try {
-      const resp = await fetch(d.url);
+      const resp = await fetch(d.url, { signal: ctrl.signal });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const total = Number(resp.headers.get("content-length")) || 0;
       const reader = resp.body?.getReader();
@@ -116,8 +120,14 @@ export function Idle() {
       // Open the downloaded file locally (flips phase → loading, replacing this screen).
       await openFile(new File([blob], d.download, { type: "application/octet-stream" }));
     } catch (err) {
-      setDlErr(`Download failed for ${d.label}: ${err instanceof Error ? err.message : String(err)}`);
+      const aborted = ctrl.signal.aborted || (err instanceof Error && err.name === "AbortError");
+      if (aborted) {
+        setDlErr(`Download cancelled — ${d.label}.`);
+      } else {
+        setDlErr(`Download failed for ${d.label}: ${err instanceof Error ? err.message : String(err)}`);
+      }
     } finally {
+      dlAbort.current = null;
       setDl(null);
     }
   }
@@ -205,7 +215,7 @@ export function Idle() {
 
                   {/* Two open modes — pinned to the bottom so they align across tiles */}
                   {dl?.id === d.id ? (
-                    <div style={{ marginTop: "auto", paddingTop: "0.5rem" }}><DownloadProgress pct={dl.pct} /></div>
+                    <div style={{ marginTop: "auto", paddingTop: "0.5rem" }}><DownloadProgress pct={dl.pct} onAbort={() => dlAbort.current?.abort()} /></div>
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", marginTop: "auto", paddingTop: "0.5rem" }}>
                       <button
@@ -281,11 +291,23 @@ const secondaryBtn: React.CSSProperties = {
   fontSize: "var(--text-sm, 0.8rem)", fontWeight: 500, whiteSpace: "nowrap",
 };
 
-function DownloadProgress({ pct }: { pct: number | null }) {
+function DownloadProgress({ pct, onAbort }: { pct: number | null; onAbort: () => void }) {
   return (
     <div data-testid="demo-download-progress" style={{ marginTop: "0.15rem" }}>
-      <div style={{ height: 6, borderRadius: 3, background: "var(--surface-panel, #f1f5f9)", overflow: "hidden" }}>
-        <div style={{ height: "100%", width: pct != null ? `${Math.round(pct * 100)}%` : "40%", background: "var(--blue-600, #3b54da)", transition: "width 0.15s", opacity: pct != null ? 1 : 0.6 }} />
+      <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+        <div style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--surface-panel, #f1f5f9)", overflow: "hidden" }}>
+          <div style={{ height: "100%", width: pct != null ? `${Math.round(pct * 100)}%` : "40%", background: "var(--blue-600, #3b54da)", transition: "width 0.15s", opacity: pct != null ? 1 : 0.6 }} />
+        </div>
+        <button
+          type="button"
+          data-testid="demo-download-abort"
+          onClick={onAbort}
+          aria-label="Stop download"
+          title="Stop download"
+          style={{ flexShrink: 0, width: 18, height: 18, lineHeight: "16px", padding: 0, fontSize: "0.7rem", border: "1px solid var(--border-strong, #c5ccd3)", borderRadius: 4, background: "var(--surface, #fff)", color: "var(--text-muted, #6b757e)", cursor: "pointer" }}
+        >
+          ✕
+        </button>
       </div>
       <span style={{ fontSize: "var(--text-xs, 0.7rem)", color: "var(--text-muted, #94a3b8)" }}>
         {pct != null ? `Downloading… ${Math.round(pct * 100)}%` : "Downloading…"}
