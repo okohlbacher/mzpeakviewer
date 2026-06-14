@@ -28,9 +28,12 @@ const S3_BASE = (process.env.S3_BASE || "https://data.mzpeak.org/v09").replace(/
 const OUT = process.env.BENCH_OUT || join(os.homedir(), "Claude/mzPeakViewer/design-reviews/mzpeakviewer-2026-06-12/bench");
 const REPS = Number(process.env.BENCH_REPS) || 3;
 const MIN_MB = Number(process.env.BENCH_MIN_MB) || 10;
+const MAX_MB = Number(process.env.BENCH_MAX_MB) || 0; // 0 = no upper cap
 const MAX_FILES = Number(process.env.BENCH_MAX_FILES) || 0; // 0 = all
 const TIMEOUT = Number(process.env.PER_OPEN_TIMEOUT_MS) || 120_000;
 const RECYCLE = Number(process.env.BROWSER_RECYCLE) || 40;
+// Which sources to measure (default both; set "s3" for a cloud-only speedtest).
+const SOURCES = (process.env.BENCH_SOURCES || "local,s3").split(",").map((s) => s.trim()).filter(Boolean);
 
 const log = (...a) => console.log(...a);
 
@@ -92,7 +95,8 @@ async function main() {
   const withSizes = [];
   for (const p of all) {
     const size = (await stat(p)).size;
-    if (size >= MIN_MB * 1e6) withSizes.push({ p, size, rel: p.slice(CORPUS.length + 1) });
+    if (size >= MIN_MB * 1e6 && (MAX_MB === 0 || size <= MAX_MB * 1e6))
+      withSizes.push({ p, size, rel: p.slice(CORPUS.length + 1) });
   }
   withSizes.sort((a, b) => a.size - b.size);
   const files = MAX_FILES > 0 ? withSizes.slice(0, MAX_FILES) : withSizes;
@@ -114,7 +118,7 @@ async function main() {
     const s3url = s3UrlFor(rel);
     const s3Available = await headOk(s3url);
 
-    for (const source of ["local", "s3"]) {
+    for (const source of SOURCES) {
       const reps = [];
       if (source === "s3" && !s3Available) {
         const rec = { rel, sizeMB, source, rep: 0, ok: false, error: "not on S3" };

@@ -17,3 +17,6 @@ public/static/*.mzpeak
 **/public/HR2MSI.mzpeak
 **/public/HR2MSI-optical.mzpeak
 design-reviews/
+
+# generated probe URL list
+bench/cdn-probe-list.tsv
