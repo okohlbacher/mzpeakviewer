@@ -125,11 +125,15 @@ export function Idle() {
   return (
     <div data-testid="idle-view" style={{ width: "100%", overflowY: "auto", display: "flex", justifyContent: "center" }}>
       <div style={{ maxWidth: 720, width: "100%", padding: "6vh 1.5rem 3rem", textAlign: "center" }}>
-        <img
-          src={`${BASE}mzpeak-logo.png`}
-          alt="mzPeak"
-          style={{ height: 54, width: "auto", margin: "0 auto 1.1rem", display: "block" }}
-        />
+        {/* OpenMS + mzPeak logos, matched height, each linking to its site. */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "1.25rem", margin: "0 auto 1.1rem" }}>
+          <a href="https://openms.org" target="_blank" rel="noopener noreferrer" aria-label="OpenMS — openms.org" data-testid="logo-openms" style={{ display: "inline-flex" }}>
+            <img src={`${BASE}openms-logo.png`} alt="OpenMS" style={{ height: 54, width: "auto", display: "block" }} />
+          </a>
+          <a href="https://mzpeak.org" target="_blank" rel="noopener noreferrer" aria-label="mzPeak — mzpeak.org" data-testid="logo-mzpeak" style={{ display: "inline-flex" }}>
+            <img src={`${BASE}mzpeak-logo.png`} alt="mzPeak" style={{ height: 54, width: "auto", display: "block" }} />
+          </a>
+        </div>
         <h1 style={{ margin: "0 0 0.4rem", fontSize: "1.25rem", color: "var(--text-heading, #1e293b)", fontWeight: "var(--weight-semibold, 600)" }}>
           Explore a mass-spectrometry file
         </h1>
@@ -199,11 +203,11 @@ export function Idle() {
                     ))}
                   </span>
 
-                  {/* Two open modes */}
+                  {/* Two open modes — pinned to the bottom so they align across tiles */}
                   {dl?.id === d.id ? (
-                    <DownloadProgress pct={dl.pct} />
+                    <div style={{ marginTop: "auto", paddingTop: "0.5rem" }}><DownloadProgress pct={dl.pct} /></div>
                   ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", marginTop: "0.15rem" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", marginTop: "auto", paddingTop: "0.5rem" }}>
                       <button
                         type="button"
                         data-testid={`demo-${d.id}-cloud`}

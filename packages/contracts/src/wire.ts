@@ -131,6 +131,19 @@ export type ParquetColumn = {
   /** Stringified footer min/max, when present. */
   min?: string | null;
   max?: string | null;
+  // ── Deep footer stats (Explorer parity), aggregated across row groups ──────
+  /** Page encodings used (e.g. ["PLAIN","RLE_DICTIONARY"]). */
+  encodings?: string[] | null;
+  /** Dictionary-encoded (has a dictionary page)? */
+  dictionary?: boolean | null;
+  /** Data-page count across row groups (from encoding_stats). */
+  dataPages?: number | null;
+  /** Dictionary-page count across row groups. */
+  dictionaryPages?: number | null;
+  /** Distinct count, when the footer carries it. */
+  distinctCount?: number | null;
+  /** Number of row groups that contain this column. */
+  rowGroups?: number | null;
 };
 
 /** Parquet footer summary for the Structure tab (Phase-3 map: enriched per-column). */
@@ -162,6 +175,23 @@ export type ColumnPage = {
   hasMore: boolean;
 };
 
+/** Computed numeric statistics over a column's sampled values. */
+export type ColumnStats = {
+  /** Numeric values seen in the sample (finite, non-null). */
+  count: number;
+  /** Nulls/non-numeric skipped in the sampled rows. */
+  nulls: number;
+  /** Rows actually read for the sample (≤ requested n, ≤ total rows). */
+  sampled: number;
+  min: number;
+  max: number;
+  mean: number;
+  median: number;
+  stddev: number;
+  p25: number;
+  p75: number;
+};
+
 /** A small bounded sample of a column (for Structure previews + numeric histogram). */
 export type ColumnSample = {
   archivePath: string;
@@ -170,6 +200,10 @@ export type ColumnSample = {
   totalRows: number;
   /** Optional numeric histogram bins (Explorer's sampleColumn output). */
   histogram?: number[] | null;
+  /** Min/max of the histogram domain (so the UI can label bin edges). */
+  histRange?: [number, number] | null;
+  /** Computed numeric stats over the sampled values (null for non-numeric columns). */
+  stats?: ColumnStats | null;
 };
 
 /** Archive member list for the Structure tab (richer than Manifest). */
@@ -185,11 +219,29 @@ export type ArchiveMemberList = {
   }[];
 };
 
-/** SDRF/ISA study metadata (Explorer Summary ▸ Study). Opaque to the wire. */
+/** One isobaric (TMT/iTRAQ) channel assignment from the run's sample metadata. */
+export type ChannelAssignment = {
+  /** Sample-label value (MS:1002602), e.g. "TMT126". */
+  channelLabel: string | null;
+  /** Reporter-ion m/z (from the file, else resolved from the reagent table). */
+  reporterMz: number | null;
+  /** Channel role (sample | reference | pooled | carrier | …), when present. */
+  role: string | null;
+  /** sample_list id, when present. */
+  sampleId: string | null;
+  /** Source/sample name, when present. */
+  sampleName: string | null;
+  /** True when bound to the open run via run_sample_binding (else study-wide). */
+  boundToThisRun: boolean;
+};
+
+/** SDRF/ISA study metadata (Explorer Summary ▸ Study) + resolved isobaric channels. */
 export type StudyMeta = {
   sdrf?: unknown;
   isa?: unknown;
   present: boolean;
+  /** Resolved isobaric channels for this run (empty for label-free files). */
+  channels: ChannelAssignment[];
 };
 
 /** Error classes the reader can raise (carried across the boundary). */

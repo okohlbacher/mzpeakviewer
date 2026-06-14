@@ -79,6 +79,7 @@ type Statistics = {
   min_value?: unknown;
   max_value?: unknown;
   null_count?: bigint;
+  distinct_count?: bigint;
 };
 type ColumnMetaData = {
   type: string; // physical type as a string, e.g. "INT64", "DOUBLE", "BYTE_ARRAY"
@@ -88,6 +89,9 @@ type ColumnMetaData = {
   total_uncompressed_size: bigint;
   total_compressed_size: bigint;
   statistics?: Statistics;
+  encodings?: unknown[];
+  dictionary_page_offset?: bigint | number | null;
+  encoding_stats?: { page_type?: unknown; count?: number }[];
 };
 type SchemaElement = {
   name: string;
@@ -273,10 +277,16 @@ export async function engineParquetFooter(
     codec: string;
     numValues: number;
     nullCount: number | null;
+    distinctCount: number | null;
     compressedBytes: number;
     uncompressedBytes: number;
     min: unknown;
     max: unknown;
+    encodings: Set<string>;
+    dictionary: boolean;
+    dataPages: number;
+    dictionaryPages: number;
+    rowGroups: number;
   };
   const byCol = new Map<string, Agg>();
   for (const group of meta.row_groups ?? []) {
@@ -292,19 +302,33 @@ export async function engineParquetFooter(
           codec: String(md.codec),
           numValues: 0,
           nullCount: null,
+          distinctCount: null,
           compressedBytes: 0,
           uncompressedBytes: 0,
           min: undefined,
           max: undefined,
+          encodings: new Set<string>(),
+          dictionary: false,
+          dataPages: 0,
+          dictionaryPages: 0,
+          rowGroups: 0,
         };
         byCol.set(name, a);
       }
+      a.rowGroups += 1;
       a.numValues += num(md.num_values);
       a.compressedBytes += num(md.total_compressed_size);
       a.uncompressedBytes += num(md.total_uncompressed_size);
+      for (const e of md.encodings ?? []) a.encodings.add(String(e));
+      if (md.dictionary_page_offset != null) a.dictionary = true;
+      for (const es of md.encoding_stats ?? []) {
+        if (/DICT/i.test(String(es.page_type))) a.dictionaryPages += Number(es.count ?? 0);
+        else a.dataPages += Number(es.count ?? 0);
+      }
       const s = md.statistics;
       if (s) {
         if (s.null_count != null) a.nullCount = (a.nullCount ?? 0) + Number(s.null_count);
+        if (s.distinct_count != null) a.distinctCount = Number(s.distinct_count);
         const lo = s.min_value ?? s.min;
         const hi = s.max_value ?? s.max;
         if (lo != null && (a.min === undefined || lt(lo, a.min))) a.min = lo;
@@ -326,6 +350,12 @@ export async function engineParquetFooter(
       uncompressedBytes: a.uncompressedBytes,
       min: a.min,
       max: a.max,
+      encodings: [...a.encodings],
+      dictionary: a.dictionary,
+      dataPages: a.dataPages,
+      dictionaryPages: a.dictionaryPages,
+      distinctCount: a.distinctCount,
+      rowGroups: a.rowGroups,
     };
   });
 
@@ -361,6 +391,8 @@ export async function engineSampleColumn(
     preview: [],
     totalRows: 0,
     histogram: null,
+    histRange: null,
+    stats: null,
   };
   const meta = await footerFor(reader, archivePath);
   const store = readerStore(reader);
@@ -384,15 +416,59 @@ export async function engineSampleColumn(
       compressors,
     })) as Record<string, unknown>[];
 
+    // Walk to the leaf cell, build a small preview + a numeric vector for stats.
+    const PREVIEW_MAX = 50;
     const preview: string[] = [];
+    const nums: number[] = [];
+    let nonNumeric = 0;
     for (const row of rows) {
       let v: unknown = row;
-      for (const seg of segments) {
-        v = (v as Record<string, unknown> | null | undefined)?.[seg];
-      }
-      preview.push(stringifyCell(v));
+      for (const seg of segments) v = (v as Record<string, unknown> | null | undefined)?.[seg];
+      if (preview.length < PREVIEW_MAX) preview.push(stringifyCell(v));
+      if (typeof v === "number" && Number.isFinite(v)) nums.push(v);
+      else if (typeof v === "bigint") nums.push(Number(v));
+      else nonNumeric++;
     }
-    return { archivePath, column, preview, totalRows, histogram: null };
+
+    // Compute numeric stats + a 24-bin histogram over the sampled values.
+    let histogram: number[] | null = null;
+    let histRange: [number, number] | null = null;
+    let stats: ColumnSample["stats"] = null;
+    if (nums.length > 0) {
+      const sorted = nums.slice().sort((x, y) => x - y);
+      const min = sorted[0]!;
+      const max = sorted[sorted.length - 1]!;
+      const q = (p: number) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))))]!;
+      const mean = nums.reduce((s, x) => s + x, 0) / nums.length;
+      const variance = nums.reduce((s, x) => s + (x - mean) * (x - mean), 0) / nums.length;
+      stats = {
+        count: nums.length,
+        nulls: nonNumeric,
+        sampled: rows.length,
+        min,
+        max,
+        mean,
+        median: q(0.5),
+        stddev: Math.sqrt(variance),
+        p25: q(0.25),
+        p75: q(0.75),
+      };
+      const BINS = 24;
+      histogram = new Array<number>(BINS).fill(0);
+      histRange = [min, max];
+      const span = max - min;
+      if (span > 0) {
+        for (const x of nums) {
+          let b = Math.floor(((x - min) / span) * BINS);
+          if (b >= BINS) b = BINS - 1;
+          if (b < 0) b = 0;
+          histogram[b]!++;
+        }
+      } else {
+        histogram[0] = nums.length; // all identical
+      }
+    }
+    return { archivePath, column, preview, totalRows, histogram, histRange, stats };
   } catch {
     return { ...empty, totalRows };
   }

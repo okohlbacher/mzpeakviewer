@@ -44,6 +44,13 @@ export type FooterColumnInput = {
   /** Raw min/max statistic (number | bigint | string | Uint8Array | null). Stringified here. */
   min?: unknown;
   max?: unknown;
+  /** Deep footer stats (Explorer parity) — passed through to the wire column. */
+  encodings?: string[] | null;
+  dictionary?: boolean | null;
+  dataPages?: number | null;
+  dictionaryPages?: number | null;
+  distinctCount?: number | null;
+  rowGroups?: number | null;
 };
 
 /** The plain decoded footer the handler hands to the adapter. */
@@ -89,6 +96,12 @@ function adaptColumn(col: FooterColumnInput): ParquetColumn {
     uncompressedBytes: col.uncompressedBytes ?? null,
     min: showStat(col.min),
     max: showStat(col.max),
+    encodings: col.encodings ?? null,
+    dictionary: col.dictionary ?? null,
+    dataPages: col.dataPages ?? null,
+    dictionaryPages: col.dictionaryPages ?? null,
+    distinctCount: col.distinctCount ?? null,
+    rowGroups: col.rowGroups ?? null,
   };
 }
 
