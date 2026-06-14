@@ -9,8 +9,8 @@ import { useStore } from "../store";
 const BASE = import.meta.env.BASE_URL;
 
 // Curated demo datasets, served from the data.mzpeak.org / StackIT CDN. Stat chips are
-// real facts. NOTE: the Bruker micrOTOF is pending publication to the CDN — its card
-// works once the object is uploaded (the other two are live now).
+// real facts. All three objects are published on the CDN (verified) and load in both
+// modes (cloud range-read + download-and-open-local).
 type Demo = {
   id: string;
   label: string;
