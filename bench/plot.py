@@ -155,9 +155,10 @@ def main():
             gx = np.linspace(min(lx), max(lx), 50)
             ax2.plot(10 ** gx, 10 ** (a + b * gx), color=COLORS[s], lw=1.5, alpha=0.9,
                      zorder=2, label=f"  {s} trend ∝ size^{b:.2f}")
-    ax2.set_xscale("log"); ax2.set_yscale("log")
+    ax2.set_xscale("log")  # file size spans 10 MB → 1 GB
+    ax2.set_ylim(bottom=0)  # linear time axis (per request)
     ax2.set_xlabel("File size (MB, log scale)")
-    ax2.set_ylabel("Open → first spectrum (ms, log scale)")
+    ax2.set_ylabel("Open → first spectrum (ms, linear scale)")
     ax2.set_title(f"mzPeakViewer opening time vs file size — {len(perfile)} files ≥ 10 MB")
     ax2.grid(which="both", alpha=0.25); ax2.set_axisbelow(True)
     ax2.legend(loc="upper left", fontsize=8, framealpha=0.9)
