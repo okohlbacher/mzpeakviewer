@@ -8,10 +8,14 @@
 // fast-path load (reads only mzpeak_index.json). That import is the ONLY other
 // mzpeakts import allowed — kept in the Worker module to stay within the
 // reader/ encapsulation boundary.
-import { MzPeakReader, ZipStorage } from "mzpeakts";
+import { MzPeakReader, ZipStorage, data as mzdata } from "mzpeakts";
 import { HttpReader } from "@zip.js/zip.js";
 import { detectUnsupported } from "./capability";
 import { UnsupportedEncodingError } from "./errors";
+
+// mzpeakts names the reconstructed point columns by their human-readable CV name.
+const MZ_ARRAY_KEY = "m/z array";
+const INTENSITY_ARRAY_KEY = "intensity array";
 
 /**
  * Opaque reader handle. The concrete type is mzpeakts' `MzPeakReader`, but
@@ -93,4 +97,46 @@ export async function openBlob(blob: Blob): Promise<Reader> {
   // boundary: mzpeakts/parquet-wasm — opening untrusted local file bytes.
   const reader = await MzPeakReader.fromBlob(blob);
   return capabilityGate(reader);
+}
+
+/** One spectrum's plain point arrays, harvested from the bulk spectra_data stream. */
+export type StreamedSpectrumArrays = {
+  index: number;
+  mz: Float64Array;
+  intensity: Float32Array;
+};
+
+/**
+ * Stream EVERY spectrum's (mz, intensity) data arrays in ONE sequential pass over the
+ * spectra_data parquet row groups (mzpeakts `DataArraysReader.enumerate`), reading each
+ * row group exactly once.
+ *
+ * This is the IV ion-index discipline and the fix for the O(pixels)×row-group blow-up of
+ * the per-pixel path: `reader.getSpectrum(i)` → `DataArraysReader.get(i)` re-reads+decodes
+ * a WHOLE row group on every call, so summing an ion image pixel-by-pixel re-reads the same
+ * row groups thousands of times (measured ≈ 700 ms/pixel over the CDN ⇒ a 34,840-pixel image
+ * never finishes). Enumerating instead touches each row group once.
+ *
+ * Spectra whose data-array source has no rows (e.g. centroid-only spectra) are simply not
+ * yielded — the caller falls back to a per-spectrum read for those few. Kept in this module
+ * so the `mzpeakts` import stays confined here (reader-boundary acceptance criterion R-03c).
+ */
+export async function* streamSpectraDataArrays(
+  reader: Reader,
+): AsyncGenerator<StreamedSpectrumArrays> {
+  const dataReader = await reader.spectrumData();
+  if (!dataReader) return;
+  for await (const [idx, table] of dataReader.enumerate()) {
+    // Non-tabular layout (ColumnMap) → skip; the per-spectrum fallback covers it. Duck-typed
+    // so we don't depend on an `instanceof Arrow.Table` across module-instance boundaries.
+    const t = table as { schema?: unknown; getChildAt?: unknown };
+    if (!t || !t.schema || typeof t.getChildAt !== "function") continue;
+    const packed = mzdata.packTableIntoDataArrays(table as Parameters<typeof mzdata.packTableIntoDataArrays>[0]);
+    // The m/z and intensity point columns are numeric at runtime; `packTableIntoDataArrays`
+    // types its values as a broad union (incl. string[]/BigInt64Array), so narrow here.
+    const mzRaw = packed[MZ_ARRAY_KEY] as unknown as ArrayLike<number> | undefined;
+    const inRaw = packed[INTENSITY_ARRAY_KEY] as unknown as ArrayLike<number> | undefined;
+    if (!mzRaw || !inRaw) continue;
+    yield { index: Number(idx), mz: Float64Array.from(mzRaw), intensity: Float32Array.from(inRaw) };
+  }
 }

@@ -22,7 +22,7 @@ import { rebuildCoordMap } from "../adapt/grid";
 import { computeIonImageStats } from "../adapt/ionImage";
 import { adaptSpectrum } from "../adapt/spectrum";
 import { harvestDataArraysOrNull } from "../reader/arrays";
-import type { Reader } from "../reader/openUrl";
+import { streamSpectraDataArrays, type Reader } from "../reader/openUrl";
 
 /**
  * Read one spectrum's plain (mz, intensity) arrays from the DATA-ARRAY source
@@ -74,22 +74,47 @@ export async function engineRenderIonImage(
 
   // coordKey → spectrumIndex for every filled cell (inverse of flattenGrid).
   const coordToSpectrum = rebuildCoordMap(gridWire);
-
+  // Inverse: spectrumIndex → coordKey, so the bulk stream (keyed by spectrum index)
+  // can write each pixel directly. Filled cells are 1:1 with spectra.
+  const spectrumToCoord = new Map<number, number>();
   for (const [coordKey, spectrumIndex] of coordToSpectrum) {
-    if (coordKey < 0 || coordKey >= ionImage.length) continue; // off-grid guard
-    const arrs = await readSpectrumArrays(reader, spectrumIndex);
-    if (!arrs) continue; // absent / undecodable spectrum contributes nothing
-    const { mz: mzArr, intensity: inArr } = arrs;
+    if (coordKey >= 0 && coordKey < ionImage.length) spectrumToCoord.set(spectrumIndex, coordKey);
+  }
+
+  // Window-sum over one spectrum's (mz, intensity) — INCLUSIVE [mzStart, mzEnd] (IV
+  // `ionImageFromCache`), NaN/Infinity → 0 (IV buildIonImage T-04-02). Unchanged math.
+  const windowSum = (mzArr: ArrayLike<number>, inArr: ArrayLike<number>): number => {
     const n = Math.min(mzArr.length, inArr.length);
     let sum = 0;
     for (let i = 0; i < n; i++) {
       const m = mzArr[i]!;
-      if (m < mzStart || m > mzEnd) continue; // inclusive [mzStart, mzEnd] (IV)
+      if (m < mzStart || m > mzEnd) continue;
       const v = inArr[i]!;
-      // Strict finite guard (mirrors IV buildIonImage T-04-02): NaN/Infinity → 0.
       if (Number.isFinite(v)) sum += v;
     }
-    ionImage[coordKey] = sum;
+    return sum;
+  };
+
+  // FAST PATH: ONE sequential pass over spectra_data row groups (each read once), instead
+  // of a random-access getSpectrum per pixel (which re-reads a whole row group every call —
+  // ≈700 ms/pixel over the CDN ⇒ a 34,840-pixel image never finishes). Same data-array
+  // source IV/`harvestDataArraysOrNull` prefers, so the summed values are identical.
+  const filled = new Set<number>();
+  for await (const { index, mz: mzArr, intensity: inArr } of streamSpectraDataArrays(reader)) {
+    const coordKey = spectrumToCoord.get(index);
+    if (coordKey === undefined) continue; // spectrum not mapped to a grid cell
+    ionImage[coordKey] = windowSum(mzArr, inArr);
+    filled.add(coordKey);
+  }
+
+  // FALLBACK: any filled cell the data-array stream did NOT cover (a centroid-only spectrum
+  // with no data arrays) is read individually — preserving the data-first→centroid source
+  // selection of the per-pixel path. Rare; for a data-array imaging file this loop is empty.
+  for (const [coordKey, spectrumIndex] of coordToSpectrum) {
+    if (coordKey < 0 || coordKey >= ionImage.length || filled.has(coordKey)) continue;
+    const arrs = await readSpectrumArrays(reader, spectrumIndex);
+    if (!arrs) continue; // absent / undecodable spectrum contributes nothing
+    ionImage[coordKey] = windowSum(arrs.mz, arrs.intensity);
   }
 
   const stats = computeIonImageStats(ionImage, gridWire.presenceMask);
