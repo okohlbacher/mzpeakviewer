@@ -72,11 +72,11 @@ def main():
     cdn_infra_est = [v * ratio for v in cdn_client] if ratio else []
 
     series = [
-        ("local filesystem", local, "#2e9e5b", False),
-        ("remote S3", cdn_client, "#3b54da", False),
+        ("Local filesystem", local, "#2e9e5b", False),
+        ("Remote S3", cdn_client, "#3b54da", False),
     ]
     if cdn_infra_est:
-        series.append(("local S3", cdn_infra_est, "#c00000", True))
+        series.append(("Local S3", cdn_infra_est, "#c00000", True))
 
     # ---- summary ----
     lines = ["# Overall opening times — incl. StackIT vantages", "",
@@ -104,8 +104,8 @@ def main():
     with open(os.path.join(BENCH, "OVERALL-OPENING.md"), "w") as fh:
         fh.write("\n".join([l for l in lines if l is not None]))
 
-    # ---- plot ----
-    plotted = [s for s in series if s[1]]
+    # ---- plot ---- (rows sorted by increasing mean time, bottom → top)
+    plotted = sorted((s for s in series if s[1]), key=lambda s: np.mean(s[1]))
     fig, ax = plt.subplots(figsize=(10, 2.0 + 0.7 * len(plotted)))
     pos = list(range(1, len(plotted) + 1))
     bp = ax.boxplot([s[1] for s in plotted], positions=pos, vert=False, widths=0.5,
@@ -126,7 +126,7 @@ def main():
     ax.set_yticks(pos); ax.set_yticklabels([s[0] for s in plotted])
     ax.set_xlim(left=0)
     ax.set_xlabel("Open → first spectrum on screen (ms, linear) — hatched = estimated")
-    ax.set_title("mzPeakViewer opening times — local filesystem vs remote S3 vs local S3")
+    ax.set_title("mzPeakViewer opening times — Local filesystem vs Local S3 vs Remote S3")
     ax.grid(axis="x", alpha=0.25); ax.set_axisbelow(True)
     fig.tight_layout()
     fig.savefig(os.path.join(BENCH, "opening-overall-boxplot.png"), dpi=150)
