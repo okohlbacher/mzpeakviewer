@@ -72,11 +72,11 @@ def main():
     cdn_infra_est = [v * ratio for v in cdn_client] if ratio else []
 
     series = [
-        ("Local (file picker)", local, "#2e9e5b", False),
-        ("CDN — client (Mac→StackIT)", cdn_client, "#3b54da", False),
+        ("local filesystem", local, "#2e9e5b", False),
+        ("remote S3", cdn_client, "#3b54da", False),
     ]
     if cdn_infra_est:
-        series.append((f"CDN — StackIT infra (est. ×{ratio:.2f})", cdn_infra_est, "#c00000", True))
+        series.append(("local S3", cdn_infra_est, "#c00000", True))
 
     # ---- summary ----
     lines = ["# Overall opening times — incl. StackIT vantages", "",
@@ -126,7 +126,7 @@ def main():
     ax.set_yticks(pos); ax.set_yticklabels([s[0] for s in plotted])
     ax.set_xlim(left=0)
     ax.set_xlabel("Open → first spectrum on screen (ms, linear) — hatched = estimated")
-    ax.set_title(f"mzPeakViewer opening times — local vs CDN (client) vs StackIT infra")
+    ax.set_title("mzPeakViewer opening times — local filesystem vs remote S3 vs local S3")
     ax.grid(axis="x", alpha=0.25); ax.set_axisbelow(True)
     fig.tight_layout()
     fig.savefig(os.path.join(BENCH, "opening-overall-boxplot.png"), dpi=150)
