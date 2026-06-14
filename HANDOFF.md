@@ -1,16 +1,19 @@
 # mzpeakviewer — Handoff Package
 
-> **Start here.** This repository is the planning + handoff home for the **unified
-> mzPeak viewer** — the merge of **mzPeakIV** (imaging/MSI) and **mzPeakExplorer**
-> (general explorer) into one app where the imaging layer activates only for
-> imaging files. A fresh checkout of this repo contains everything needed to build
-> the new codebase: the roadmap, the GSD harness, the adversarial-review process,
-> the validated tech stack, the source-app architecture, and both projects'
-> backlogs.
+> **Start here.** This repository is the **unified mzPeak viewer** — the merge of
+> **mzPeakIV** (imaging/MSI) and **mzPeakExplorer** (general explorer) into one app
+> where the imaging layer activates only for imaging files. A fresh checkout contains
+> the working codebase plus everything that produced it: the roadmap, the GSD harness,
+> the adversarial-review process, the validated tech stack, the source-app
+> architecture, and both projects' backlogs.
 
-**Status (2026-06-12):** Planning. No application code yet. The roadmap passed a
-dual adversarial review (codex + vibe). Phase 0 (reader convergence) is in flight
-via [HUPO-PSI/mzpeakts#1](https://github.com/HUPO-PSI/mzpeakts/pull/1).
+**Status (2026-06-14, HEAD `5175c0c`):** Building — **Phases 0–5 complete**; the app
+runs end-to-end in a browser and is preview-deployed on `gh-pages`. 180 unit + 15
+Playwright e2e green; typecheck + build clean across all four workspaces. Phase 6
+(safety harness + single deploy + decommission) remains. The roadmap passed a dual
+adversarial review (codex + vibe); Phase 0 reader convergence pinned `mzpeakts@4067f84`
+(aux-arrays + Numpress Linear), tracked upstream as
+[HUPO-PSI/mzpeakts#1](https://github.com/HUPO-PSI/mzpeakts/pull/1).
 
 ---
 
@@ -73,7 +76,7 @@ This project uses **GSD** (Get Stuff Done) — planning artifacts live in `.plan
 and each phase is planned then executed through GSD commands.
 
 ```
-Phase 0  Reader convergence        (prerequisite; in flight via the numpress PR)
+Phase 0  Reader convergence        ✅ pinned mzpeakts@4067f84 (aux-arrays + Numpress)
    │
 Phase 1  Unified Contracts ◀ KEYSTONE — nothing migrates before this
    │      protocol + store + capability model + URL grammar, as types/spec/tests

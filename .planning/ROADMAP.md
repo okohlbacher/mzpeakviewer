@@ -10,12 +10,12 @@ This roadmap is derived from the synthesized design at [research/MERGE-ROADMAP.m
 
 ## Phases
 
-- [ ] **Phase 0: Reader Convergence** — one vendored `mzpeakts` with aux-arrays AND Numpress Linear; both source apps build on it. *(prerequisite; in flight via HUPO-PSI/mzpeakts#1)*
-- [ ] **Phase 1: Unified Contracts (KEYSTONE)** — superset worker protocol + unified store shape + capability model + URL grammar module, as types/spec/tests with zero behavior change.
-- [ ] **Phase 2: Shared ui-kit** — monorepo workspace; design tokens + purely presentational components extracted; both shells consume them unchanged.
-- [ ] **Phase 3: Engine Migration (`@mzpeak/core`)** — one Web Worker engine; rewrite Explorer's main-thread data access as messages; merge IV's imaging handlers; parity/golden tests gate it.
-- [ ] **Phase 4: Unified Shell + Capability Sidebar** — one app; capability-gated rail (Advanced + MSI accordions); merged store; pixel/ROI→spectrum; a11y; lazy MSI chunk.
-- [ ] **Phase 5: Unified URL Resolver + Link Stability** — one deep-link grammar/resolver; legacy `/IV/` shim (`scan=N→spectrum=N-1`); per-target redirects; old-link regression corpus.
+- [x] **Phase 0: Reader Convergence** — one vendored `mzpeakts` with aux-arrays AND Numpress Linear; both source apps build on it. *(pinned `mzpeakts@4067f84`; upstream HUPO-PSI/mzpeakts#1)*
+- [x] **Phase 1: Unified Contracts (KEYSTONE)** — superset worker protocol + unified store shape + capability model + URL grammar module, as types/spec/tests with zero behavior change. *(`@mzpeak/contracts`, 49 tests)*
+- [x] **Phase 2: Shared ui-kit** — monorepo workspace; design tokens + purely presentational components extracted; both shells consume them unchanged. *(`@mzpeak/ui-kit`, 19 tests)*
+- [x] **Phase 3: Engine Migration (`@mzpeak/core`)** — one Web Worker engine; rewrite Explorer's main-thread data access as messages; merge IV's imaging handlers; parity/golden tests gate it. *(`@mzpeak/core`, 112 tests)*
+- [x] **Phase 4: Unified Shell + Capability Sidebar** — one app; capability-gated rail (Advanced + MSI accordions); merged store; pixel/ROI→spectrum; a11y; lazy MSI chunk. *(`app/`)*
+- [x] **Phase 5: Unified URL Resolver + Link Stability** — one deep-link grammar/resolver; legacy `/IV/` shim (`scan=N→spectrum=N-1`); per-target redirects; old-link regression corpus. *(15 e2e green)*
 - [ ] **Phase 6: Safety Harness + Single Deploy + Decommission** — compatibility/perf/memory harness + rollback canary; collapse to one deploy; redirect old paths; decommission.
 
 ## Dependency order
@@ -35,7 +35,7 @@ This roadmap is derived from the synthesized design at [research/MERGE-ROADMAP.m
   3. Consumption is unified to one mechanism (git submodule) with a documented bootstrap.
 **Plans:** TBD
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
-**Notes:** In flight — gated on the upstream PR merge; fallback is pinning to the fork commit. Valuable even if the merge stops here.
+**Notes:** Done — pinned to `mzpeakts@4067f84` (aux-arrays + Numpress Linear in one commit) as the single vendored submodule; tracked upstream via HUPO-PSI/mzpeakts#1.
 
 ### Phase 1: Unified Contracts (KEYSTONE)
 **Goal:** Define every contract the engine and shell are built against — as TYPES, a SPEC, and TESTS, with zero runtime behavior change in either app: the superset worker protocol (all IV imaging messages + all Explorer browse/archive/parquet/scan/chrom/study messages, each annotated with clone-vs-transfer, size cap/paging, and cancellation), the unified zustand store shape + view-state model, the capability model (`isImaging` via `probeIsImaging` 3-signal semantics, `numChromatograms`/`hasTicColumn`, `hasOptical`), and the URL grammar as a pure parse/serialize module (conflict matrix, canonicalization, legacy `/IV/` translation).

@@ -33,7 +33,7 @@ See [research/MERGE-ROADMAP.md](research/MERGE-ROADMAP.md) for the full design a
 
 ## Status
 
-Planning. Repo skeleton + GSD milestone scaffolded 2026-06-12. No app code yet — Phase 0 (reader convergence) is the prerequisite, in flight via [HUPO-PSI/mzpeakts#1](https://github.com/HUPO-PSI/mzpeakts/pull/1).
+Building — **Phases 0–5 complete** (HEAD `5175c0c`, 2026-06-14). The app runs end-to-end in a browser (capability-adaptive shell, engine worker, imaging round-trip, URL resolver) and is preview-deployed on `gh-pages`. 180 unit + 15 Playwright e2e green; typecheck + build clean across all four workspaces. Phase 6 (safety harness + single deploy + decommission of the source apps) remains. Phase 0 reader convergence pinned `mzpeakts@4067f84` (aux-arrays + Numpress Linear), tracked upstream via [HUPO-PSI/mzpeakts#1](https://github.com/HUPO-PSI/mzpeakts/pull/1).
 
 ## Source projects (provenance)
 

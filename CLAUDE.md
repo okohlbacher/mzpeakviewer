@@ -8,8 +8,13 @@ activates only for imaging files. See `.planning/PROJECT.md` and
 
 ## Status
 
-Planning. Repo skeleton + GSD milestone scaffolded 2026-06-12 from a v2 roadmap
-that passed a dual adversarial review (codex + vibe). No application code yet.
+**Building — Phases 0–5 complete.** The app runs end-to-end in a browser and is
+preview-deployed on `gh-pages` (with the legacy `/IV/` shim + demo datasets). As of
+HEAD `5175c0c` (2026-06-14): **180 unit tests** (contracts 49 / core 112 / ui-kit 19)
+**+ 15 Playwright e2e**, all green; `npm run typecheck` and `npm run build` clean
+across all four workspaces. Phase 6 (safety harness + single deploy + decommission)
+is the remaining work. The 7-phase roadmap was scaffolded 2026-06-12 from a v2 plan
+that passed a dual adversarial review (codex + vibe).
 
 ## Push / Remote Policy (HARD RULE)
 
@@ -37,13 +42,15 @@ Copy the verdict line (`accept` / `accept-with-revisions` / `reject`) into the
 phase commit footer. `codex` is at `/opt/homebrew/bin/codex`; `vibe` at
 `~/.local/bin/vibe` for second-opinion reviews.
 
-## Stack (target)
+## Stack
 
-Vite 8 + React 19 + TypeScript ~5.9; npm workspaces; `@mzpeak/core` (Web Worker
-data engine) + `@mzpeak/ui-kit` (tokens + presentational components) + app shell.
-Vendored `mzpeakts` (parquet-wasm + apache-arrow + zip.js) as a git submodule.
-Canvas 2D ion images; uPlot spectra. Client-side only; static-deployable
-(GitHub Pages + mzpeak.org rsync).
+Vite 8 + React 19 + TypeScript ~5.9; npm workspaces (`packages/contracts`,
+`packages/ui-kit`, `packages/core`, `app`). `@mzpeak/core` (Web Worker data engine) +
+`@mzpeak/ui-kit` (tokens + presentational components) + `@mzpeak/contracts` (protocol/
+store/capability/URL) + the `app/` shell. Vendored `mzpeakts` (parquet-wasm +
+apache-arrow + zip.js) as a git submodule (`vendor/mzpeakts`). Canvas 2D ion images;
+uPlot spectra. Client-side only; static-deployable (GitHub Pages + mzpeak.org rsync).
+See `.planning/STACK.md` for pinned versions.
 
 ## GSD
 

@@ -20,7 +20,7 @@ mzpeak.org). **Pin these; do not float majors.** Re-validate only with evidence.
 
 | Component | Version | Note |
 |---|---|---|
-| mzpeakts | submodule pin (Phase 0 commit) | aux-arrays + Numpress Linear; one consumption style |
+| mzpeakts | submodule @ `4067f84` (Phase 0) | aux-arrays + Numpress Linear; one consumption style |
 | parquet-wasm | 0.7.1 | single-threaded ESM build — **no COOP/COEP needed** |
 | apache-arrow | 21.1.0 | must match what parquet-wasm/arrow-js-ffi expect — **do not float major** |
 | arrow-js-ffi | 0.4.3 | zero-copy Arrow FFI bridge |
@@ -33,11 +33,15 @@ mzpeak.org). **Pin these; do not float majors.** Re-validate only with evidence.
 |---|---|---|
 | @vitejs/plugin-react | 6.0.2 | JSX + Fast Refresh; peer vite ^8 |
 | vite-plugin-wasm | 3.6.0 | imports parquet-wasm `.wasm` as ESM |
-| vite-plugin-top-level-await | 1.6.0 | WASM init uses top-level await |
 
-**Worker builds:** declare `worker.plugins: () => [wasm(), topLevelAwait()]` in
+**top-level-await:** `vite-plugin-top-level-await` is **NOT used** (as built). With
+`build.target: "es2022"` + modern browsers, TLA is native and parquet-wasm's init works
+without the plugin — verified in node. See the note in `app/vite.config.ts`.
+
+**Worker builds (load-bearing):** declare `worker.plugins: () => [wasm()]` in
 `vite.config.ts` — without it, WASM silently breaks in production Worker bundles
-(works in dev only). This bit mzPeakIV; it is a Phase-3 must-have.
+(works in dev only). `@mzpeak/core`'s worker imports `mzpeakts` → parquet-wasm, so the
+worker sub-build needs `vite-plugin-wasm` too. This bit mzPeakIV; it was a Phase-3 must-have.
 
 ## Dev tools
 
