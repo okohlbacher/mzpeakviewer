@@ -103,7 +103,9 @@ def main():
         lines += ["", f"Files measured on both: **{len(both)}**. "
                   f"Median local/S3 ratio: **{np.median(ratios):.2f}×** "
                   f"(>1 → S3 faster; range reads avoid reading the whole file)."]
-    lines += ["", f"Boxplot: `open-bench-boxplot.png` · per-file data: `open-bench-perfile.csv`", ""]
+    lines += ["", "Plots: `open-bench-boxplot.png` (distribution) · "
+              "`open-bench-time-vs-size.png` (time vs file size) · "
+              "per-file data: `open-bench-perfile.csv`", ""]
     with open(os.path.join(BENCH, "TIMINGS.md"), "w") as fh:
         fh.write("\n".join(lines))
 
@@ -136,7 +138,35 @@ def main():
     fig.tight_layout()
     fig.savefig(os.path.join(BENCH, "open-bench-boxplot.png"), dpi=150)
     fig.savefig(os.path.join(BENCH, "open-bench-boxplot.svg"))
-    print(f"[plot] wrote TIMINGS.md, open-bench-perfile.csv, open-bench-boxplot.png/.svg to {BENCH}")
+
+    # ---- opening time vs file size (scatter, log-log, per source + trend) ----
+    fig2, ax2 = plt.subplots(figsize=(10, 6))
+    for s in present:
+        xs = [size[rel] for rel in perfile if s in perfile[rel] and size.get(rel)]
+        ys = [perfile[rel][s] for rel in perfile if s in perfile[rel] and size.get(rel)]
+        if not xs:
+            continue
+        ax2.scatter(xs, ys, s=18, color=COLORS[s], alpha=0.55, edgecolors="white",
+                    linewidths=0.4, label=LABELS[s], zorder=3)
+        # log-log least-squares trend line (time ≈ a · size^b)
+        if len(xs) >= 3:
+            lx, ly = np.log10(xs), np.log10(ys)
+            b, a = np.polyfit(lx, ly, 1)
+            gx = np.linspace(min(lx), max(lx), 50)
+            ax2.plot(10 ** gx, 10 ** (a + b * gx), color=COLORS[s], lw=1.5, alpha=0.9,
+                     zorder=2, label=f"  {s} trend ∝ size^{b:.2f}")
+    ax2.set_xscale("log"); ax2.set_yscale("log")
+    ax2.set_xlabel("File size (MB, log scale)")
+    ax2.set_ylabel("Open → first spectrum (ms, log scale)")
+    ax2.set_title(f"mzPeakViewer opening time vs file size — {len(perfile)} files ≥ 10 MB")
+    ax2.grid(which="both", alpha=0.25); ax2.set_axisbelow(True)
+    ax2.legend(loc="upper left", fontsize=8, framealpha=0.9)
+    fig2.tight_layout()
+    fig2.savefig(os.path.join(BENCH, "open-bench-time-vs-size.png"), dpi=150)
+    fig2.savefig(os.path.join(BENCH, "open-bench-time-vs-size.svg"))
+
+    print(f"[plot] wrote TIMINGS.md, open-bench-perfile.csv, open-bench-boxplot.png/.svg, "
+          f"open-bench-time-vs-size.png/.svg to {BENCH}")
     for s in present:
         st = stats(series[s])
         print(f"  {s}: n={st['n']} median={fmt(st['median'])} mean={fmt(st['mean'])} max={fmt(st['max'])} fails={fails.get(s,0)}")

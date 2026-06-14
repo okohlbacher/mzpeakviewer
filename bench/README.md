@@ -32,5 +32,8 @@ Env: `BENCH_REPS` (3), `BENCH_MIN_MB` (10), `BENCH_MAX_FILES` (0=all), `S3_BASE`
 ```bash
 python3 bench/plot.py
 ```
-→ `TIMINGS.md` (summary table), `open-bench-perfile.csv`, `open-bench-boxplot.png/.svg`
-(horizontal boxplot of per-file average open times, local vs S3, with jittered scatter).
+→ `TIMINGS.md` (summary table), `open-bench-perfile.csv`,
+`open-bench-boxplot.png/.svg` (horizontal boxplot of per-file average open times,
+local vs S3, with jittered scatter), and
+`open-bench-time-vs-size.png/.svg` (opening time vs file size, log-log scatter per
+source with a power-law trend line).
