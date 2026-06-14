@@ -102,16 +102,22 @@ test("Structure → mzpeak_index.json redirects to the Metadata manifest (+ down
   await expect(page.getByTestId("metadata-view")).toBeVisible();
 });
 
-test("idle start page: demo cards + dropzone + URL field, and a demo loads", async ({ page }) => {
+test("idle start page: example datasets (cloud + download), dropzone, URL field; file opens", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("idle-view")).toBeVisible();
-  await expect(page.locator('[data-testid^="demo-"]')).toHaveCount(3);
+  // Three curated example datasets, each offering both open modes.
+  for (const id of ["bruker", "imaging", "tmt"]) {
+    await expect(page.getByTestId(`demo-${id}`)).toBeVisible();
+    await expect(page.getByTestId(`demo-${id}-cloud`)).toBeVisible();      // ☁ stream from S3/CDN
+    await expect(page.getByTestId(`demo-${id}-download`)).toBeVisible();   // ⤓ download + open local
+  }
   await expect(page.getByTestId("idle-dropzone")).toBeVisible();
   await expect(page.getByTestId("idle-url")).toBeVisible();
 
-  // A demo card loads its file → the idle screen is replaced by the viewer.
-  await page.getByTestId("demo-lc").click();
-  await expect(page.getByTestId("is-imaging")).toHaveText("no", { timeout: 45_000 });
+  // The open flow itself, exercised offline via the file picker (the demo datasets
+  // are large remote CDN objects, unsuitable for a fast e2e click).
+  await page.getByTestId("file-input").setInputFiles(IMAGING);
+  await expect(page.getByTestId("is-imaging")).toHaveText("yes", { timeout: 45_000 });
   await expect(page.getByTestId("idle-view")).toHaveCount(0);
   expect(await page.getByTestId("error").count()).toBe(0);
 });
