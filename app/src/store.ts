@@ -96,6 +96,9 @@ export interface AppState {
   /** Open a remote .mzpeak by URL (deep-link / ?file= path). Mirrors openFile. */
   openUrl: (url: string) => Promise<void>;
   setView: (view: View) => void;
+  /** Return to the idle start page — clears the loaded file + payload so the Idle
+   *  screen (drop-zone + demo datasets + URL field) shows again. */
+  reset: () => void;
   setMsLevelFilter: (level: number | null) => void;
   /** Structure → "view index.json": switch to the Metadata view and ask it to scroll
    *  to + highlight its Manifest section. Pass null (from Metadata) to clear once done. */
@@ -437,6 +440,39 @@ export const useStore = create<AppState>((set, get) => ({
   // -------------------------------------------------------------------------
   setView: (view: View) => {
     set({ view });
+  },
+
+  // Back to the idle start page. Bump the open-seq so any in-flight async from the
+  // previous file (scanBreakdown / selectSpectrum) is dropped, then clear the payload.
+  reset: () => {
+    ++currentOpenSeq;
+    set({
+      phase: "idle",
+      error: null,
+      capabilities: null,
+      stats: null,
+      fileMeta: null,
+      manifest: null,
+      grid: null,
+      ticColumn: null,
+      opticalImages: [],
+      ionImage: null,
+      ionStats: null,
+      multiChannel: null,
+      channels: [],
+      fileName: null,
+      fileSize: null,
+      view: "summary",
+      selector: null,
+      msLevelFilter: null,
+      metadataReveal: null,
+      spectrum: null,
+      spectrumLoading: false,
+      browse: null,
+      chrom: null,
+      chromLoading: false,
+      notices: [],
+    });
   },
 
   setMsLevelFilter: (level: number | null) => {

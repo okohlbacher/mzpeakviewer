@@ -5,11 +5,15 @@ import { fileURLToPath } from "node:url";
 // setInputFiles (which bypasses the click flow and hid a double-open bug).
 const IMAGING = fileURLToPath(new URL("../../packages/core/test/fixtures/imaging.mzpeak", import.meta.url));
 
-test("Load demo button opens the bundled file (real click → openUrl)", async ({ page }) => {
+test("Load demo button returns to the start page to pick an example dataset", async ({ page }) => {
   await page.goto("/");
-  await page.getByTestId("load-demo-btn").click();
+  // Open a file first so the viewer (not the start page) is showing.
+  await page.getByTestId("file-input").setInputFiles(IMAGING);
   await expect(page.getByTestId("is-imaging")).toHaveText("yes", { timeout: 45_000 });
-  await expect(page.getByTestId("num-spectra")).not.toHaveText("0");
+  // "Load demo" in the header → back to the start page with the example datasets.
+  await page.getByTestId("load-demo-btn").click();
+  await expect(page.getByTestId("idle-view")).toBeVisible();
+  await expect(page.locator('[data-testid^="demo-"][data-testid$="-cloud"]')).toHaveCount(3);
   expect(await page.getByTestId("error").count()).toBe(0);
 });
 
@@ -32,7 +36,7 @@ test("Open file button: one click opens the dialog EXACTLY once and loads the fi
 
 test("full real-click flow: demo → Spectra → Ion image → pixel → spectrum", async ({ page }) => {
   await page.goto("/");
-  await page.getByTestId("load-demo-btn").click();
+  await page.getByTestId("file-input").setInputFiles(IMAGING);
   await expect(page.getByTestId("is-imaging")).toHaveText("yes", { timeout: 45_000 });
 
   // Spectra (real nav click) — spectrum 0 already loaded on open.
@@ -56,7 +60,7 @@ test("full real-click flow: demo → Spectra → Ion image → pixel → spectru
 
 test("Structure (real clicks): list members → inspect a parquet footer", async ({ page }) => {
   await page.goto("/");
-  await page.getByTestId("load-demo-btn").click();
+  await page.getByTestId("file-input").setInputFiles(IMAGING);
   await expect(page.getByTestId("is-imaging")).toHaveText("yes", { timeout: 45_000 });
 
   // Open Advanced accordion → Structure.
@@ -75,7 +79,7 @@ test("Structure (real clicks): list members → inspect a parquet footer", async
 
 test("Structure → mzpeak_index.json redirects to the Metadata manifest (+ download enabled)", async ({ page }) => {
   await page.goto("/");
-  await page.getByTestId("load-demo-btn").click();
+  await page.getByTestId("file-input").setInputFiles(IMAGING);
   await expect(page.getByTestId("is-imaging")).toHaveText("yes", { timeout: 45_000 });
 
   await page.getByTestId("accordion-advanced").click();

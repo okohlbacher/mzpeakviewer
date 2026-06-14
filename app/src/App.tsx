@@ -447,7 +447,7 @@ function TopBar() {
   const phase = useStore((s) => s.phase);
   const fileName = useStore((s) => s.fileName);
   const openFile = useStore((s) => s.openFile);
-  const openUrl = useStore((s) => s.openUrl);
+  const reset = useStore((s) => s.reset);
   const busy = phase === "loading";
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -526,7 +526,8 @@ function TopBar() {
         type="button"
         data-testid="load-demo-btn"
         disabled={busy}
-        onClick={() => void openUrl(`${import.meta.env.BASE_URL}demo.mzpeak`)}
+        title="Back to the start page to pick an example dataset"
+        onClick={() => reset()}
         style={{
           marginLeft: "0.5rem",
           padding: "0.35rem 0.75rem",
