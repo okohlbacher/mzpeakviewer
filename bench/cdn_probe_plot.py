@@ -23,14 +23,28 @@ LABELS = {"client": "Client (Mac → CDN)", "infra": "Infra (StackIT VM → CDN)
 
 
 def warm_perfile(path):
-    """rel -> mean warm TTFB (ms) over reps>=1 with http 200/206."""
+    """rel -> mean warm TTFB (ms) over reps>=1 with http 200/206.
+    NB: rel (the path) contains commas, so parse the FIXED last 5 fields from the
+    right (mb,rep,http,ttfb_ms,total_ms) and treat the remainder as rel."""
     reps = defaultdict(list)
     if not os.path.exists(path):
         return {}
     with open(path) as fh:
-        for row in csv.DictReader(fh):
-            if int(row["rep"]) >= 1 and row["http"] in ("200", "206"):
-                reps[row["rel"]].append(float(row["ttfb_ms"]))
+        next(fh, None)  # header
+        for line in fh:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            parts = line.split(",")
+            if len(parts) < 6:
+                continue
+            mb, rep, http, ttfb, total = parts[-5:]
+            rel = ",".join(parts[:-5])
+            try:
+                if int(rep) >= 1 and http in ("200", "206"):
+                    reps[rel].append(float(ttfb))
+            except ValueError:
+                continue
     return {rel: sum(v) / len(v) for rel, v in reps.items() if v}
 
 
