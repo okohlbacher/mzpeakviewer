@@ -416,9 +416,30 @@ export class EngineClient {
     return this.request<StudyMeta>((requestId) => ({ type: "studyMeta", requestId }));
   }
 
-  /** Render a single-channel ion image for an m/z window. */
-  renderIonImage(mz: number, tolDa: number): Promise<RenderIonImageResult> {
-    return this.request<RenderIonImageResult>((requestId) => ({ type: "renderIonImage", mz, tolDa, requestId }));
+  /**
+   * Render a single-channel ion image for an m/z window. `onProgress(done, total)` (if
+   * given) fires from the worker's `renderProgress` events for THIS request only, and is
+   * detached when the render settles — so a progress bar can track the in-flight render.
+   */
+  renderIonImage(
+    mz: number,
+    tolDa: number,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<RenderIonImageResult> {
+    let off: () => void = () => {};
+    const p = this.request<RenderIonImageResult>((requestId) => {
+      if (onProgress) {
+        off = this.on("renderProgress", (ev) => {
+          if (ev.requestId === requestId) onProgress(ev.done, ev.total);
+        });
+      }
+      return { type: "renderIonImage", mz, tolDa, requestId };
+    });
+    void p.then(
+      () => off(),
+      () => off(),
+    );
+    return p;
   }
 
   /** Render an RGB multi-channel overlay (one image per non-null channel). */

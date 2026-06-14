@@ -15,13 +15,16 @@ import { openEngineFile, openEngineUrl, type EngineFile } from "../engine/open";
 import { readEngineSpectrum } from "../engine/spectrum";
 import { engineScanBreakdown } from "../engine/scanBreakdown";
 import { engineExtractChrom, type ChromContext } from "../engine/chrom";
-import { engineRenderIonImage, engineMeanSpectrum, engineRoiSpectrum } from "../engine/imaging";
+import { engineRenderIonImage, engineMeanSpectrum, engineRoiSpectrum, type SpectraArrayCache } from "../engine/imaging";
 import { engineRenderMultiChannel } from "../engine/multichannel";
 import { engineGetOpticalImage } from "../engine/optical";
 import { engineArchiveList, engineArchiveMemberBytes, engineParquetFooter, engineSampleColumn, clearStructureCache } from "../engine/structure";
 import { engineStudyMeta } from "../engine/studyMeta";
 import { UnsupportedEncodingError, CorruptFileError } from "../reader/errors";
 import { buffersOf, type Respond } from "./respond";
+
+/** Default ion-image cache ceiling (~768 MB of decoded points) until the shell sets one. */
+const DEFAULT_CACHE_LIMIT_BYTES = 768 * 1024 * 1024;
 
 /** Mutable per-session context the worker entry owns one of. */
 export type EngineContext = {
@@ -30,10 +33,15 @@ export type EngineContext = {
   gen: number;
   /** Cached scan context so extractChrom can reuse rows + representation counts. */
   scan: ChromContext | null;
+  /** Decoded grid-cell spectra from the first ion render, so later renders re-sum from
+   *  memory (no re-stream). Dropped on every open/close — never leaks across files. */
+  ionCache: SpectraArrayCache | null;
+  /** Ion-cache byte ceiling (setCacheConfig.cacheLimitBytes; default below). */
+  cacheLimitBytes: number;
 };
 
 export function createContext(): EngineContext {
-  return { active: null, gen: 0, scan: null };
+  return { active: null, gen: 0, scan: null, ionCache: null, cacheLimitBytes: DEFAULT_CACHE_LIMIT_BYTES };
 }
 
 /** Map a thrown reader error to a wire error class (+ findings when present). */
@@ -59,6 +67,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         const g = ++ctx.gen;
         ctx.active = null;
         ctx.scan = null;
+        ctx.ionCache = null; // decoded-spectra cache is per-file — drop it
         clearStructureCache(); // path-keyed footer cache must not leak across files
         const ef =
           req.source.kind === "file"
@@ -91,11 +100,16 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         ctx.gen++;
         ctx.active = null;
         ctx.scan = null;
+        ctx.ionCache = null;
         return; // no correlated response
       }
 
       case "setCacheConfig":
-        // Cache policy is advisory; the in-worker cache is not yet wired. No-op ack.
+        // Wire the ion-cache byte ceiling. `preloadEnabled` is reserved (no eager preload
+        // yet); a positive limit caps how much decoded spectra the ion render may retain.
+        if (Number.isFinite(req.cacheLimitBytes) && req.cacheLimitBytes > 0) {
+          ctx.cacheLimitBytes = req.cacheLimitBytes;
+        }
         return;
 
       case "cancel":
@@ -136,7 +150,19 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
           respond({ type: "renderResult", requestId: req.requestId, ionImage: null, stats: null });
           return;
         }
-        const { ionImage, stats } = await engineRenderIonImage(active.reader, active.grid, req.mz, req.tolDa);
+        const { ionImage, stats, cache } = await engineRenderIonImage(
+          active.reader,
+          active.grid,
+          req.mz,
+          req.tolDa,
+          {
+            cache: ctx.ionCache,
+            limitBytes: ctx.cacheLimitBytes,
+            onProgress: (doneN, totalN) =>
+              respond({ type: "renderProgress", requestId: req.requestId, done: doneN, total: totalN }),
+          },
+        );
+        ctx.ionCache = cache; // retain (or keep null when the file exceeds the budget)
         respond({ type: "renderResult", requestId: req.requestId, ionImage, stats }, buffersOf(ionImage));
         return;
       }

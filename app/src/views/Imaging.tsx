@@ -185,6 +185,8 @@ function ImagingInner({
   const opticalGen = useRef(0);
 
   const [busy, setBusy] = useState(false);
+  // Ion-render progress (filled cells) — drives the progress bar while a render is in flight.
+  const [renderProgress, setRenderProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [readout, setReadout] = useState<{ x: number; y: number; key: number } | null>(null);
 
@@ -227,14 +229,18 @@ function ImagingInner({
     if (!ionInputsValid || busy) return;
     setBusy(true);
     setError(null);
+    setRenderProgress({ done: 0, total: 0 });
     try {
-      const res = await engine.renderIonImage(mzNum, tolNum);
+      const res = await engine.renderIonImage(mzNum, tolNum, (done, total) =>
+        setRenderProgress({ done, total }),
+      );
       setIonImageStore(res.ionImage, res.stats);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setIonImageStore(null, null);
     } finally {
       setBusy(false);
+      setRenderProgress(null);
     }
   }
 
@@ -545,6 +551,10 @@ function ImagingInner({
         </div>
       </div>
 
+      {mode === "ion" && busy && renderProgress && (
+        <IonRenderProgress done={renderProgress.done} total={renderProgress.total} />
+      )}
+
       {error && (
         <p data-testid="imaging-error" style={{ color: "var(--danger, #c00)", fontSize: "0.85rem", margin: 0 }}>{error}</p>
       )}
@@ -706,6 +716,32 @@ function ImagingInner({
         </div>
       )}
     </section>
+  );
+}
+
+/** Determinate progress bar shown while an ion image renders. `total === 0` (the brief
+ *  window before the worker reports the cell count) shows an indeterminate sliver. */
+function IonRenderProgress({ done, total }: { done: number; total: number }) {
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : null;
+  return (
+    <div data-testid="ion-render-progress" role="status" aria-live="polite" style={{ display: "flex", alignItems: "center", gap: "0.6rem", margin: 0 }}>
+      <div style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--surface-panel, #f1f5f9)", overflow: "hidden", maxWidth: 320 }}>
+        <div
+          data-testid="ion-render-progress-fill"
+          style={{
+            height: "100%",
+            width: pct != null ? `${pct}%` : "35%",
+            background: "var(--blue-600, #3b54da)",
+            borderRadius: 3,
+            transition: "width 0.15s",
+            opacity: pct != null ? 1 : 0.6,
+          }}
+        />
+      </div>
+      <span style={{ fontSize: "var(--text-xs, 0.72rem)", color: "var(--text-muted, #94a3b8)", fontFamily: "var(--font-mono, monospace)", whiteSpace: "nowrap" }}>
+        {pct != null ? `Rendering ion image… ${pct}%` : "Rendering ion image…"}
+      </span>
+    </div>
   );
 }
 

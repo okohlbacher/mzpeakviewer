@@ -61,25 +61,76 @@ async function readSpectrumArrays(
  *
  * Stats are computed via `computeIonImageStats(img, gridWire.presenceMask)` so a
  * present-with-zero pixel still counts toward min (IV `computeIonImageStats`).
+ *
+ * CACHE (review follow-up): the FIRST render streams + decodes the whole spectra_data
+ * (one row-group pass, ~tens of seconds over the CDN). The decoded per-pixel (mz,
+ * intensity) arrays are retained in a `SpectraArrayCache` so EVERY subsequent ion image
+ * — any m/z, any tolerance — re-sums from memory in ~a second, with NO network. The cache
+ * is bounded by `limitBytes`; a file whose grid spectra exceed it is rendered uncached
+ * (still correct, just re-streamed each time). The cache is owned by the worker session
+ * and dropped on open/close (see dispatch.ts) so it never leaks across files.
  */
+export type SpectraArrayCache = {
+  /** spectrumIndex → decoded point arrays, for every filled grid cell with data. */
+  byIndex: Map<number, { mz: Float64Array; intensity: Float32Array }>;
+  /** True once a full pass populated every available filled-cell spectrum. */
+  complete: boolean;
+  /** Approximate bytes held (mz f64 + intensity f32), for the budget check. */
+  bytes: number;
+};
+
+export type RenderIonImageOptions = {
+  /** Reuse/populate this session cache of decoded grid-cell spectra. */
+  cache?: SpectraArrayCache | null;
+  /** Max bytes the cache may hold before this file is rendered uncached. */
+  limitBytes?: number;
+  /** Progress callback `(done, total)` over filled cells; throttled by the caller’s use. */
+  onProgress?: (done: number, total: number) => void;
+};
+
+/** Default cache ceiling (~768 MB of decoded points) when the shell hasn’t set one. */
+const DEFAULT_CACHE_LIMIT_BYTES = 768 * 1024 * 1024;
+/** Min wall-clock gap between progress emissions (avoid flooding postMessage). */
+const PROGRESS_INTERVAL_MS = 120;
+
+function now(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
 export async function engineRenderIonImage(
   reader: Reader,
   gridWire: ImagingGridWire,
   mz: number,
   tolDa: number,
-): Promise<{ ionImage: Float32Array; stats: IonImageStats }> {
+  opts?: RenderIonImageOptions,
+): Promise<{ ionImage: Float32Array; stats: IonImageStats; cache: SpectraArrayCache | null }> {
   const ionImage = new Float32Array(gridWire.width * gridWire.height);
   const mzStart = mz - tolDa;
   const mzEnd = mz + tolDa;
+  const limitBytes = opts?.limitBytes ?? DEFAULT_CACHE_LIMIT_BYTES;
+  const onProgress = opts?.onProgress;
 
   // coordKey → spectrumIndex for every filled cell (inverse of flattenGrid).
   const coordToSpectrum = rebuildCoordMap(gridWire);
-  // Inverse: spectrumIndex → coordKey, so the bulk stream (keyed by spectrum index)
-  // can write each pixel directly. Filled cells are 1:1 with spectra.
+  // Inverse: spectrumIndex → coordKey, so a stream keyed by spectrum index writes pixels
+  // directly. Filled cells are 1:1 with spectra.
   const spectrumToCoord = new Map<number, number>();
   for (const [coordKey, spectrumIndex] of coordToSpectrum) {
     if (coordKey >= 0 && coordKey < ionImage.length) spectrumToCoord.set(spectrumIndex, coordKey);
   }
+  const total = spectrumToCoord.size;
+
+  // Throttled progress emitter over filled cells.
+  let done = 0;
+  let lastEmit = 0;
+  const tick = (force = false) => {
+    if (!onProgress) return;
+    const t = now();
+    if (force || t - lastEmit >= PROGRESS_INTERVAL_MS) {
+      lastEmit = t;
+      onProgress(Math.min(done, total), total);
+    }
+  };
 
   // Window-sum over one spectrum's (mz, intensity) — INCLUSIVE [mzStart, mzEnd] (IV
   // `ionImageFromCache`), NaN/Infinity → 0 (IV buildIonImage T-04-02). Unchanged math.
@@ -95,16 +146,49 @@ export async function engineRenderIonImage(
     return sum;
   };
 
-  // FAST PATH: ONE sequential pass over spectra_data row groups (each read once), instead
-  // of a random-access getSpectrum per pixel (which re-reads a whole row group every call —
-  // ≈700 ms/pixel over the CDN ⇒ a 34,840-pixel image never finishes). Same data-array
-  // source IV/`harvestDataArraysOrNull` prefers, so the summed values are identical.
+  // ── CACHE-HIT PATH: re-sum from the in-memory decoded arrays (no network) ───────────
+  if (opts?.cache?.complete) {
+    const byIndex = opts.cache.byIndex;
+    for (const [spectrumIndex, coordKey] of spectrumToCoord) {
+      const arrs = byIndex.get(spectrumIndex);
+      // Absent ⇒ that cell contributed nothing on the build pass either → stays 0 (parity).
+      if (arrs) ionImage[coordKey] = windowSum(arrs.mz, arrs.intensity);
+      done++;
+      tick();
+    }
+    tick(true);
+    const stats = computeIonImageStats(ionImage, gridWire.presenceMask);
+    return { ionImage, stats, cache: opts.cache };
+  }
+
+  // ── BUILD PATH: ONE sequential pass over spectra_data row groups (each read once),
+  // instead of a random-access getSpectrum per pixel (≈700 ms/pixel over the CDN ⇒ a
+  // 34,840-pixel image never finishes). Same data-array source IV/`harvestDataArraysOrNull`
+  // prefers, so the summed values are identical. Decoded grid-cell arrays are cached as we
+  // go (until the budget is hit), so later renders take the cache-hit path above. ──────
+  const building = new Map<number, { mz: Float64Array; intensity: Float32Array }>();
+  let bytes = 0;
+  let cacheable = true;
+  const remember = (index: number, mzArr: Float64Array, inArr: Float32Array) => {
+    if (!cacheable) return;
+    bytes += mzArr.byteLength + inArr.byteLength;
+    if (bytes > limitBytes) {
+      cacheable = false; // too big for this session — render uncached from here on
+      building.clear();
+      return;
+    }
+    building.set(index, { mz: mzArr, intensity: inArr });
+  };
+
   const filled = new Set<number>();
   for await (const { index, mz: mzArr, intensity: inArr } of streamSpectraDataArrays(reader)) {
     const coordKey = spectrumToCoord.get(index);
-    if (coordKey === undefined) continue; // spectrum not mapped to a grid cell
+    if (coordKey === undefined) continue; // spectrum not mapped to a grid cell — not cached
     ionImage[coordKey] = windowSum(mzArr, inArr);
     filled.add(coordKey);
+    remember(index, mzArr, inArr);
+    done++;
+    tick();
   }
 
   // FALLBACK: any filled cell the data-array stream did NOT cover (a centroid-only spectrum
@@ -113,12 +197,18 @@ export async function engineRenderIonImage(
   for (const [coordKey, spectrumIndex] of coordToSpectrum) {
     if (coordKey < 0 || coordKey >= ionImage.length || filled.has(coordKey)) continue;
     const arrs = await readSpectrumArrays(reader, spectrumIndex);
+    done++;
+    tick();
     if (!arrs) continue; // absent / undecodable spectrum contributes nothing
     ionImage[coordKey] = windowSum(arrs.mz, arrs.intensity);
+    remember(spectrumIndex, arrs.mz, arrs.intensity);
   }
+  tick(true);
 
   const stats = computeIonImageStats(ionImage, gridWire.presenceMask);
-  return { ionImage, stats };
+  // Commit the cache only if it held the whole grid within budget — else null (uncached).
+  const cache: SpectraArrayCache | null = cacheable ? { byIndex: building, complete: true, bytes } : null;
+  return { ionImage, stats, cache };
 }
 
 // ── Mean / ROI spectrum ──────────────────────────────────────────────────────
