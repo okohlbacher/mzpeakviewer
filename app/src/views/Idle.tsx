@@ -24,7 +24,7 @@ const CDN = "https://data.mzpeak.org/v09";
 const DEMOS: Demo[] = [
   {
     id: "bruker",
-    label: "Bruker QTOF — general MS",
+    label: "General MS data - Bruker QTOF",
     desc: "Bruker micrOTOF-Q II ESI-QTOF run (MetaboLights MTBLS520)",
     kind: "ms",
     url: `${CDN}/mzML-examples/bruker-microtof-q2/neg_01_Fistax_1-A%2C2_01_5715.mzpeak`,
@@ -33,7 +33,7 @@ const DEMOS: Demo[] = [
   },
   {
     id: "imaging",
-    label: "Imaging — mouse urinary bladder",
+    label: "Imaging Data - Mouse Urinary Bladder",
     desc: "AP-SMALDI MSI: ion images, optical overlay, per-pixel spectra",
     kind: "imaging",
     url: `${CDN}/imzml-examples/PXD001283-HR2MSI-urinary-bladder/HR2MSImouseurinarybladderS096.mzpeak`,
@@ -42,7 +42,7 @@ const DEMOS: Demo[] = [
   },
   {
     id: "tmt",
-    label: "SDRF — TMT 10-plex",
+    label: "TMT Example (10-plex)",
     desc: "PXD011799 TiO₂ TMT fraction; SDRF channel/sample model",
     kind: "sdrf",
     url: `${CDN}/sdrf-examples/PXD011799/mzpeak/20170131_Lumos_RSLC4_Maurer_Hartl_UW_MFPL_TiO2_TMT_fr8.mzpeak`,
@@ -174,7 +174,7 @@ export function Idle() {
             <div style={{ margin: "1.5rem 0 0.5rem", color: "var(--text-muted, #94a3b8)", fontSize: "var(--text-sm, 0.8rem)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
               Or try an example dataset
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "0.75rem", textAlign: "left" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "0.75rem", textAlign: "left" }}>
               {DEMOS.map((d) => (
                 <div
                   key={d.id}
@@ -203,7 +203,7 @@ export function Idle() {
                   {dl?.id === d.id ? (
                     <DownloadProgress pct={dl.pct} />
                   ) : (
-                    <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.15rem" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", marginTop: "0.15rem" }}>
                       <button
                         type="button"
                         data-testid={`demo-${d.id}-cloud`}
