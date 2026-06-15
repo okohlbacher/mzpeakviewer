@@ -69,8 +69,11 @@
   --danger:       #c62828;
   --danger-soft:  #ef9a9a;
   --danger-bg:    #fce4ec;
-  --success:      #2e9e5b;
-  --success-soft: #43a047;
+  /* a11y: darkened from #2e9e5b (~3.4:1 small-text on white — failed WCAG AA) to ~4.9:1
+     while staying a recognizable mass-spec green. Used as foreground (capability "yes"
+     text, success badges, the ion-cache-ready chip). [adversarial review 2026-06-15, F-08] */
+  --success:      #1a8249;
+  --success-soft: #43a047; /* soft fills/borders only — not text */
   --info:         var(--blue-600);
   --info-bg:      var(--blue-50);
 

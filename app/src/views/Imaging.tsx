@@ -785,7 +785,9 @@ function EmptyState({ mode, hasOptical, opticalErr }: { mode: ImagingMode; hasOp
     msg = "No data to display.";
   }
   return (
-    <p data-testid="imaging-empty" style={{ color: "var(--text-muted, #94a3b8)", fontSize: "0.85rem", textAlign: "center", maxWidth: 360 }}>
+    // On the dark --ink stage: --text-muted (#6b757e) is only ~4.0:1; use the on-stage
+    // token (~13:1) so the empty-state message meets WCAG AA. [adversarial review F-08]
+    <p data-testid="imaging-empty" style={{ color: "var(--text-on-stage, #e7edf2)", fontSize: "0.85rem", textAlign: "center", maxWidth: 360 }}>
       {msg}
     </p>
   );
