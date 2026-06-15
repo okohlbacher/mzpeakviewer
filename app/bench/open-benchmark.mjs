@@ -34,6 +34,10 @@ const TIMEOUT = Number(process.env.PER_OPEN_TIMEOUT_MS) || 120_000;
 const RECYCLE = Number(process.env.BROWSER_RECYCLE) || 40;
 // Which sources to measure (default both; set "s3" for a cloud-only speedtest).
 const SOURCES = (process.env.BENCH_SOURCES || "local,s3").split(",").map((s) => s.trim()).filter(Boolean);
+// Explicit file list — rel paths under CORPUS (a leading `data/` is stripped), comma- or
+// newline-separated, OR a path to a file containing them. When set, benchmark EXACTLY these
+// (skip the walk + size filters) — used to run the curated size-dependence set (size-bench.md).
+const FILES_SPEC = process.env.BENCH_FILES || "";
 
 const log = (...a) => console.log(...a);
 
@@ -91,16 +95,36 @@ async function measureOpen(browser, source, { localPath, s3url }) {
 
 async function main() {
   await mkdir(OUT, { recursive: true });
-  const all = (await walk(CORPUS));
-  const withSizes = [];
-  for (const p of all) {
-    const size = (await stat(p)).size;
-    if (size >= MIN_MB * 1e6 && (MAX_MB === 0 || size <= MAX_MB * 1e6))
-      withSizes.push({ p, size, rel: p.slice(CORPUS.length + 1) });
+  let files;
+  if (FILES_SPEC) {
+    // Explicit curated set: resolve each rel path under CORPUS, stat for size, no size filter.
+    let spec, fromFile = false;
+    try { spec = await (await import("node:fs/promises")).readFile(FILES_SPEC, "utf8"); fromFile = true; }
+    catch { spec = FILES_SPEC; } // not a file → treat as an inline comma/newline list
+    // From a FILE: split on newlines ONLY — paths legitimately contain commas (e.g.
+    // "neg_01_Fistax_1-A,2_01_5715.mzpeak"). Inline env strings still split on comma too.
+    const sep = fromFile ? /\n+/ : /[\n,]+/;
+    const rels = spec.split(sep).map((s) => s.trim().replace(/^data\//, "")).filter(Boolean);
+    files = [];
+    for (const rel of rels) {
+      const p = join(CORPUS, rel);
+      try { files.push({ p, size: (await stat(p)).size, rel }); }
+      catch { log(`[bench] MISSING (skipped): ${rel}`); }
+    }
+    files.sort((a, b) => a.size - b.size);
+    log(`[bench] ${files.length} explicit files (BENCH_FILES) · reps=${REPS} · preview=${PREVIEW} · s3=${S3_BASE}`);
+  } else {
+    const all = (await walk(CORPUS));
+    const withSizes = [];
+    for (const p of all) {
+      const size = (await stat(p)).size;
+      if (size >= MIN_MB * 1e6 && (MAX_MB === 0 || size <= MAX_MB * 1e6))
+        withSizes.push({ p, size, rel: p.slice(CORPUS.length + 1) });
+    }
+    withSizes.sort((a, b) => a.size - b.size);
+    files = MAX_FILES > 0 ? withSizes.slice(0, MAX_FILES) : withSizes;
+    log(`[bench] ${files.length} files >= ${MIN_MB}MB · reps=${REPS} · preview=${PREVIEW} · s3=${S3_BASE}`);
   }
-  withSizes.sort((a, b) => a.size - b.size);
-  const files = MAX_FILES > 0 ? withSizes.slice(0, MAX_FILES) : withSizes;
-  log(`[bench] ${files.length} files >= ${MIN_MB}MB · reps=${REPS} · preview=${PREVIEW} · s3=${S3_BASE}`);
 
   const jsonl = join(OUT, "open-bench-results.jsonl");
   await writeFile(jsonl, "");
@@ -131,6 +155,10 @@ async function main() {
         await appendFile(jsonl, JSON.stringify(rec) + "\n");
         if (res.ok) reps.push(res.ms);
         await recycle();
+        // A clean failure on the first rep (timeout / OOM / unsupported) recurs
+        // identically — don't burn the remaining reps on it (e.g. the 3.28 GB
+        // whole-file local open that the browser can't hold).
+        if (!res.ok && r === 0) break;
       }
       const avg = reps.length ? Math.round(reps.reduce((a, b) => a + b, 0) / reps.length) : null;
       log(`[${i}/${files.length}] ${sizeMB}MB ${source.padEnd(5)} avg=${avg ?? "FAIL"}ms (${reps.length}/${REPS})  ${rel}`);
