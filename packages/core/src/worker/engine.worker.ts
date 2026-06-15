@@ -5,24 +5,45 @@
 // dispatch.ts (node-testable); this file is the only browser-Worker-bound piece and is
 // verified end-to-end in the app (Phase 4).
 import type { WorkerRequest } from "@mzpeak/contracts";
-import { dispatch, createContext } from "./dispatch";
+import { dispatch, createContext, startIonPrefetch } from "./dispatch";
 import { makeRespond } from "./respond";
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 const ctx = createContext();
 const respond = makeRespond((msg, transfer) => scope.postMessage(msg, transfer));
 
-// Serialize dispatches: the mzpeakts/parquet-wasm reader is single-threaded, so
-// process one request fully before the next (review CRITICAL — avoids concurrent
-// reads racing on the one reader; the open generation-guard in dispatch handles
-// supersession). `dispatch` posts its own error response per request; the .catch
-// here keeps the serial chain alive after an UNEXPECTED throw (one that escaped
-// dispatch's own handling) — but we LOG it rather than swallow silently, so a worker
-// crash is visible instead of a request hanging with no response.
-let tail: Promise<void> = Promise.resolve();
+// Message types that are USER-driven signal reads. Receiving one marks user activity so
+// the background ion-cache prefetch backs off (PREFETCH_COOLDOWN_MS) and the user stays
+// responsive.
+const USER_READ_TYPES = new Set<WorkerRequest["type"]>([
+  "selectSpectrum",
+  "renderIonImage",
+  "renderMultiChannel",
+  "meanSpectrum",
+  "roiSpectrum",
+  "extractChrom",
+  "getOpticalImage",
+]);
+
+// Serialize ALL reader access through ONE mutex (the mzpeakts/parquet-wasm reader is
+// single-threaded / non-reentrant). The mutex — not the old per-dispatch tail — is now
+// the single gate: dispatched requests AND the fire-and-forget background prefetch both
+// acquire it, so they never race the reader, yet the prefetch releases between chunks so
+// a user request interleaves after at most one in-flight chunk (bounded soft-preempt).
+// `dispatch` posts its own error per request; this .catch logs an UNEXPECTED throw rather
+// than swallowing it, so a worker fault is visible instead of a silently hung request.
 scope.addEventListener("message", (e: MessageEvent<WorkerRequest>) => {
-  tail = tail
-    .then(() => dispatch(e.data, ctx, respond))
+  const msg = e.data;
+  if (msg && USER_READ_TYPES.has(msg.type)) {
+    ctx.lastUserActivity = typeof performance !== "undefined" ? performance.now() : 0;
+  }
+  void ctx.mutex
+    .runExclusive(() => dispatch(msg, ctx, respond))
+    .then(() => {
+      // After an imaging file opens, warm its ion cache in the background (interruptible,
+      // yields to user reads via the same mutex) so the first ion render is instant.
+      if (msg && msg.type === "open") startIonPrefetch(ctx);
+    })
     .catch((err) => {
       // eslint-disable-next-line no-console
       console.error("[engine.worker] unhandled dispatch error:", err);

@@ -16,7 +16,8 @@ import { readEngineSpectrumCached } from "../engine/spectrum";
 import { CacheBudget, SpectrumLruCache } from "../engine/cache";
 import { engineScanBreakdown } from "../engine/scanBreakdown";
 import { engineExtractChrom, type ChromContext } from "../engine/chrom";
-import { engineRenderIonImage, engineMeanSpectrum, engineRoiSpectrum, type SpectraArrayCache } from "../engine/imaging";
+import { engineRenderIonImage, engineMeanSpectrum, engineRoiSpectrum, prefetchIonCache, type SpectraArrayCache } from "../engine/imaging";
+import { Mutex } from "../engine/mutex";
 import { engineRenderMultiChannel } from "../engine/multichannel";
 import { engineGetOpticalImage } from "../engine/optical";
 import { engineArchiveList, engineArchiveMemberBytes, engineParquetFooter, engineSampleColumn, clearStructureCache } from "../engine/structure";
@@ -39,11 +40,67 @@ export type EngineContext = {
   /** LRU of decoded per-spectrum (m/z, intensity, msLevel) — accelerates repeat
    *  selectSpectrum + (Stage 2) the background prefetch. Shares `budget`. */
   spectrumCache: SpectrumLruCache;
+  /** Serializes ALL reader access (dispatched reads + the background prefetch) — the
+   *  reader is single-threaded / non-reentrant. */
+  mutex: Mutex;
+  /** `performance.now()` of the last user-driven signal read; the prefetch pauses
+   *  within `PREFETCH_COOLDOWN_MS` of it so user reads stay responsive. */
+  lastUserActivity: number;
+  /** Whether background prefetch on open is enabled (setCacheConfig.preloadEnabled). */
+  preloadEnabled: boolean;
 };
 
 export function createContext(): EngineContext {
   const budget = new CacheBudget();
-  return { active: null, gen: 0, scan: null, ionCache: null, budget, spectrumCache: new SpectrumLruCache(budget) };
+  return {
+    active: null,
+    gen: 0,
+    scan: null,
+    ionCache: null,
+    budget,
+    spectrumCache: new SpectrumLruCache(budget),
+    mutex: new Mutex(),
+    lastUserActivity: 0,
+    preloadEnabled: true,
+  };
+}
+
+/** Cooldown after user activity before the background prefetch resumes (Explorer's 350ms). */
+const PREFETCH_COOLDOWN_MS = 350;
+
+/**
+ * Fire-and-forget background prefetch of the ion-image cache, started after an imaging
+ * file opens. Warms `ctx.ionCache` via the interruptible `prefetchIonCache` so the FIRST
+ * ion render is an instant cache hit instead of a ~35 s cold stream. Reads run under
+ * `ctx.mutex` (never racing dispatched user reads), pause while the user is active, and
+ * bail the moment the file changes or a render already built the cache. Commits to the
+ * shared budget only on full success; a stopped/over-budget run leaves no trace.
+ */
+export function startIonPrefetch(ctx: EngineContext): void {
+  const ef = ctx.active;
+  const gen = ctx.gen;
+  if (!ef || !ef.grid || !ctx.preloadEnabled) return;
+  const grid = ef.grid;
+  void prefetchIonCache(ef.reader, grid, {
+    mutex: ctx.mutex,
+    shouldStop: () => ctx.gen !== gen || (ctx.ionCache?.complete ?? false),
+    isUserActive: () =>
+      typeof performance !== "undefined"
+        ? performance.now() - ctx.lastUserActivity < PREFETCH_COOLDOWN_MS
+        : false,
+    cooldownMs: PREFETCH_COOLDOWN_MS,
+    budgetRemaining: () => ctx.budget.remaining(),
+  })
+    .then(({ cache }) => {
+      // Commit only if still the current file and a render hasn't already built it.
+      if (ctx.gen === gen && cache && !ctx.ionCache) {
+        ctx.ionCache = cache;
+        ctx.budget.add(cache.bytes);
+      }
+    })
+    .catch(() => {
+      // Background warming is best-effort; a failure just means the first render is cold.
+    });
 }
 
 /** Map a thrown reader error to a wire error class (+ findings when present). */
@@ -97,6 +154,9 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
           // for renders) so they are structured-cloned, never detached.
           buffersOf(ef.tic),
         );
+        // NB: the background ion-cache prefetch is kicked off by the WORKER ENTRY after
+        // this open dispatch resolves (not here) — so `dispatch` stays free of background
+        // side-effects and the node dispatch-tests don't spawn an unsynchronized reader.
         return;
       }
 
@@ -117,6 +177,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         if (Number.isFinite(req.cacheLimitBytes) && req.cacheLimitBytes > 0) {
           ctx.budget.limitBytes = req.cacheLimitBytes;
         }
+        ctx.preloadEnabled = req.preloadEnabled;
         return;
 
       case "cancel":

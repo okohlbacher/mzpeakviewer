@@ -23,6 +23,14 @@ import { computeIonImageStats } from "../adapt/ionImage";
 import { adaptSpectrum } from "../adapt/spectrum";
 import { harvestDataArraysOrNull } from "../reader/arrays";
 import { streamSpectraDataArrays, type Reader } from "../reader/openUrl";
+import type { Mutex } from "./mutex";
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const nowMs = (): number => (typeof performance !== "undefined" ? performance.now() : Date.now());
+/** Background prefetch time-slice: hold the reader at most this long before yielding so a
+ *  user read interleaves promptly (bounded soft-preempt). One in-memory slice; a single
+ *  network row-group read inside it can run longer — same bound as one row-group fetch. */
+const PREFETCH_SLICE_MS = 30;
 
 /**
  * Read one spectrum's plain (mz, intensity) arrays from the DATA-ARRAY source
@@ -209,6 +217,112 @@ export async function engineRenderIonImage(
   // Commit the cache only if it held the whole grid within budget — else null (uncached).
   const cache: SpectraArrayCache | null = cacheable ? { byIndex: building, complete: true, bytes } : null;
   return { ionImage, stats, cache };
+}
+
+/** Cooperative control for the interruptible background prefetch. */
+export type PrefetchControl = {
+  /** Serializes reader access against dispatched user reads (the non-reentrant reader). */
+  mutex: Mutex;
+  /** Stop and discard immediately (gen changed / aborted / cache already built). */
+  shouldStop: () => boolean;
+  /** Pause (don't start a new read) while the user is active. */
+  isUserActive: () => boolean;
+  /** Cooldown slice while paused, ms. */
+  cooldownMs: number;
+  /** Bytes still free in the shared cache budget. */
+  budgetRemaining: () => number;
+  /** Progress over filled cells (optional). */
+  onProgress?: (done: number, total: number) => void;
+};
+
+/**
+ * Background-prefetch the ion-image cache: the SAME two-phase build as
+ * `engineRenderIonImage` (bulk spectra_data stream + per-pixel centroid fallback) MINUS
+ * the window-sum, so the resulting `SpectraArrayCache` is byte-for-byte what a cold
+ * render would have produced — a later render takes the instant cache-hit path.
+ *
+ * Cooperative + interruptible: every reader touch runs under `control.mutex` (so it never
+ * races a dispatched user read on the non-reentrant reader), it pauses while the user is
+ * active, and it bails the moment `shouldStop()` is true (file changed, render took over,
+ * or budget exhausted). Returns `{ cache }` (null when stopped or over budget).
+ */
+export async function prefetchIonCache(
+  reader: Reader,
+  gridWire: ImagingGridWire,
+  control: PrefetchControl,
+): Promise<{ cache: SpectraArrayCache | null; stopped: boolean }> {
+  const dense = gridWire.width * gridWire.height;
+  const coordToSpectrum = rebuildCoordMap(gridWire);
+  const spectrumToCoord = new Map<number, number>();
+  for (const [coordKey, spectrumIndex] of coordToSpectrum) {
+    if (coordKey >= 0 && coordKey < dense) spectrumToCoord.set(spectrumIndex, coordKey);
+  }
+  const total = spectrumToCoord.size;
+
+  const building = new Map<number, { mz: Float64Array; intensity: Float32Array }>();
+  let bytes = 0;
+  let done = 0;
+
+  // Pause loop: return false if we should stop while waiting.
+  const waitWhileUserActive = async (): Promise<boolean> => {
+    while (control.isUserActive()) {
+      if (control.shouldStop()) return false;
+      await sleep(control.cooldownMs);
+    }
+    return !control.shouldStop();
+  };
+
+  const filled = new Set<number>();
+  const it = streamSpectraDataArrays(reader)[Symbol.asyncIterator]();
+  let streamDone = false;
+  let overBudget = false;
+  try {
+    while (!streamDone) {
+      if (!(await waitWhileUserActive())) return { cache: null, stopped: true };
+      // Run a TIME-SLICED batch under the mutex: keep pulling decoded spectra (cheap,
+      // in-memory between network row-group reads) until the slice elapses, then release
+      // the reader and yield ONCE. Yielding per-spectrum would clamp to setTimeout's ~4ms
+      // floor × 34,840 spectra ⇒ ~100s+; slicing keeps the whole pass near its ~35s I/O cost.
+      await control.mutex.runExclusive(async () => {
+        const start = nowMs();
+        for (;;) {
+          const res = await it.next();
+          if (res.done) { streamDone = true; return; }
+          const { index, mz, intensity } = res.value;
+          const coordKey = spectrumToCoord.get(index);
+          if (coordKey !== undefined) {
+            bytes += mz.byteLength + intensity.byteLength;
+            if (bytes > control.budgetRemaining()) { overBudget = true; return; }
+            building.set(index, { mz, intensity });
+            filled.add(coordKey);
+            done++;
+          }
+          if (nowMs() - start > PREFETCH_SLICE_MS) return; // end the slice, yield below
+        }
+      });
+      if (overBudget) return { cache: null, stopped: false }; // too big to cache
+      control.onProgress?.(done, total);
+      await sleep(0); // ONE yield per slice (lets a queued user read take the mutex)
+    }
+  } finally {
+    if (it.return) await it.return(undefined);
+  }
+
+  // Centroid-only fallback for any grid cell the bulk stream didn't cover — keeps the
+  // prefetch cache identical to a render-built one (rare for data-array imaging files).
+  for (const [coordKey, spectrumIndex] of coordToSpectrum) {
+    if (coordKey < 0 || coordKey >= dense || filled.has(coordKey)) continue;
+    if (!(await waitWhileUserActive())) return { cache: null, stopped: true };
+    const arrs = await control.mutex.runExclusive(() => harvestDataArraysOrNull(reader, spectrumIndex));
+    done++;
+    control.onProgress?.(done, total);
+    if (!arrs) continue;
+    bytes += arrs.mz.byteLength + arrs.intensity.byteLength;
+    if (bytes > control.budgetRemaining()) return { cache: null, stopped: false };
+    building.set(spectrumIndex, { mz: arrs.mz, intensity: arrs.intensity });
+  }
+
+  return { cache: { byIndex: building, complete: true, bytes }, stopped: false };
 }
 
 // ── Mean / ROI spectrum ──────────────────────────────────────────────────────
