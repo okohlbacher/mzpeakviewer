@@ -7,6 +7,21 @@
 
 ---
 
+## Implementation status (updated 2026-06-15)
+
+- **Stage 1 — shipped (`f62c28b`):** memory-sized shared cache budget
+  (`clamp(deviceMemory×96, 192, 768) MB`) + a spectrum LRU read-through storing
+  m/z + intensity + msLevel only. Repeat `selectSpectrum` 448 ms → 13 ms.
+- **Stage 2 — shipped (`c133e2f`):** a FIFO reader mutex (replaces the per-dispatch
+  serialization) + an interruptible, time-sliced **background ion-cache prefetch on
+  open**. First ion render after open is now an instant cache hit (0.1 s vs 33 s cold,
+  verified in-browser); user reads preempt the prefetch (soft-preempt ≤ one 30 ms slice
+  + 350 ms cooldown). The cold-render wait is eliminated.
+- **Stage 3 — deferred (operator decision, 2026-06-15):** parallel HTTP/2 range reads +
+  `AbortSignal` true-interrupt require modifying the pinned `mzpeakts` submodule
+  (separate repo/policy) for now-modest gain (the latency is already hidden by Stage 2).
+  Kept as the §7 follow-up; revisit when there's appetite to touch the reader.
+
 ## 0. TL;DR
 
 1. **Rendering an ion image is ~100% I/O + decode, ~0% compute.** Measured: 35.4 s total, of which the window-sum over all 40.6 M points is **47 ms**. Do **not** optimize the math.
@@ -134,12 +149,12 @@ Covered in §2/§3: compute is already 47 ms; efficiency = I/O (parallel reads +
 
 ## 7. Recommended sequence
 
-1. **Port the spectrum prefetch cache** (Explorer's scheduler + LRU) into `@mzpeak/core`, **memory-sized and shared with the ion cache** (R2), storing **`mz`+`intensity`+`msLevel` only** (R3).
-2. **Two-lane scheduler** so user reads override prefetch (R1, soft preempt first).
-3. **MS0/1-only prefetch worklist** (R3) — big win on LC/DDA, neutral on imaging.
-4. **Background prefetch on open**, interruptible and de-prioritized, warming both caches (§3.2) — gated behind the scheduler so it can't starve foreground (Explorer's lesson).
-5. **Parallel range reads** over HTTP/2 (§3.1) — the structural fix for the 35 s → ~10–15 s; do alongside a signal-aware reader for true interrupt (R1 option 2).
-6. **Confirm HTTP/2 in-browser** and, if needed, enable it on the pull zone (§6).
-7. *(Upstream/format)* propose a pre-binned ion index for the worst-case cold render (§3.6).
+1. ✅ **Spectrum prefetch cache** — done (`f62c28b`): memory-sized, shared with the ion cache (R2), stores `mz`+`intensity`+`msLevel` only (R3).
+2. ✅ **User reads override prefetch** — done (`c133e2f`): the reader mutex bounds preemption to one in-flight 30 ms slice; activity stamp + 350 ms cooldown back the prefetch off (R1, soft preempt).
+3. ◻ **MS0/1-only prefetch worklist** (R3) — partial: the ion-cache prefetch covers all grid cells (imaging = all MS1). The LC/DDA spectrum-LRU prefetch that *skips MS2* (the ~3× win on the TMT file) is not yet wired — the cache already stores `msLevel` for it.
+4. ✅ **Background prefetch on open** — done (`c133e2f`): interruptible, time-sliced, warms the ion cache; can't starve foreground (mutex + cooldown).
+5. ◻ **Parallel range reads** over HTTP/2 + signal-aware reader for true interrupt (R1 option 2) — **deferred** (Stage 3, operator decision): needs `mzpeakts` submodule changes for modest gain now that Stage 2 hides the latency.
+6. ◻ **Confirm HTTP/2 in-browser** (§6) — DevTools Protocol column; the CDN supports `h2` (ALPN) but verify the custom hostname doesn't fall back to http/1.1.
+7. ◻ *(Upstream/format)* pre-binned ion index for the worst-case cold render (§3.6).
 
-**Effort/impact:** #1–#3 are medium effort, high impact for navigation + LC files and unify the caches. #4 makes imaging *feel* instant. #5 is the highest-ceiling but the most reader-invasive (parallelism + AbortSignal). #2/#6 are small.
+**Net effect of what shipped (Stages 1–2):** the cold ion-render wait is eliminated (background warm + instant cache hit), repeat spectrum navigation is instant, and memory is bounded by one device-sized budget. The remaining items (3, 5–7) are incremental and can wait.
