@@ -169,6 +169,25 @@ export function Idle() {
           </div>
         ) : (
           <>
+            {/* Remote URL — placed up top (between the intro text and the drop-zone) so it's
+                never hidden underneath the demo-dataset grid. */}
+            <form
+              onSubmit={(e) => { e.preventDefault(); const u = url.trim(); if (u) void openUrl(u); }}
+              style={{ margin: "0 0 1.25rem", display: "flex", gap: "0.5rem" }}
+            >
+              <input
+                data-testid="idle-url"
+                type="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="…or paste a https:// .mzpeak URL"
+                style={{ flex: 1, padding: "0.5rem 0.7rem", border: "1px solid var(--border-default, #e2e8f0)", borderRadius: 8, fontSize: "var(--text-sm, 0.85rem)" }}
+              />
+              <button type="submit" disabled={!url.trim()} style={{ padding: "0.5rem 1rem", border: "1px solid var(--blue-600, #3b54da)", borderRadius: 8, background: "var(--blue-600, #3b54da)", color: "#fff", cursor: url.trim() ? "pointer" : "not-allowed", fontWeight: "var(--weight-medium, 500)" }}>
+                Load
+              </button>
+            </form>
+
             {/* Drop-zone / file picker */}
             <div
               data-testid="idle-dropzone"
@@ -264,24 +283,6 @@ export function Idle() {
                 {dlErr}
               </p>
             )}
-
-            {/* Remote URL */}
-            <form
-              onSubmit={(e) => { e.preventDefault(); const u = url.trim(); if (u) void openUrl(u); }}
-              style={{ marginTop: "1.25rem", display: "flex", gap: "0.5rem" }}
-            >
-              <input
-                data-testid="idle-url"
-                type="url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="…or paste a https:// .mzpeak URL"
-                style={{ flex: 1, padding: "0.5rem 0.7rem", border: "1px solid var(--border-default, #e2e8f0)", borderRadius: 8, fontSize: "var(--text-sm, 0.85rem)" }}
-              />
-              <button type="submit" disabled={!url.trim()} style={{ padding: "0.5rem 1rem", border: "1px solid var(--blue-600, #3b54da)", borderRadius: 8, background: "var(--blue-600, #3b54da)", color: "#fff", cursor: url.trim() ? "pointer" : "not-allowed", fontWeight: "var(--weight-medium, 500)" }}>
-                Load
-              </button>
-            </form>
 
             {error && (
               <p data-testid="idle-error" style={{ marginTop: "1rem", color: "var(--danger, #dc2626)", fontSize: "var(--text-sm, 0.85rem)" }}>
