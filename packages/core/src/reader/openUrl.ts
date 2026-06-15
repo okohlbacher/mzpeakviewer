@@ -129,8 +129,13 @@ export async function* streamSpectraDataArrays(
   let dr: Awaited<ReturnType<Reader["spectrumData"]>>;
   try {
     dr = await reader.spectrumData();
-  } catch {
-    return;
+  } catch (e) {
+    // Only an EMPTY (0-row-group) spectra_data is a legitimate "no stream" — common for
+    // all-centroid LC/DDA files. ANY other throw (network drop, corrupt footer, decode
+    // panic) is a real failure: rethrow so the caller surfaces it instead of silently
+    // rendering a blank/partial ion image. (An ABSENT file returns null here, not a throw.)
+    if (e instanceof Error && e.message === "Empty Parquet file") return;
+    throw e;
   }
   yield* streamArrays(dr);
 }
@@ -147,8 +152,11 @@ export async function* streamSpectraPeaksArrays(
   let dr: Awaited<ReturnType<Reader["spectrumPeaks"]>>;
   try {
     dr = await reader.spectrumPeaks();
-  } catch {
-    return; // absent/empty spectra_peaks → no stream
+  } catch (e) {
+    // Empty (0-row-group) spectra_peaks → legitimate "no stream"; rethrow real failures
+    // (absent file returns null, handled by streamArrays). See streamSpectraDataArrays.
+    if (e instanceof Error && e.message === "Empty Parquet file") return;
+    throw e;
   }
   yield* streamArrays(dr);
 }

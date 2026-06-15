@@ -32,6 +32,48 @@ const nowMs = (): number => (typeof performance !== "undefined" ? performance.no
  *  network row-group read inside it can run longer — same bound as one row-group fetch. */
 const PREFETCH_SLICE_MS = 30;
 
+/** Promoted per-spectrum MS-level column (mirrors open.ts buildTic / spectrum.ts). */
+const MS_LEVEL_COL = "MS_1000511_ms_level";
+
+/** Bulk-read the promoted MS-level column vectorized; null when the column is absent. */
+function readMsLevels(reader: Reader): Int16Array | null {
+  const sm = (reader as unknown as {
+    spectrumMetadata?: {
+      spectra?: { getChild?: (n: string) => { get(i: number): unknown } | null } | null;
+      length?: number;
+    } | null;
+  }).spectrumMetadata;
+  const spectra = sm?.spectra;
+  if (!spectra || typeof spectra.getChild !== "function") return null;
+  const col = spectra.getChild(MS_LEVEL_COL);
+  if (!col) return null;
+  const n = sm?.length ?? 0;
+  const levels = new Int16Array(n);
+  for (let i = 0; i < n; i++) {
+    const v = col.get(i);
+    levels[i] = typeof v === "number" && Number.isFinite(v) ? v : 0;
+  }
+  return levels;
+}
+
+/**
+ * Build the "include this spectrum in the ion image?" predicate enforcing the MS1-ONLY
+ * rule (design requirement: NEVER sum MS2 into an ion image / its cache). Mirrors
+ * buildTic's fallback: filter to MS1 only when the grid actually carries MS1 data; if NO
+ * mapped spectrum is MS1 (a misannotated / level-0 file) or the MS-level column is absent,
+ * include every mapped spectrum (so such files still render rather than going blank).
+ */
+export function makeMs1Only(reader: Reader, mappedIndices: Iterable<number>): (i: number) => boolean {
+  const levels = readMsLevels(reader);
+  if (!levels) return () => true;
+  let hasMs1 = false;
+  for (const si of mappedIndices) {
+    if (si >= 0 && si < levels.length && levels[si] === 1) { hasMs1 = true; break; }
+  }
+  if (!hasMs1) return () => true; // no MS1 at all → don't filter (fallback)
+  return (i: number) => i >= 0 && i < levels.length && levels[i] === 1;
+}
+
 /**
  * Read one spectrum's plain (mz, intensity) arrays from the DATA-ARRAY source
  * (spectra_data), with a centroid (spectra_peaks) fallback ONLY when the spectrum
@@ -120,11 +162,15 @@ export async function engineRenderIonImage(
 
   // coordKey → spectrumIndex for every filled cell (inverse of flattenGrid).
   const coordToSpectrum = rebuildCoordMap(gridWire);
+  // MS1-only gate (never sum MS2 into an ion image); fallback includes all when the grid
+  // carries no MS1 data — mirrors buildTic. Excluded (MS2) pixels stay 0 in every path.
+  const isMs1 = makeMs1Only(reader, coordToSpectrum.values());
   // Inverse: spectrumIndex → coordKey, so a stream keyed by spectrum index writes pixels
   // directly. Filled cells are 1:1 with spectra.
   const spectrumToCoord = new Map<number, number>();
   for (const [coordKey, spectrumIndex] of coordToSpectrum) {
-    if (coordKey >= 0 && coordKey < ionImage.length) spectrumToCoord.set(spectrumIndex, coordKey);
+    if (coordKey >= 0 && coordKey < ionImage.length && isMs1(spectrumIndex))
+      spectrumToCoord.set(spectrumIndex, coordKey);
   }
   const total = spectrumToCoord.size;
 
@@ -204,6 +250,7 @@ export async function engineRenderIonImage(
   // selection of the per-pixel path. Rare; for a data-array imaging file this loop is empty.
   for (const [coordKey, spectrumIndex] of coordToSpectrum) {
     if (coordKey < 0 || coordKey >= ionImage.length || filled.has(coordKey)) continue;
+    if (!isMs1(spectrumIndex)) continue; // MS2 cell — stays 0 (parity with the build pass)
     const arrs = await readSpectrumArrays(reader, spectrumIndex);
     done++;
     tick();
@@ -253,9 +300,13 @@ export async function prefetchIonCache(
 ): Promise<{ cache: SpectraArrayCache | null; stopped: boolean }> {
   const dense = gridWire.width * gridWire.height;
   const coordToSpectrum = rebuildCoordMap(gridWire);
+  // MS1-only gate — the prefetch cache must be byte-identical to a render-built one, so it
+  // applies the SAME filter (never caches MS2). See engineRenderIonImage / makeMs1Only.
+  const isMs1 = makeMs1Only(reader, coordToSpectrum.values());
   const spectrumToCoord = new Map<number, number>();
   for (const [coordKey, spectrumIndex] of coordToSpectrum) {
-    if (coordKey >= 0 && coordKey < dense) spectrumToCoord.set(spectrumIndex, coordKey);
+    if (coordKey >= 0 && coordKey < dense && isMs1(spectrumIndex))
+      spectrumToCoord.set(spectrumIndex, coordKey);
   }
   const total = spectrumToCoord.size;
 
@@ -312,6 +363,7 @@ export async function prefetchIonCache(
   // prefetch cache identical to a render-built one (rare for data-array imaging files).
   for (const [coordKey, spectrumIndex] of coordToSpectrum) {
     if (coordKey < 0 || coordKey >= dense || filled.has(coordKey)) continue;
+    if (!isMs1(spectrumIndex)) continue; // MS2 cell — never cached (parity with the build pass)
     if (!(await waitWhileUserActive())) return { cache: null, stopped: true };
     const arrs = await control.mutex.runExclusive(() => harvestDataArraysOrNull(reader, spectrumIndex));
     done++;

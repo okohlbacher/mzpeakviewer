@@ -82,6 +82,14 @@ const PREFETCH_COOLDOWN_MS = 350;
  * bail the moment the file changes or a render already built the cache. Commits to the
  * shared budget only on full success; a stopped/over-budget run leaves no trace.
  */
+/** Signal the UI that ion images are now warm (any m/z renders instantly). `points` =
+ *  total decoded points held across the grid's cached spectra (not an m/z-window count). */
+function emitIonIndexReady(cache: SpectraArrayCache, respond: Respond): void {
+  let points = 0;
+  for (const a of cache.byIndex.values()) points += a.mz.length;
+  respond({ type: "ionIndexReady", points });
+}
+
 export function startIonPrefetch(ctx: EngineContext, respond?: Respond): void {
   const ef = ctx.active;
   const gen = ctx.gen;
@@ -102,11 +110,7 @@ export function startIonPrefetch(ctx: EngineContext, respond?: Respond): void {
       if (ctx.gen === gen && cache && !ctx.ionCache) {
         ctx.ionCache = cache;
         ctx.budget.add(cache.bytes);
-        // Signal the UI that ion images are now warm (any m/z renders instantly). `points`
-        // = total decoded points held (the whole grid's spectra, not specific m/z windows).
-        let points = 0;
-        for (const a of cache.byIndex.values()) points += a.mz.length;
-        respond?.({ type: "ionIndexReady", points });
+        if (respond) emitIonIndexReady(cache, respond);
       }
     })
     .catch(() => {
@@ -164,6 +168,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         ctx.ionCache = null; // decoded-spectra cache is per-file — drop it
         ctx.spectrumCache.clear(); // per-file spectrum LRU — drop it
         ctx.budget.resetUsage(); // both caches cleared → reset the shared usage
+        ctx.remote = false; // reset per-open so a failed/superseded open can't leave a stale prefetch gate
         clearStructureCache(); // path-keyed footer cache must not leak across files
         const ef =
           req.source.kind === "file"
@@ -203,6 +208,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         ctx.ionCache = null;
         ctx.spectrumCache.clear();
         ctx.budget.resetUsage();
+        ctx.remote = false;
         return; // no correlated response
       }
 
@@ -276,6 +282,10 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
           if (prev) ctx.budget.sub(prev.bytes);
           if (cache) ctx.budget.add(cache.bytes);
           ctx.ionCache = cache;
+          // A render that built the cache itself (beating the background prefetch) must
+          // still emit the warm signal — otherwise it's lost (the prefetch's commit is
+          // gated on !ctx.ionCache and won't fire). Fires at most once per file.
+          if (cache && cache.complete) emitIonIndexReady(cache, respond);
         }
         respond({ type: "renderResult", requestId: req.requestId, ionImage, stats }, buffersOf(ionImage));
         return;
