@@ -14,10 +14,14 @@ import { currentShareUrl } from "./urlSync";
 
 export function ShareButton() {
   const phase = useStore((s) => s.phase);
+  const sourceUrl = useStore((s) => s.sourceUrl);
   const [copied, setCopied] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
 
-  const ready = phase === "ready";
+  // A share link must reference the dataset by URL. A LOCAL file has no shareable URL, so
+  // sharing is disabled — a `?spectrum=N`-style link with no `file=` is useless off this machine.
+  const canShare = phase === "ready" && sourceUrl != null;
+  const localOnly = phase === "ready" && sourceUrl == null;
 
   const onShare = useCallback(async () => {
     const url = currentShareUrl();
@@ -42,12 +46,15 @@ export function ShareButton() {
   }, []);
 
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}>
+    <span
+      style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
+      title={localOnly ? "Local files can't be shared — open the dataset from a URL for a shareable link." : undefined}
+    >
       <Button
         data-testid="share-btn"
         variant="secondary"
         size="sm"
-        disabled={!ready}
+        disabled={!canShare}
         onClick={() => void onShare()}
         iconLeft={
           <svg

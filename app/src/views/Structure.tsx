@@ -33,12 +33,74 @@ function fmtFloat(n: number): string {
 function isManifest(path: string): boolean {
   return path.split("/").pop()?.toLowerCase() === "mzpeak_index.json";
 }
-/** Manifest first (it's the archive's table of contents), then the original (stable) order. */
+/** Embedded raster image (optical / derived-MS overview, the images/ folder — Q10). */
+function isImage(path: string): boolean {
+  return /\.(tiff?|png|jpe?g|gif|bmp|webp)$/i.test(path);
+}
+
+/** Member category — drives both ordering and the row icon. */
+type MemberCategory = "manifest" | "parquet" | "image" | "other";
+function categoryOf(m: Member): MemberCategory {
+  if (isManifest(m.path)) return "manifest";
+  if (m.isParquet) return "parquet";
+  if (isImage(m.path)) return "image";
+  return "other"; // embedded files / anything else
+}
+/** Render order: index.json (the TOC) → Parquet payload → images → other embedded files.
+ *  Embedded files are shown ONLY after the Parquet payload. Stable within each category. */
+const CATEGORY_RANK: Record<MemberCategory, number> = { manifest: 0, parquet: 1, image: 2, other: 3 };
 function orderMembers(members: Member[]): Member[] {
   return members
     .map((m, i) => ({ m, i }))
-    .sort((a, b) => (isManifest(a.m.path) ? 0 : 1) - (isManifest(b.m.path) ? 0 : 1) || a.i - b.i)
+    .sort((a, b) => CATEGORY_RANK[categoryOf(a.m)] - CATEGORY_RANK[categoryOf(b.m)] || a.i - b.i)
     .map((x) => x.m);
+}
+
+/** Distinct icon per category: braces = index.json, columns = parquet arrays, picture =
+ *  image, page = other embedded file. Fixed color per category so the kind is scannable. */
+function MemberIcon({ category }: { category: MemberCategory }) {
+  const base = {
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  const sz = (color: string) => ({ width: "0.95rem", height: "0.95rem", flexShrink: 0, color });
+  switch (category) {
+    case "manifest": // index.json — curly braces
+      return (
+        <svg {...base} style={sz("var(--accent, #3b54da)")}>
+          <path d="M9 4H8a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h1" />
+          <path d="M15 4h1a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-1" />
+        </svg>
+      );
+    case "parquet": // columnar arrays — columns
+      return (
+        <svg {...base} style={sz("var(--blue-600, #3b54da)")}>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <line x1="9" y1="4" x2="9" y2="20" />
+          <line x1="15" y1="4" x2="15" y2="20" />
+        </svg>
+      );
+    case "image": // embedded raster image
+      return (
+        <svg {...base} style={sz("var(--success, #1a8249)")}>
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <circle cx="8.5" cy="8.5" r="1.5" />
+          <path d="m21 15-5-5L5 21" />
+        </svg>
+      );
+    default: // other embedded file — page with folded corner
+      return (
+        <svg {...base} style={sz("var(--text-muted, #94a3b8)")}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+        </svg>
+      );
+  }
 }
 
 export function Structure() {
@@ -87,7 +149,8 @@ export function Structure() {
           {error && <p data-testid="structure-error" style={{ color: "var(--danger, #c00)" }}>{error}</p>}
           <ul data-testid="structure-members" style={{ listStyle: "none", margin: 0, padding: 0, fontFamily: "var(--font-mono, monospace)", fontSize: "var(--text-sm, 0.85rem)" }}>
             {orderMembers(members).map((m) => {
-              const manifest = isManifest(m.path);
+              const category = categoryOf(m);
+              const manifest = category === "manifest";
               const clickable = m.isParquet || manifest;
               return (
                 <li key={m.path}>
@@ -96,6 +159,7 @@ export function Structure() {
                     disabled={!clickable}
                     title={manifest ? "View mzpeak_index.json in Metadata" : (m.kind ?? undefined)}
                     data-testid={manifest ? "structure-manifest" : undefined}
+                    data-category={category}
                     data-parquet={m.isParquet ? "true" : undefined}
                     style={{
                       display: "flex", width: "100%", justifyContent: "space-between", gap: "0.75rem", alignItems: "center",
@@ -106,6 +170,7 @@ export function Structure() {
                     }}
                   >
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                      <MemberIcon category={category} />
                       {manifest && (
                         <span style={{ fontFamily: "var(--font-sans)", fontSize: "0.62rem", fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--accent, #3b54da)", background: "var(--gray-0, #fff)", border: "1px solid var(--accent, #3b54da)", borderRadius: 3, padding: "0 0.3rem", flexShrink: 0 }}>
                           manifest

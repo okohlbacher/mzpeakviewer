@@ -77,6 +77,38 @@ test("Structure (real clicks): list members → inspect a parquet footer", async
   expect(await page.getByTestId("structure-error").count()).toBe(0);
 });
 
+test("Structure: index.json first, then the Parquet payload, then embedded files", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTestId("file-input").setInputFiles(IMAGING);
+  await expect(page.getByTestId("is-imaging")).toHaveText("yes", { timeout: 45_000 });
+  await page.getByTestId("accordion-advanced").click();
+  await page.getByTestId("nav-tab-structure").click();
+  await expect(page.getByTestId("structure-view")).toBeVisible();
+
+  // Category of each member row, in render order.
+  const cats = await page
+    .locator('[data-testid="structure-members"] button')
+    .evaluateAll((btns) => btns.map((b) => b.getAttribute("data-category")));
+  expect(cats.length).toBeGreaterThan(1);
+  expect(cats[0]).toBe("manifest"); // index.json pinned first
+  expect(cats).toContain("parquet");
+
+  // Non-decreasing category rank → embedded files (image/other) only AFTER the parquet payload.
+  const rank: Record<string, number> = { manifest: 0, parquet: 1, image: 2, other: 3 };
+  for (let i = 1; i < cats.length; i++) {
+    expect(rank[cats[i] ?? "other"]!).toBeGreaterThanOrEqual(rank[cats[i - 1] ?? "other"]!);
+  }
+});
+
+test("local file: Share view is disabled (no shareable URL off this machine)", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTestId("file-input").setInputFiles(IMAGING);
+  await expect(page.getByTestId("is-imaging")).toHaveText("yes", { timeout: 45_000 });
+  const shareBtn = page.getByTestId("share-btn");
+  await expect(shareBtn).toBeVisible();
+  await expect(shareBtn).toBeDisabled(); // local file → sourceUrl null → can't share
+});
+
 test("Structure → mzpeak_index.json redirects to the Metadata manifest (+ download enabled)", async ({ page }) => {
   await page.goto("/");
   await page.getByTestId("file-input").setInputFiles(IMAGING);
