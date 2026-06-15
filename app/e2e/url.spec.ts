@@ -93,3 +93,28 @@ test("share button produces a canonical deep link for the current view", async (
   // spectrum=0 selection round-trips as the spectrum form.
   expect(search).toContain("spectrum=0");
 });
+
+// ---------------------------------------------------------------------------
+// Regression: a file opened through the UI (the URL box / cloud demo → openUrl),
+// NOT via a ?file= deep link, must STILL produce a share link that references the
+// dataset. The bug was that the source URL was captured only on the deep-link path,
+// so a UI-opened cloud file shared as `?spectrum=N` with no `file=`.
+// ---------------------------------------------------------------------------
+test("share after opening via the UI URL box (not a deep link) still references the dataset", async ({ page, baseURL }) => {
+  await page.goto("/");
+  // Open the same-origin demo through the UI openUrl path. An ABSOLUTE URL so the
+  // type="url" box accepts it (it rejects relative paths).
+  const origin = baseURL ?? (await page.evaluate(() => location.origin));
+  await page.getByTestId("idle-url").fill(`${origin}${DEMO}`);
+  await page.getByTestId("idle-url").press("Enter");
+
+  const shareBtn = page.getByTestId("share-btn");
+  await expect(shareBtn).toBeVisible({ timeout: 60_000 });
+  await expect(shareBtn).toBeEnabled({ timeout: 60_000 });
+  await shareBtn.click();
+
+  await page.waitForFunction(() => window.location.search.includes("file="), { timeout: 5_000 });
+  const search = decodeURIComponent(new URL(page.url()).search);
+  expect(search).toContain("file=");
+  expect(search).toContain(DEMO); // the dataset URI is embedded, not dropped
+});

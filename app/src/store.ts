@@ -53,6 +53,10 @@ export interface AppState {
   opticalImages: OpticalImageMeta[];
   fileName: string | null;
   fileSize: number | null;
+  /** The URL the current file was opened from (cloud demo, pasted URL, or ?file= deep link),
+   *  or null for a local file. This is the shareable source URI the "Share view" link embeds
+   *  as `file=`; without it a deep link can't reference the dataset. */
+  sourceUrl: string | null;
 
   // imaging layer products — lifted out of the Imaging view so they persist across
   // tab switches and the Overlay view can composite them as stackable layers.
@@ -153,6 +157,7 @@ export const useStore = create<AppState>((set, get) => ({
   opticalImages: [],
   fileName: null,
   fileSize: null,
+  sourceUrl: null,
 
   // imaging layer products
   ionImage: null,
@@ -217,6 +222,7 @@ export const useStore = create<AppState>((set, get) => ({
       channels: [],
       fileName: file.name,
       fileSize: null,
+      sourceUrl: null, // local file — not shareable by URL
       view: "summary",
       selector: null,
       msLevelFilter: null,
@@ -359,6 +365,7 @@ export const useStore = create<AppState>((set, get) => ({
       channels: [],
       fileName: displayName,
       fileSize: null,
+      sourceUrl: url, // remote source — the shareable URI for deep links
       view: "summary",
       selector: null,
       msLevelFilter: null,
@@ -469,6 +476,7 @@ export const useStore = create<AppState>((set, get) => ({
       channels: [],
       fileName: null,
       fileSize: null,
+      sourceUrl: null,
       view: "summary",
       selector: null,
       msLevelFilter: null,

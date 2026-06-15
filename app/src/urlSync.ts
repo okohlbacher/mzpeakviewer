@@ -25,12 +25,6 @@ import {
 import { useStore } from "./store";
 
 // ---------------------------------------------------------------------------
-// Module-local record of the URL the current file was opened from. The app
-// store tracks `fileName` (a display name) but not the source URL, so we keep
-// the authoritative ?file= value here for share-link round-tripping.
-// ---------------------------------------------------------------------------
-let openedFromUrl: string | null = null;
-
 /** The mode the URL grammar resolves against, derived from capabilities. */
 function modeFromCapabilities(): FileMode {
   const caps = useStore.getState().capabilities;
@@ -101,8 +95,6 @@ export async function hydrateFromLocation(): Promise<void> {
   // but with no file there's no mode and no selection to apply.
   if (!raw.file) return;
 
-  openedFromUrl = raw.file;
-
   // Open the file FULLY before applying the deep-linked view. openUrl's promise
   // settles only after its auto-preselect of spectrum 0 (which routes the view to
   // "spectra"); awaiting it here means the URL's explicit ?view= is applied LAST and
@@ -138,7 +130,7 @@ export function currentShareUrl(): string {
 
   const v: ViewState = {
     ...DEFAULT_VIEW_STATE,
-    sourceUrl: openedFromUrl,
+    sourceUrl: s.sourceUrl,
     view: s.view,
     selector,
     // chrom: only the TIC mode is meaningful in the current store; emit it so
@@ -152,5 +144,5 @@ export function currentShareUrl(): string {
 
 /** Test/debug hook: expose the source URL the current file was opened from. */
 export function sourceUrl(): string | null {
-  return openedFromUrl;
+  return useStore.getState().sourceUrl;
 }
