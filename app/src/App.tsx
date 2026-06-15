@@ -91,15 +91,15 @@ function Sidebar() {
   // a button that is hidden inside a collapsed accordion region.
   const allTabs: View[] = ["summary", "spectra"];
   if (showChrom) allTabs.push("chromatograms");
-  // Advanced accordion items — only when the accordion is open.
-  if (expanded.advanced) allTabs.push("metadata", "structure");
-  // MSI accordion items — only when imaging AND the accordion is open.
+  // MSI accordion items FIRST (only when imaging AND open) — Advanced is always last.
   // Optical/Overlay only appear when the file actually carries an optical image.
   if (isImaging && expanded.imaging) {
     allTabs.push("overview", "ion", "multi");
     if (hasOptical) allTabs.push("optical", "overlay");
     allTabs.push("grid");
   }
+  // Advanced accordion items LAST (only when the accordion is open).
+  if (expanded.advanced) allTabs.push("metadata", "structure");
 
   // When the active view is inside a collapsed accordion, auto-expand it so
   // the active tab is always reachable in the roving set.
@@ -317,24 +317,8 @@ function Sidebar() {
           <TabButton id="chromatograms" label="Chromatograms" data-testid="nav-tab-chromatograms" />
         )}
 
-        {/* Advanced accordion */}
-        <AccordionHeader
-          accordionKey="advanced"
-          label="Advanced"
-          open={expanded.advanced}
-          testid="accordion-advanced"
-        />
-        <div
-          id="accordion-body-advanced"
-          role="region"
-          aria-labelledby="accordion-head-advanced"
-          hidden={!expanded.advanced}
-        >
-          <TabButton id="metadata" label="Metadata" depth={1} />
-          <TabButton id="structure" label="Structure" depth={1} />
-        </div>
-
-        {/* MSI accordion — only when isImaging */}
+        {/* MSI accordion — only when isImaging. Rendered BEFORE Advanced so Advanced is always
+            the last section in the rail (after MSI). */}
         {isImaging && (
           <>
             <AccordionHeader
@@ -359,6 +343,23 @@ function Sidebar() {
             </div>
           </>
         )}
+
+        {/* Advanced accordion — ALWAYS LAST (after MSI). */}
+        <AccordionHeader
+          accordionKey="advanced"
+          label="Advanced"
+          open={expanded.advanced}
+          testid="accordion-advanced"
+        />
+        <div
+          id="accordion-body-advanced"
+          role="region"
+          aria-labelledby="accordion-head-advanced"
+          hidden={!expanded.advanced}
+        >
+          <TabButton id="metadata" label="Metadata" depth={1} />
+          <TabButton id="structure" label="Structure" depth={1} />
+        </div>
       </div>
 
       {/* Mini file stats at the bottom */}
