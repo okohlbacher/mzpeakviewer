@@ -1,0 +1,51 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   mzPeak Design System — Colormap tokens
+   The perceptually-uniform scientific colormaps are the product's hero visual.
+   Stops are the exact matplotlib anchors used in the app's rasterize.ts, exposed
+   here as CSS gradients so legends, scale bars, swatches and chrome can quote
+   the real palette. NEVER recolour these — perceptual uniformity is the point.
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Viridis — default ion-image / TIC colormap (9 matplotlib anchors) */
+  --viridis-0: #440154;
+  --viridis-1: #482878;
+  --viridis-2: #3e4a89;
+  --viridis-3: #31688e;
+  --viridis-4: #26828e;
+  --viridis-5: #1f9e89;
+  --viridis-6: #35b779;
+  --viridis-7: #6ece58;
+  --viridis-8: #fde725;
+  --gradient-viridis: linear-gradient(
+    90deg,
+    var(--viridis-0) 0%, var(--viridis-1) 12.5%, var(--viridis-2) 25%,
+    var(--viridis-3) 37.5%, var(--viridis-4) 50%, var(--viridis-5) 62.5%,
+    var(--viridis-6) 75%, var(--viridis-7) 87.5%, var(--viridis-8) 100%
+  );
+
+  /* Inferno — high-contrast alternate */
+  --inferno-0: #000004;
+  --inferno-1: #280b54;
+  --inferno-2: #65156e;
+  --inferno-3: #9f2a63;
+  --inferno-4: #d44842;
+  --inferno-5: #f57d15;
+  --inferno-6: #fac127;
+  --inferno-7: #f9c934;
+  --inferno-8: #fcffa4;
+  --gradient-inferno: linear-gradient(
+    90deg,
+    var(--inferno-0) 0%, var(--inferno-1) 12.5%, var(--inferno-2) 25%,
+    var(--inferno-3) 37.5%, var(--inferno-4) 50%, var(--inferno-5) 62.5%,
+    var(--inferno-6) 75%, var(--inferno-7) 87.5%, var(--inferno-8) 100%
+  );
+
+  /* Grayscale — neutral intensity ramp */
+  --gradient-gray: linear-gradient(90deg, #000000 0%, #ffffff 100%); /* @kind color */
+
+  /* Base-peak m/z hue cycle (violet→red, stops short of wrap) */
+  --gradient-basepeak: linear-gradient(
+    90deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff
+  ); /* @kind color */
+}

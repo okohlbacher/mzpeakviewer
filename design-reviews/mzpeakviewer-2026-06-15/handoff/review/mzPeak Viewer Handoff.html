@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mzPeak Viewer — Redesign Handoff</title>
+<link rel="stylesheet" href="../_ds/mzpeak-iv-design-system-019e2535-1b34-72fa-99aa-4e449e8dbbdb/tokens/fonts.css">
+<link rel="stylesheet" href="../_ds/mzpeak-iv-design-system-019e2535-1b34-72fa-99aa-4e449e8dbbdb/tokens/colors.css">
+<link rel="stylesheet" href="../_ds/mzpeak-iv-design-system-019e2535-1b34-72fa-99aa-4e449e8dbbdb/tokens/typography.css">
+<link rel="stylesheet" href="../_ds/mzpeak-iv-design-system-019e2535-1b34-72fa-99aa-4e449e8dbbdb/tokens/spacing.css">
+<link rel="stylesheet" href="../_ds/mzpeak-iv-design-system-019e2535-1b34-72fa-99aa-4e449e8dbbdb/tokens/base.css">
+<style>
+  body { background: var(--gray-100); color: var(--gray-700); }
+  .page {
+    max-width: 860px; margin: 0 auto; background: var(--gray-0);
+    padding: 64px 72px 80px; box-shadow: var(--shadow-2); min-height: 100vh;
+  }
+  .backbar {
+    max-width: 860px; margin: 0 auto; display: flex; align-items: center; gap: 10px;
+    padding: 14px 8px; font-size: 12px; color: var(--gray-500);
+  }
+  .backbar a { font-weight: 600; }
+  h1 { font-size: 30px; letter-spacing: -0.02em; color: var(--gray-900); margin: 0 0 6px; }
+  .lede { font-size: 15px; color: var(--gray-600); line-height: 1.55; margin: 0 0 4px; max-width: 62ch; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+  .pill { font-size: 11px; font-weight: 500; border: 1px solid var(--gray-200); background: var(--gray-50); border-radius: var(--radius-pill); padding: 3px 10px; color: var(--gray-600); }
+  .pill b { color: var(--blue-700); }
+  h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--blue-700);
+    margin: 52px 0 14px; padding-bottom: 8px; border-bottom: 2px solid var(--blue-100);
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  h2 .n { font-family: var(--font-mono); font-size: 12px; color: var(--gray-400); }
+  h3 { font-size: 16px; color: var(--gray-900); margin: 26px 0 4px; letter-spacing: -0.01em; }
+  p { font-size: 13.5px; line-height: 1.6; margin: 8px 0; max-width: 66ch; }
+  .eyebrow { text-transform: uppercase; letter-spacing: 0.06em; font-size: 10.5px; font-weight: 600; color: var(--gray-400); }
+  ul { margin: 8px 0; padding-left: 0; list-style: none; max-width: 66ch; }
+  li { font-size: 13px; line-height: 1.55; padding: 4px 0 4px 20px; position: relative; }
+  li::before { content: "→"; position: absolute; left: 0; color: var(--blue-500); }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  code { font-family: var(--font-mono); font-size: 12px; background: var(--gray-100); border-radius: 3px; padding: 1px 5px; color: var(--gray-700); }
+
+  /* Before / after blocks */
+  .ba { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--gray-200); border-radius: var(--radius-md); overflow: hidden; margin: 12px 0 4px; }
+  .ba > div { padding: 12px 15px; font-size: 12.5px; line-height: 1.5; }
+  .ba .before { background: var(--gray-25); border-right: 1px solid var(--gray-200); }
+  .ba .after { background: var(--blue-50); }
+  .ba .lbl { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; display: block; margin-bottom: 5px; }
+  .ba .before .lbl { color: var(--gray-400); }
+  .ba .after .lbl { color: var(--blue-600); }
+
+  /* Screen block */
+  .screen { border-top: 1px solid var(--gray-150); padding-top: 4px; margin-top: 30px; }
+  .screen:first-of-type { border-top: none; }
+  .scr-h { display: flex; align-items: baseline; gap: 10px; }
+  .scr-h .ix { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: #fff; background: var(--blue-600); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; align-self: center; }
+
+  /* Component inventory table */
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 12.5px; }
+  th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-400); font-weight: 600; padding: 7px 10px; border-bottom: 1px solid var(--gray-200); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--gray-100); vertical-align: top; line-height: 1.45; }
+  td .cn { font-family: var(--font-mono); color: var(--blue-700); font-weight: 500; }
+  .tag { display: inline-block; font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 7px; border-radius: var(--radius-pill); }
+  .tag.reuse { background: #eafaf0; color: var(--success); }
+  .tag.extend { background: #fff8e1; color: var(--warning); }
+  .tag.new { background: var(--blue-50); color: var(--blue-700); }
+
+  .callout { border: 1px solid var(--blue-200); background: var(--blue-50); border-radius: var(--radius-md); padding: 16px 18px; margin: 16px 0; }
+  .callout h3 { margin-top: 0; color: var(--blue-800); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  .loop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; margin: 10px 0; }
+  .loop .node { border: 1px solid var(--blue-200); background: var(--gray-0); border-radius: var(--radius-sm); padding: 5px 10px; font-weight: 500; color: var(--blue-700); }
+  .loop .ar { color: var(--blue-400); }
+  .foot { margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--gray-200); font-size: 11.5px; color: var(--gray-400); }
+  @media print { .backbar { display: none; } body { background: #fff; } .page { box-shadow: none; max-width: none; padding: 0; } }
+  @media (max-width: 720px) { .page { padding: 36px 22px; } .ba, .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="backbar">← <a href="mzPeak%20Viewer%20Redesign.html">Back to interactive wireframes</a> · Redesign handoff</div>
+<div class="page">
+
+  <span class="eyebrow">Design review &amp; redesign proposal</span>
+  <h1>mzPeak Viewer — Redesign Handoff</h1>
+  <p class="lede">A structure-level redesign of the unified, capability-adaptive mzPeak viewer (the merge of mzPeakIV imaging + mzPeakExplorer) for proteomics and imaging-MS researchers. The brief: sharpen information hierarchy, make empty/loading/error states honest, raise accessibility, and make the imaging round-trip — <span class="mono">m/z → ion image → pixel → spectrum</span> — self-evident, all without leaving the dense, instrument-grade aesthetic or the existing token system.</p>
+
+  <div class="meta-row">
+    <span class="pill">Scope: <b>6 connected screens</b></span>
+    <span class="pill">Fidelity: <b>mid-fi wireframe</b></span>
+    <span class="pill">Type: <b>IBM Plex Sans / Mono</b></span>
+    <span class="pill">Accent: <b>#3b54da</b></span>
+    <span class="pill">Client-side, static-deployable</span>
+    <span class="pill">No new color tokens</span>
+  </div>
+
+  <h2><span class="n">01</span> What this redesign is — and isn’t</h2>
+  <p>This is a <b>wireframe-level review</b>, not a reskin. The visual language is unchanged: hairline-bordered light chrome wrapping a dark “data stage”, IBM Plex Sans for chrome and IBM Plex Mono for every measured value, the OpenMS electric-blue <code>#3b54da</code> accent used sparingly, viridis/inferno as the only data colour. Every change below is a <b>layout, copy, state, or affordance</b> move that can be implemented against the current component set. Nothing asks for a new palette, a heavier icon family, or decorative gradients.</p>
+  <ul>
+    <li><b>Kept:</b> the 2px spacing scale, 28px controls, the dark <code>--ink</code> stage with dot-grid, percentile clip + colormap + log scale, the real <code>role=tablist</code> sidebar, route=false pixel-pick into an in-place dock, the parquet footer inspector with on-demand sampling.</li>
+    <li><b>Changed:</b> information hierarchy on every view, the empty/loading/error copy and behaviour, the discoverability scaffolding around the imaging loop, and the accessibility surface (labels, focus, live regions, keyboard pixel-picking).</li>
+  </ul>
+
+  <div class="callout">
+    <h3>The central thesis: make the round-trip a guided loop</h3>
+    <p style="margin-bottom:6px">The product’s reason to exist is one correct round-trip. Today a first-time user can open an imaging file and never realise it’s possible. The redesign threads a single, repeated motif — a numbered loop — from the start page into the nav into the imaging view itself.</p>
+    <div class="loop">
+      <span class="node">① Pick m/z + tolerance</span><span class="ar">→</span>
+      <span class="node">② Render ion image</span><span class="ar">→</span>
+      <span class="node">③ Click a pixel</span><span class="ar">→</span>
+      <span class="node">④ Read its spectrum</span><span class="ar">↺</span>
+    </div>
+  </div>
+
+  <h2><span class="n">02</span> Screen-by-screen changes</h2>
+
+  <div class="screen">
+    <div class="scr-h"><span class="ix">1</span><h3>Start / file-open</h3></div>
+    <p>The front door. It must explain the product, earn trust (nothing is uploaded), and offer three open paths without ambiguity.</p>
+    <div class="ba">
+      <div class="before"><span class="lbl">Before</span>Logos, headline and paragraph at equal weight; three visually identical demo tiles; two equal grey “open mode” buttons; a spinner-only loading state; terse one-line errors.</div>
+      <div class="after"><span class="lbl">After</span>Headline → value prop → privacy line stacked by priority; the imaging demo is highlighted with a ↻ round-trip caption; primary “Open from cloud” + quiet “Download &amp; open”; a determinate, cancellable MB-of-MB load; specific errors that name the file and the expected format.</div>
+    </div>
+    <ul>
+      <li>Drop-zone gains a sub-line naming the <code>.mzpeak</code> format (ZIP of Parquet + <span class="mono">mzpeak_index.json</span>) and an accepted-formats link — fewer wrong-file dead-ends.</li>
+      <li>Drag-over is an unmistakable accent fill with the file name echoed and a “Release to open” confirmation.</li>
+      <li>A11y: drop-zone is <code>role=button</code> with a 3px focus ring and Enter/Space; the URL field gets a real label.</li>
+    </ul>
+  </div>
+
+  <div class="screen">
+    <div class="scr-h"><span class="ix">2</span><h3>Capability-adaptive shell</h3></div>
+    <p>The persistent chrome whose left nav grows an <b>Imaging (MSI)</b> group only when the file carries spatial coordinates, and a <b>Chromatograms</b> entry only when chromatograms exist.</p>
+    <div class="ba">
+      <div class="before"><span class="lbl">Before</span>Groups appear or vanish silently; the round-trip order isn’t encoded in the nav; capability state is buried in Summary; MiniStats is a loose key/value stack.</div>
+      <div class="after"><span class="lbl">After</span>A quiet caption on the group header (“IMS columns ✓”) explains <i>why</i> a group is present; the first two MSI items are numbered ①②; capability badges sit in the top bar; MiniStats becomes a pinned file card.</div>
+    </div>
+    <ul>
+      <li>The existing <code>role=tablist</code> + roving <code>tabindex</code> + Arrow/Home/End behaviour is retained, including auto-expanding the accordion that owns the active tab so focus is never trapped.</li>
+      <li>A one-line banner states what was detected and which groups are therefore shown/hidden — adaptivity becomes legible, not magical.</li>
+      <li>Non-imaging files degrade gracefully: the MSI group is withheld and Chromatograms is surfaced in its place.</li>
+    </ul>
+  </div>
+
+  <div class="screen">
+    <div class="scr-h"><span class="ix">3</span><h3>Summary overview</h3></div>
+    <p>The orientation page after open: who is this file, what can it do, where do I go next.</p>
+    <div class="ba">
+      <div class="before"><span class="lbl">Before</span>Four metric tiles lead with no file identity; capabilities are a long mixed StatRow list; the TIC thumbnail is decorative; no explicit next step.</div>
+      <div class="after"><span class="lbl">After</span>An identity line anchors the page above its vitals; capabilities become a scannable badge grid with detection signals + confidence; the TIC thumbnail becomes an “Open ion-image explorer →” button; three explicit next-step actions hand off to the right view.</div>
+    </div>
+    <ul>
+      <li>Unsupported features surface as amber chips with tooltips, so results are never silently incomplete.</li>
+      <li>Raw detail (file rows, archive members) is demoted into disclosures to keep the hero uncluttered.</li>
+    </ul>
+  </div>
+
+  <div class="screen">
+    <div class="scr-h"><span class="ix">4</span><h3>Spectra view</h3></div>
+    <p>m/z vs intensity for the selected spectrum, with MS-level filtering and isobaric (TMT/iTRAQ) reporter-ion reading.</p>
+    <div class="ba">
+      <div class="before"><span class="lbl">Before</span>A long select + bare index input lead; centroid/profile only appears in a meta string; the zoom gesture is undocumented; TMT reporters are anonymous sticks; MS-level hides in a dropdown.</div>
+      <div class="after"><span class="lbl">After</span>Prev/Next + “#318 / 1684 in level” lead; a representation badge and a persistent “scroll to zoom · double-click to reset” hint sit by the plot; reporter ions become colour-matched channel pills (label · % of strongest · sample); MS level becomes a segmented control of only the levels present.</div>
+    </div>
+    <ul>
+      <li>Axes are explicitly labelled (<i>intensity</i> / <i>m/z (Th)</i>) and the plot carries an aria-described summary.</li>
+      <li>Detection is honest: “9 / 10 channels detected (±5 mDa)”, undetected channels dimmed to a dash — never fabricated.</li>
+      <li>A one-line note exposes the cross-view link: picking a pixel in Imaging fills this exact plot.</li>
+    </ul>
+  </div>
+
+  <div class="screen">
+    <div class="scr-h"><span class="ix">5</span><h3>Imaging view — the round-trip</h3></div>
+    <p>The product’s payoff surface, and the screen the brief weights most heavily.</p>
+    <div class="ba">
+      <div class="before"><span class="lbl">Before</span>Bare m/z/tolerance inputs with no units or map of what they produce; a blank dark stage; an unframed render wait; a hover readout as muted text far below the canvas; a legend floating loose; pixel-pick that can route away to Spectra.</div>
+      <div class="after"><span class="lbl">After</span>A 4-step stepper across the top lights as you progress; a labelled m/z control with Th/Da unit chips + example; a “warming…/ready · prefetched” badge for the background prefetch; a determinate render bar with pixel count; an on-stage readout chip + selection ring; a legend bound flush to the stage; and an in-place spectrum dock that keeps the ion image in view.</div>
+    </div>
+    <ul>
+      <li>Keyboard pixel-picking (arrows move a cursor cell, Enter picks) plus an aria-live readout make the core interaction operable without a mouse.</li>
+      <li>The dock pre-announces step ④ even before a pixel is picked (“click any pixel above to load its spectrum here”), and its header carries full provenance: pixel x · y · #index · point count · centroid/profile.</li>
+      <li>The empty state coaches the exact next action rather than reading as broken.</li>
+    </ul>
+  </div>
+
+  <div class="screen">
+    <div class="scr-h"><span class="ix">6</span><h3>Parquet structure inspector</h3></div>
+    <p>The format-orientation surface — archive members and per-column parquet footers — for format implementers and curious scientists.</p>
+    <div class="ba">
+      <div class="before"><span class="lbl">Before</span>Members and footers share one scroll; the manifest looks like any row; size/share are numbers to compare by eye; jargon with no bridge to the science; histograms would stall if automatic.</div>
+      <div class="after"><span class="lbl">After</span>A stable two-pane inspector keeps the selected member highlighted; the manifest is pinned with a badge and a “View JSON →” cross-link to Metadata; inline share bars make dominant arrays legible at a glance; an empty-state line frames columns as stored data arrays; the ≤50k-row sampled histogram stays opt-in.</div>
+    </div>
+    <ul>
+      <li>Semantic table headers + expandable rows-as-buttons + tabular figures so values compare cleanly down each column.</li>
+    </ul>
+  </div>
+
+  <h2><span class="n">03</span> Component inventory</h2>
+  <p>The redesign composes almost entirely from the bound design system. Three small new primitives are proposed; everything else is reuse or a light extension.</p>
+  <table>
+    <thead><tr><th>Component</th><th style="width:90px">Status</th><th>Role in the redesign</th></tr></thead>
+    <tbody>
+      <tr><td><span class="cn">Button</span></td><td><span class="tag reuse">reuse</span></td><td>Render, Load URL, Open from cloud, next-step actions (primary / secondary / ghost).</td></tr>
+      <tr><td><span class="cn">SegmentedControl</span></td><td><span class="tag reuse">reuse</span></td><td>MS-level filter, linear/log scale, Metadata/Structure switch.</td></tr>
+      <tr><td><span class="cn">Select</span></td><td><span class="tag reuse">reuse</span></td><td>Colormap, percentile clip, spectrum picker, optical-image picker.</td></tr>
+      <tr><td><span class="cn">NumberField</span></td><td><span class="tag reuse">reuse</span></td><td>m/z + tolerance with Th/Da unit chips — the measured-value entry pattern.</td></tr>
+      <tr><td><span class="cn">Checkbox</span></td><td><span class="tag reuse">reuse</span></td><td>TIC norm, overlay-layer visibility.</td></tr>
+      <tr><td><span class="cn">Badge</span></td><td><span class="tag extend">extend</span></td><td>Capability + MS-level + representation pills; add a <code>dot</code> capability variant in the top bar.</td></tr>
+      <tr><td><span class="cn">StatRow</span></td><td><span class="tag reuse">reuse</span></td><td>File panel, footer stats, deep-column stats.</td></tr>
+      <tr><td><span class="cn">Panel</span></td><td><span class="tag reuse">reuse</span></td><td>Capabilities / File / Archive-members disclosures.</td></tr>
+      <tr><td><span class="cn">ColormapScale</span></td><td><span class="tag extend">extend</span></td><td>The stage legend — bind it flush to the canvas with max/0 anchors + a signal-pixel count.</td></tr>
+      <tr><td><span class="cn">MetricTile</span></td><td><span class="tag reuse">reuse</span></td><td>Summary vitals row (exists in app source).</td></tr>
+      <tr><td><span class="cn">ChannelPills</span></td><td><span class="tag reuse">reuse</span></td><td>Isobaric reporter channels (exists in app source).</td></tr>
+      <tr><td><span class="cn">SpectrumDock</span></td><td><span class="tag extend">extend</span></td><td>In-place per-pixel spectrum; add the “invite” empty state + provenance header.</td></tr>
+      <tr><td><span class="cn">RoundTripStepper</span></td><td><span class="tag new">new</span></td><td>The 4-step loop indicator; a thin presentational strip driven by render/pick state.</td></tr>
+      <tr><td><span class="cn">CapabilityBanner</span></td><td><span class="tag new">new</span></td><td>One-line “what was detected / what is shown” explainer in the shell.</td></tr>
+      <tr><td><span class="cn">ShareCell</span> (share bar)</td><td><span class="tag new">new</span></td><td>Inline proportion bar in the parquet column table.</td></tr>
+    </tbody>
+  </table>
+
+  <h2><span class="n">04</span> Cross-cutting rationale</h2>
+  <div class="grid2">
+    <div>
+      <h3 style="font-size:14px">Accessibility</h3>
+      <ul>
+        <li>Real tablist semantics + roving tabindex retained; focus never trapped in a collapsed accordion.</li>
+        <li>Keyboard pixel-picking on the ion canvas with an aria-live readout.</li>
+        <li>Every control labelled; plots carry a described summary.</li>
+        <li>3px navy focus ring (<code>--focus-ring</code>) honoured on all interactive chrome; contrast checked on the active-tab accent.</li>
+      </ul>
+    </div>
+    <div>
+      <h3 style="font-size:14px">States</h3>
+      <ul>
+        <li>Empty states coach the next action and distinguish causes (not-loaded vs truly-empty).</li>
+        <li>Loading is determinate and cancellable wherever a byte count exists.</li>
+        <li>Errors name the artefact and the recovery path.</li>
+        <li>Missing data reads as an em-dash or a plain statement — never a fabricated value.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 style="font-size:14px">Density &amp; hierarchy</h3>
+  <p>The app is intentionally dense; the redesign tunes that density rather than loosening it. Primary actions and current position are raised; raw diagnostics are demoted into disclosures; tabular figures keep numeric columns aligned. The result reads as a more confident instrument, not a busier one.</p>
+
+  <h2><span class="n">05</span> Open questions for the team</h2>
+  <ul>
+    <li>Should the round-trip stepper persist across all MSI sub-views, or only on Ion image?</li>
+    <li>Is the background prefetch of common m/z windows already wired, or does the “warming” badge describe future behaviour?</li>
+    <li>Confirm the canonical unit label for m/z in the UI — <span class="mono">Th</span> vs <span class="mono">m/z</span> vs <span class="mono">Da</span> — and standardise.</li>
+    <li>Do we want the capability badges in the top bar on every view, or only until the user has visited Summary once?</li>
+  </ul>
+
+  <div class="foot">
+    mzPeak Viewer redesign review · wireframes are mid-fidelity and built on the bound mzPeak token system · source app: <span class="mono">okohlbacher/mzpeakviewer</span> · visual system: <span class="mono">mzPeak IV Design System</span>. Numbers shown are illustrative.
+  </div>
+</div>
+</body>
+</html>

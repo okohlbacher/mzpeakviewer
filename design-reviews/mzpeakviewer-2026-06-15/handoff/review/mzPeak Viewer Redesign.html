@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mzPeak Viewer — Redesign Review</title>
+<link rel="stylesheet" href="../_ds/mzpeak-iv-design-system-019e2535-1b34-72fa-99aa-4e449e8dbbdb/tokens/fonts.css">
+<link rel="stylesheet" href="../_ds/mzpeak-iv-design-system-019e2535-1b34-72fa-99aa-4e449e8dbbdb/tokens/colors.css">
+<link rel="stylesheet" href="../_ds/mzpeak-iv-design-system-019e2535-1b34-72fa-99aa-4e449e8dbbdb/tokens/typography.css">
+<link rel="stylesheet" href="../_ds/mzpeak-iv-design-system-019e2535-1b34-72fa-99aa-4e449e8dbbdb/tokens/spacing.css">
+<link rel="stylesheet" href="../_ds/mzpeak-iv-design-system-019e2535-1b34-72fa-99aa-4e449e8dbbdb/tokens/base.css">
+<link rel="stylesheet" href="wf.css">
+<style>
+  .spinner { width: 18px; height: 18px; border: 2px solid var(--gray-300); border-top-color: var(--blue-600); border-radius: 50%; display: inline-block; animation: spin 0.8s linear infinite; }
+  .spinner.big { width: 30px; height: 30px; border-width: 3px; border-color: #2a323a; border-top-color: var(--blue-500); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <span class="brand"><span class="dot"></span><b>mzPeak Viewer</b><span>· Redesign Review</span></span>
+    <span class="spacer"></span>
+    <label class="tg"><input type="checkbox" id="tg-ann" checked> Annotations</label>
+    <label class="tg"><input type="checkbox" id="tg-notes" checked> Notes panel</label>
+    <a class="doclink" href="mzPeak%20Viewer%20Handoff.html">Handoff doc ↗</a>
+  </header>
+
+  <nav class="nav" id="nav" aria-label="Screens"></nav>
+
+  <div class="flow" id="flow">
+    <span class="lead">Round-trip</span>
+  </div>
+
+  <div class="main">
+    <div class="stagewrap mz-scroll" id="stagewrap">
+      <div class="statehdr">
+        <h2 id="sh-title">—</h2>
+        <p id="sh-sub" class="muted"></p>
+        <div class="seg" id="stateseg" role="group" aria-label="States"></div>
+      </div>
+      <div class="scaler" id="scaler">
+        <div class="frame" id="frame">
+          <div class="frame-host" id="host"></div>
+        </div>
+      </div>
+    </div>
+    <aside class="notes mz-scroll" id="notes" aria-label="Review notes"></aside>
+  </div>
+</div>
+
+<script src="wf-screens-1.js"></script>
+<script src="wf-screens-2.js"></script>
+<script src="wf-annotations.js"></script>
+<script>
+(function () {
+  "use strict";
+  // ── Screen registry ──────────────────────────────────────────────────────
+  var SCREENS = [
+    { id: "start",     ix: 1, label: "Start",     title: "Start / file-open", sub: "First contact — drop a file, pick a demo, paste a URL",
+      states: [["default", "Idle"], ["over", "Dragging"], ["loading", "Loading"], ["error", "Error"]] },
+    { id: "shell",     ix: 2, label: "Shell",     title: "Capability-adaptive shell", sub: "Top bar + the sidebar that grows the MSI group only for imaging files",
+      states: [["default", "Imaging file"], ["lcms", "LC-MS file"]] },
+    { id: "summary",   ix: 3, label: "Summary",   title: "Summary overview", sub: "File identity, vitals, capability readiness, next steps",
+      states: [["imaging", "Imaging"], ["lcms", "LC-MS"]] },
+    { id: "spectra",   ix: 4, label: "Spectra",   title: "Spectra view", sub: "m/z vs intensity for the selected spectrum",
+      states: [["profile", "Profile"], ["tmt", "TMT · centroid"], ["empty", "Empty"]] },
+    { id: "imaging",   ix: 5, label: "Imaging",   title: "Imaging view", sub: "The m/z → ion image → pixel → spectrum round-trip",
+      states: [["empty", "Empty"], ["rendering", "Rendering"], ["ready", "Ready"], ["picked", "Pixel picked"]] },
+    { id: "structure", ix: 6, label: "Structure", title: "Parquet structure inspector", sub: "Archive members and per-column footers",
+      states: [["list", "No selection"], ["footer", "Parquet footer"], ["column", "Column expanded"]] },
+  ];
+  var FLOW = [
+    { id: "start", st: "default", label: "Start" },
+    { id: "summary", st: "imaging", label: "Summary" },
+    { id: "spectra", st: "profile", label: "Spectra" },
+    { id: "imaging", st: "empty", label: "Imaging", warm: true },
+    { id: "structure", st: "list", label: "Structure" },
+  ];
+
+  var state = { screen: "start", st: "default" };
+  try { var saved = JSON.parse(localStorage.getItem("wf-pos") || "null"); if (saved && saved.screen) state = saved; } catch (e) {}
+
+  var $ = function (s) { return document.querySelector(s); };
+  var host = $("#host"), frame = $("#frame"), scaler = $("#scaler"), stagewrap = $("#stagewrap");
+
+  function meta(id) { for (var i = 0; i < SCREENS.length; i++) if (SCREENS[i].id === id) return SCREENS[i]; return SCREENS[0]; }
+  function annFor(screen, st) {
+    var s = WF_ANN[screen] || {};
+    return s[st] || s[Object.keys(s)[0]] || [];
+  }
+
+  // ── Build top nav ─────────────────────────────────────────────────────────
+  (function buildNav() {
+    var nav = $("#nav");
+    SCREENS.forEach(function (s) {
+      var b = document.createElement("button");
+      b.innerHTML = '<span class="ix">' + s.ix + '</span>' + s.label;
+      b.setAttribute("data-screen", s.id);
+      b.onclick = function () { go(s.id, s.states[0][0]); };
+      nav.appendChild(b);
+    });
+  })();
+
+  // ── Build flow strip ──────────────────────────────────────────────────────
+  (function buildFlow() {
+    var flow = $("#flow");
+    FLOW.forEach(function (f, i) {
+      if (i) { var a = document.createElement("span"); a.className = "arr" + (f.warm ? " warm" : ""); a.textContent = "→"; flow.appendChild(a); }
+      var s = document.createElement("span");
+      s.className = "step"; s.setAttribute("data-screen", f.id);
+      s.innerHTML = f.label + (f.id === "imaging" ? ' <span class="mono">m/z→ion→pixel→spectrum</span>' : "");
+      s.onclick = function () { go(f.id, f.st); };
+      flow.appendChild(s);
+    });
+  })();
+
+  // ── State segmented control ───────────────────────────────────────────────
+  function buildStateSeg() {
+    var seg = $("#stateseg"); seg.innerHTML = "";
+    meta(state.screen).states.forEach(function (pair) {
+      var b = document.createElement("button");
+      b.textContent = pair[1];
+      b.setAttribute("aria-pressed", String(pair[0] === state.st));
+      b.onclick = function () { go(state.screen, pair[0]); };
+      seg.appendChild(b);
+    });
+  }
+
+  // ── Render notes + pins ───────────────────────────────────────────────────
+  function renderNotesAndPins() {
+    var notes = $("#notes");
+    var list = annFor(state.screen, state.st);
+    notes.innerHTML = '<h3>' + meta(state.screen).title + '</h3>' +
+      '<p class="sub">' + list.length + ' annotated change' + (list.length === 1 ? "" : "s") + ' · each is a concrete before → after. Hover a pin or a note to link them.</p>';
+    // remove old pins
+    Array.prototype.slice.call(host.querySelectorAll(".pin")).forEach(function (p) { p.remove(); });
+
+    list.forEach(function (n) {
+      // note card
+      var card = document.createElement("div");
+      card.className = "note"; card.setAttribute("data-n", n.n);
+      card.innerHTML =
+        '<div class="num">' + n.n + '</div>' +
+        '<div class="body">' +
+          '<span class="tag ' + n.tag + '">' + n.tag + '</span>' +
+          '<p class="tt">' + n.tt + '</p>' +
+          '<p class="ba">' +
+            (n.b && n.b !== "—" ? '<span class="row b"><span class="lbl">Before&nbsp;</span><span>' + n.b + '</span></span>' : "") +
+            '<span class="row a"><span class="lbl">After&nbsp;</span><span>' + n.a + '</span></span>' +
+          '</p>' +
+        '</div>';
+      notes.appendChild(card);
+
+      // pin
+      var pin = document.createElement("div");
+      pin.className = "pin"; pin.textContent = n.n;
+      pin.style.left = n.x + "%"; pin.style.top = n.y + "%";
+      pin.setAttribute("data-n", n.n);
+      host.appendChild(pin);
+
+      var lit = function (on) {
+        pin.classList.toggle("lit", on); card.classList.toggle("lit", on);
+        if (on) card.scrollIntoViewIfNeeded ? card.scrollIntoViewIfNeeded() : null;
+      };
+      pin.onmouseenter = function () { lit(true); };
+      pin.onmouseleave = function () { lit(false); };
+      card.onmouseenter = function () { pin.classList.add("lit"); };
+      card.onmouseleave = function () { pin.classList.remove("lit"); };
+    });
+  }
+
+  // ── Fit / scale the mock ──────────────────────────────────────────────────
+  function fit() {
+    var avail = stagewrap.clientWidth - 56; // padding
+    var natW = 1160;
+    var scale = Math.min(1, avail / natW);
+    frame.style.transform = "scale(" + scale + ")";
+    scaler.style.width = (natW * scale) + "px";
+    scaler.style.height = (frame.offsetHeight * scale) + "px";
+  }
+
+  // ── Navigate ──────────────────────────────────────────────────────────────
+  function go(screen, st) {
+    if (!WF_SCREENS[screen]) return;
+    var m = meta(screen);
+    // validate state
+    var ok = m.states.some(function (p) { return p[0] === st; });
+    if (!ok) st = m.states[0][0];
+    state.screen = screen; state.st = st;
+    try { localStorage.setItem("wf-pos", JSON.stringify(state)); } catch (e) {}
+
+    // chrome
+    $("#sh-title").textContent = m.title;
+    $("#sh-sub").textContent = m.sub;
+    Array.prototype.slice.call(document.querySelectorAll("#nav button")).forEach(function (b) {
+      b.setAttribute("aria-current", String(b.getAttribute("data-screen") === screen));
+    });
+    Array.prototype.slice.call(document.querySelectorAll("#flow .step")).forEach(function (s) {
+      s.classList.toggle("on", s.getAttribute("data-screen") === screen);
+    });
+    buildStateSeg();
+
+    // body
+    host.innerHTML = WF_SCREENS[screen](st);
+    renderNotesAndPins();
+    fit(); setTimeout(fit, 60); setTimeout(fit, 200);
+    stagewrap.scrollTop = 0;
+  }
+
+  // ── Hotspot navigation (data-goto="screen:state") ─────────────────────────
+  host.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-goto]");
+    if (!t) return;
+    var v = t.getAttribute("data-goto");
+    if (!v) return;
+    var parts = v.split(":");
+    go(parts[0], parts[1] || meta(parts[0]).states[0][0]);
+  });
+
+  // ── Toggles ───────────────────────────────────────────────────────────────
+  $("#tg-ann").addEventListener("change", function (e) {
+    host.classList.toggle("pins-off", !e.target.checked);
+  });
+  $("#tg-notes").addEventListener("change", function (e) {
+    $("#notes").classList.toggle("hidden", !e.target.checked);
+    fit(); setTimeout(fit, 60);
+  });
+
+  window.addEventListener("resize", fit);
+  window.addEventListener("load", function () { fit(); setTimeout(fit, 120); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+  go(state.screen, state.st);
+})();
+</script>
+</body>
+</html>

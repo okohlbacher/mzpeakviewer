@@ -1,0 +1,63 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   mzPeak Design System — Spacing, radii, elevation, motion
+   A 2px-based compact scale. The app is data-dense; default gaps are tight.
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Spacing (2px base) ────────────────────────────────────────────────── */
+  --space-0:  0;
+  --space-1:  2px;
+  --space-2:  4px;
+  --space-3:  6px;
+  --space-4:  8px;
+  --space-5:  12px;
+  --space-6:  16px;
+  --space-7:  20px;
+  --space-8:  24px;
+  --space-9:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ── Radii ─────────────────────────────────────────────────────────────── */
+  --radius-xs:   3px;  /* buttons, inputs (authentic to app) */
+  --radius-sm:   4px;  /* tab groups, chips */
+  --radius-md:   6px;  /* cards, dropzone */
+  --radius-lg:   8px;  /* panels, dialogs */
+  --radius-xl:   12px;
+  --radius-pill: 999px;
+
+  /* ── Border widths ─────────────────────────────────────────────────────── */
+  --border-width:    1px;
+  --border-width-2:  1.5px;
+  --border-dashed:   2px;
+
+  /* ── Elevation (subtle, instrument-grade) ──────────────────────────────── */
+  --shadow-0: none;
+  --shadow-1: 0 1px 2px rgba(16, 22, 30, 0.06), 0 0 0 1px rgba(16, 22, 30, 0.04);
+  --shadow-2: 0 2px 6px rgba(16, 22, 30, 0.08), 0 0 0 1px rgba(16, 22, 30, 0.05);
+  --shadow-3: 0 6px 18px rgba(16, 22, 30, 0.12);
+  --shadow-pop: 0 12px 32px rgba(16, 22, 30, 0.18);
+  --shadow-inset: inset 0 1px 2px rgba(16, 22, 30, 0.06);
+
+  /* ── Layout rails (the persistent app shell) ───────────────────────────── */
+  --shell-topbar-h:   44px;
+  --shell-statusbar-h:26px;
+  --shell-rail-w:     272px;
+  --shell-rail-w-min: 0px;
+  --shell-spectrum-h: 188px;
+  --control-h:        28px;  /* default control height (compact) */
+  --control-h-sm:     22px;
+  --tab-h:            30px;
+
+  /* ── Motion ────────────────────────────────────────────────────────────── */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1); /* @kind other */
+  --ease-emphasis: cubic-bezier(0.3, 0, 0, 1); /* @kind other */
+  --dur-fast:  120ms; /* @kind other */
+  --dur-base:  180ms; /* @kind other */
+  --dur-slow:  260ms; /* @kind other */
+  --transition-control: background var(--dur-fast) var(--ease-standard),
+                        border-color var(--dur-fast) var(--ease-standard),
+                        color var(--dur-fast) var(--ease-standard),
+                        box-shadow var(--dur-fast) var(--ease-standard);
+}

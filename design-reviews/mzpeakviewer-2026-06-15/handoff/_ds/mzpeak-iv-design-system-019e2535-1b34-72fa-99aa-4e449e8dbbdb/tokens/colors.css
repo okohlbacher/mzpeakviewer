@@ -1,0 +1,118 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   mzPeak Design System — Color tokens
+   Derived from the mzPeakIV source: Material blue (#1565c0) accent, hairline
+   cool-neutral panels, semantic amber/red/green, and the scientific perceptual
+   colormaps (viridis / inferno) that are the product's signature visual.
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Cool neutral ramp (chrome, text, borders) ─────────────────────────── */
+  --gray-0:   #ffffff;
+  --gray-25:  #fafbfc;
+  --gray-50:  #f4f6f8;
+  --gray-100: #eceff2;
+  --gray-150: #e3e7eb;
+  --gray-200: #dde2e7;
+  --gray-300: #c5ccd3;
+  --gray-400: #9aa4ad;
+  --gray-500: #6b757e;
+  --gray-600: #4b545c;
+  --gray-700: #353c43;
+  --gray-800: #232a30;
+  --gray-900: #151a1e;
+
+  /* The "data stage" — dark surface the ion-image canvas sits on. Tuned just
+     above the absent-pixel sentinel (#1a1a1a) so empty pixels read as data. */
+  --ink:        #0e1216;
+  --ink-raised: #161c22;
+  --ink-line:   #2a323a;
+  --sentinel:   #1a1a1a; /* absent / no-data pixel (do not use as colormap-low) */
+
+  /* ── OpenMS brand blue — electric royal blue, in sync with the logo's blue
+     peaks. PRIMARY UI accent (wordmark itself is near-black; see --gray-900). ── */
+  --blue-900: #1b2870;
+  --blue-800: #263799;
+  --blue-700: #2f44bf;
+  --blue-600: #3b54da; /* PRIMARY accent — OpenMS electric blue */
+  --blue-500: #5468e0;
+  --blue-400: #7d8ce8;
+  --blue-300: #a6b1f0;
+  --blue-200: #c9d0f7;
+  --blue-100: #e6e9fc;
+  --blue-50:  #f2f4fe;
+
+  /* OpenMS signal red (#C00000 mass-spec peaks) — signature accent, used sparingly */
+  --red-700: #9b0000;
+  --red-600: #c00000; /* OpenMS peak red */
+  --red-500: #d62828;
+  --red-200: #f1b4b4;
+  --red-100: #fbe0e0;
+  --red-50:  #fdf2f2;
+
+  /* OpenMS brand spectrum — the warm→cool mass-spec peaks of the logo.
+     A flourish for hero moments / brand accents (never for data — use colormaps). */
+  --openms-spectrum: linear-gradient(90deg,
+    #f5a623 0%, #f4612e 16%, #f0344e 33%, #e6249e 50%,
+    #b026d3 66%, #6d3be8 83%, #3b5be0 100%); /* @kind color */
+
+  /* Indigo — secondary, for dense data tables / peak lists */
+  --indigo-600: #283593;
+  --indigo-500: #3949ab;
+  --indigo-300: #9fa8da;
+  --indigo-200: #c5cae9;
+  --indigo-50:  #e8eaf6;
+
+  /* ── Semantic ──────────────────────────────────────────────────────────── */
+  --warning:      #8a6d00;
+  --warning-bg:   #fff8e1;
+  --warning-band: rgba(255, 200, 0, 0.25); /* m/z selection band over spectra */
+  --danger:       #c62828;
+  --danger-soft:  #ef9a9a;
+  --danger-bg:    #fce4ec;
+  --success:      #2e9e5b;
+  --success-soft: #43a047;
+  --info:         var(--blue-600);
+  --info-bg:      var(--blue-50);
+
+  /* RGB false-colour channels (multi-channel ion overlay) */
+  --channel-r: #e53935;
+  --channel-g: #43a047;
+  --channel-b: #1e88e5;
+
+  /* ── Semantic aliases (use these in components) ────────────────────────── */
+  --bg-app:        var(--gray-50);
+  --bg-canvas:     var(--gray-0);
+  --surface:       var(--gray-0);
+  --surface-sunken:var(--gray-50);
+  --surface-raised:var(--gray-0);
+  --surface-stage: var(--ink);
+
+  --text-strong:   var(--gray-900);
+  --text-body:     var(--gray-700);
+  --text-muted:    var(--gray-500);
+  --text-faint:    var(--gray-400);
+  --text-on-accent:#ffffff;
+  --text-on-stage: #e7edf2;
+  --text-link:     var(--blue-600);
+
+  --border-hairline: var(--gray-200);
+  --border-soft:     var(--gray-150);
+  --border-strong:   var(--gray-300);
+  --border-focus:    var(--blue-600);
+
+  --accent:         var(--blue-600);
+  --accent-hover:   var(--blue-700);
+  --accent-active:  var(--blue-800);
+  --accent-subtle:  var(--blue-50);
+  --accent-quiet:   var(--indigo-50);
+
+  /* OpenMS signal red — peak lines, active spectrum markers, brand flourish */
+  --signal:        var(--red-600);
+  --signal-hover:  var(--red-700);
+  --signal-subtle: var(--red-50);
+  --spectrum-line: var(--blue-600);
+  --spectrum-fill: rgba(59, 84, 218, 0.09);
+  --peak-line:     var(--red-600);
+
+  --focus-ring: 0 0 0 3px rgba(59, 84, 218, 0.28);
+}

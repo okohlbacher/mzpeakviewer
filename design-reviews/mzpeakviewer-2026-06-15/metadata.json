@@ -1,0 +1,36 @@
+{
+  "repo": "github.com/okohlbacher/mzpeakviewer (PUBLIC); local /Users/kohlbach/Claude/mzPeakViewer",
+  "goal": "In-depth Claude Design review of the unified mzPeak viewer UI; export a handoff document WITHOUT an interactive Phase-2 discussion of suggestions; analyze the handoff adversarially locally, then discuss with the user.",
+  "project_url": "https://claude.ai/design/p/11a8b2ef-94ca-4dfc-8747-29d237de06aa",
+  "share_link": null,
+  "storage_root": "design-reviews/",
+  "skill_path": "/Users/kohlbach/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/0c437e9f-b5ea-43e9-94b8-17a1f2c7f564/48aaaf32-3117-474a-8429-fa7a0d07a8bc/skills/c-design-review",
+  "downloads_dir": "/Users/kohlbach/Downloads",
+  "browser_connected": true,
+  "blocked_on": null,
+  "phase1_note": "Repo attached via URL-inline in the prompt (the GitHub repo-picker UI never surfaced). Claude Design DID browse the public GitHub repo + the loaded mzPeak IV Design System, asked a clarifying wizard (answered from brief.md), and generated 6 connected wireframes + a handoff doc grounded in the real tokens (#3b54da, IBM Plex).",
+  "phases": {
+    "phase0": "done",
+    "phase1": "done",
+    "phase2": "skipped",
+    "phase3": "done",
+    "phase4": "done",
+    "phase5": "pending",
+    "phase6": "pending"
+  },
+  "exports": [
+    {
+      "zip": "# mzPeakViewer Design System Review__---__## Title____mzPeakViewer Redesign & Design System__.zip",
+      "sha256": "844c2f119a705c28c9903885fe84f998f3e9709bb53bfb61a4c8bff8a806df28",
+      "files": 19,
+      "suspect_export": false,
+      "top_level": [
+        ".thumbnail",
+        "_ds",
+        "review"
+      ],
+      "stored_at": "2026-06-15T04:46:02+00:00",
+      "source": "/Users/kohlbach/Downloads/# mzPeakViewer Design System Review__---__## Title____mzPeakViewer Redesign & Design System__.zip"
+    }
+  ]
+}

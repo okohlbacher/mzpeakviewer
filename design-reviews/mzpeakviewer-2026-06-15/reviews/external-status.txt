@@ -1,0 +1,4 @@
+# External adversary status — re-run 2026-06-15 with corrected CLI syntax
+codex: ok    (codex 0.137.0, `exec -s read-only`; 18-finding table; spot-checked, reliable)
+vibe:  failed (vibe 2.14.1 `--agent plan`; produced no review — hit/again turn-limited, 0-byte output; not counted)
+# NOTE: the bundled run_external_reviews.sh uses stale June-2026 flags (codex `--ask-for-approval` removed in 0.137.0). codex re-run by hand with the repo's PROC-01 form (`codex exec -`).

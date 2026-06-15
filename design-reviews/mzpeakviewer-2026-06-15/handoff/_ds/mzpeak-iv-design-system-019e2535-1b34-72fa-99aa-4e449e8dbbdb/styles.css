@@ -1,0 +1,13 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   mzPeak Design System — global entry point
+   Consumers link THIS file only. Imports the full token + base closure.
+   Keep this file as @import lines only (no rules here).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@import "./tokens/fonts.css";
+@import "./tokens/colors.css";
+@import "./tokens/colormaps.css";
+@import "./tokens/typography.css";
+@import "./tokens/spacing.css";
+@import "./tokens/base.css";
+@import "./components/components.css";

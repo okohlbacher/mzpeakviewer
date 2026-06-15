@@ -1,0 +1,27 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   mzPeak Design System — Webfonts
+   The product ships with the system-ui stack. For the design system we elevate
+   to IBM Plex — a typeface family built for technical/scientific instrument UIs,
+   with a true monospace companion (IBM Plex Mono) for m/z values, intensities
+   and all tabular numerics. system-ui remains the fallback so nothing breaks
+   if the webfont fails to load.
+
+   SUBSTITUTION FLAG: original app uses `system-ui, sans-serif`. We add
+   IBM Plex Sans / IBM Plex Mono as the brand faces.
+
+   ── DELIVERY DRIFT (mzPeakIV @ HEAD) ───────────────────────────────────────
+   The app NEUTRALIZED its copy of this file: the render-blocking Google Fonts
+   `@import url(...)` was removed because it is a hard external-CDN dependency
+   that violates the app's client-side / offline / GitHub-Pages constraints.
+   In the app, IBM Plex Sans/Mono are now SELF-HOSTED via @fontsource and
+   imported as JS modules in `src/main.tsx` (latin weights: sans 400/500/600/
+   700 + 400-italic, mono 400/500/600); the app's `index.css` no longer imports
+   this file at all.
+
+   This DS *deliberately retains* the CDN `@import` below: design-system
+   consumers are standalone HTML artifacts with no bundler/@fontsource step, so
+   the @import is the only portable way for them to pick up IBM Plex. For a
+   production embed, self-host the same weights (per the app) and drop this line.
+   ────────────────────────────────────────────────────────────────────────── */
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap");

@@ -1,0 +1,64 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   mzPeak Design System — Typography tokens
+   IBM Plex Sans for chrome, IBM Plex Mono for every number (m/z, intensity,
+   counts, coordinates). A compact, instrument-grade scale: dense by default.
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Families ──────────────────────────────────────────────────────────── */
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", "Menlo", monospace;
+
+  /* ── Type scale (compact / data-dense) ─────────────────────────────────── */
+  --text-2xs:  10.5px;  /* axis ticks, micro-labels */
+  --text-xs:   11.5px;  /* table cells, badges, hints */
+  --text-sm:   12.5px;  /* DEFAULT UI text, controls, body */
+  --text-base: 13px;    /* panel body */
+  --text-md:   14px;    /* panel headings */
+  --text-lg:   16px;    /* view titles */
+  --text-xl:   20px;    /* section titles */
+  --text-2xl:  26px;    /* page / hero numerics */
+  --text-display: 34px; /* marketing display */
+
+  /* ── Weights ───────────────────────────────────────────────────────────── */
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* ── Line heights ──────────────────────────────────────────────────────── */
+  --leading-tight:   1.15;
+  --leading-snug:    1.3;
+  --leading-normal:  1.45;
+  --leading-relaxed: 1.6;
+
+  /* ── Letter spacing ────────────────────────────────────────────────────── */
+  --tracking-tight:  -0.01em;
+  --tracking-normal: 0;
+  --tracking-wide:   0.02em;
+  --tracking-caps:   0.06em;  /* overline / eyebrow labels */
+
+  /* ── Semantic roles ────────────────────────────────────────────────────── */
+  --font-ui:      var(--font-sans);
+  --font-numeric: var(--font-mono);
+
+  /* Tabular numerics — the house default for any figure that must align */
+  --numeric-features: "tnum" 1, "zero" 1; /* @kind other */
+}
+
+/* Utility: any element that displays measured values */
+.mz-numeric {
+  font-family: var(--font-numeric);
+  font-feature-settings: var(--numeric-features);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Eyebrow / overline label */
+.mz-overline {
+  font-family: var(--font-sans);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
