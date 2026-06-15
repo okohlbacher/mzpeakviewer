@@ -233,8 +233,12 @@ function ImagingInner({
     setError(null);
     setRenderProgress({ done: 0, total: 0 });
     try {
-      const res = await engine.renderIonImage(mzNum, tolNum, (done, total) =>
-        setRenderProgress({ done, total }),
+      const res = await engine.renderIonImage(
+        mzNum,
+        tolNum,
+        (done, total) => setRenderProgress({ done, total }),
+        // Progressive preview: draw each partial image so a cold render fills in live.
+        (ionImage, stats) => setIonImageStore(ionImage, stats),
       );
       setIonImageStore(res.ionImage, res.stats);
     } catch (err) {

@@ -138,6 +138,9 @@ export type WorkerResponse =
   // ionImage.buffer TRANSFERRED; stats null when ionImage null.
   | { type: "renderResult"; requestId: number; ionImage: Float32Array | null; stats: IonImageStats | null }
   | { type: "renderProgress"; requestId: number; done: number; total: number }
+  // Progressive PREVIEW of a cold ion render: a partial image emitted periodically as the
+  // build streams, so the UI shows it filling in (perceived speed). ionImage.buffer TRANSFERRED.
+  | { type: "renderPreview"; requestId: number; ionImage: Float32Array; stats: IonImageStats }
   | { type: "multiChannelResult"; requestId: number; channels: (Float32Array | null)[] }
   | { type: "ionIndexPreloading" }
   | { type: "ionIndexPreloadAborted" }

@@ -112,6 +112,29 @@ describe("EngineClient", () => {
     await expect(p).resolves.toEqual({ ionImage: img, stats: ION_STATS });
   });
 
+  it("(b2) renderIonImage forwards renderPreview partials to onPreview for THIS request only", async () => {
+    const fw = new FakeWorker();
+    const client = new EngineClient(fw);
+    fw.push({ type: "ready" });
+
+    const onPreview = vi.fn();
+    const p = client.renderIonImage(150, 0.5, undefined, onPreview);
+    const { msg } = fw.last();
+
+    const partial = new Float32Array([5, 6]);
+    fw.push({ type: "renderPreview", requestId: msg.requestId, ionImage: partial, stats: ION_STATS });
+    fw.push({ type: "renderPreview", requestId: msg.requestId + 999, ionImage: new Float32Array([0]), stats: ION_STATS });
+    expect(onPreview).toHaveBeenCalledTimes(1); // the other request's preview is ignored
+    expect(onPreview).toHaveBeenCalledWith(partial, ION_STATS);
+
+    // Settling the render detaches the preview subscription.
+    const final = new Float32Array([7, 8]);
+    fw.push({ type: "renderResult", requestId: msg.requestId, ionImage: final, stats: ION_STATS });
+    await expect(p).resolves.toEqual({ ionImage: final, stats: ION_STATS });
+    fw.push({ type: "renderPreview", requestId: msg.requestId, ionImage: new Float32Array([9]), stats: ION_STATS });
+    expect(onPreview).toHaveBeenCalledTimes(1); // no delivery after settle
+  });
+
   it("(c) an {type:error, requestId} rejects the right promise", async () => {
     const fw = new FakeWorker();
     const client = new EngineClient(fw);

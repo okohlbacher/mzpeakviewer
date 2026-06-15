@@ -221,12 +221,19 @@ export type RenderIonImageOptions = {
   limitBytes?: number;
   /** Progress callback `(done, total)` over filled cells; throttled by the caller’s use. */
   onProgress?: (done: number, total: number) => void;
+  /** Progressive PREVIEW: a COPY of the partially-built ion image + its stats, emitted
+   *  periodically during a COLD build so the UI shows the image filling in. Not called on the
+   *  instant cache-hit path. The copy is the caller's to transfer. */
+  onPreview?: (ionImage: Float32Array, stats: IonImageStats) => void;
 };
 
 /** Default cache ceiling (~768 MB of decoded points) when the shell hasn’t set one. */
 const DEFAULT_CACHE_LIMIT_BYTES = 768 * 1024 * 1024;
 /** Min wall-clock gap between progress emissions (avoid flooding postMessage). */
 const PROGRESS_INTERVAL_MS = 120;
+/** Min wall-clock gap between progressive-preview image emissions (heavier than progress:
+ *  a full-image copy + stats pass), so previews stay cheap over a ~tens-of-seconds build. */
+const PREVIEW_INTERVAL_MS = 500;
 
 function now(): number {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -268,6 +275,20 @@ export async function engineRenderIonImage(
     if (force || t - lastEmit >= PROGRESS_INTERVAL_MS) {
       lastEmit = t;
       onProgress(Math.min(done, total), total);
+    }
+  };
+
+  // Throttled progressive-PREVIEW emitter (build path only): a COPY of the partial image +
+  // its stats, so the UI shows pixels filling in as the build streams. Skipped when no
+  // onPreview is given or on the instant cache-hit path (which returns before the build).
+  const onPreview = opts?.onPreview;
+  let lastPreview = 0;
+  const previewTick = () => {
+    if (!onPreview) return;
+    const t = now();
+    if (t - lastPreview >= PREVIEW_INTERVAL_MS) {
+      lastPreview = t;
+      onPreview(ionImage.slice(), computeIonImageStats(ionImage, gridWire.presenceMask));
     }
   };
 
@@ -328,6 +349,7 @@ export async function engineRenderIonImage(
     remember(index, mzArr, inArr);
     done++;
     tick();
+    previewTick();
   }
 
   // FALLBACK: any filled cell the data-array stream did NOT cover (a centroid-only spectrum

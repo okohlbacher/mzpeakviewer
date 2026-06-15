@@ -90,32 +90,48 @@ function emitIonIndexReady(cache: SpectraArrayCache, respond: Respond): void {
   respond({ type: "ionIndexReady", points });
 }
 
+/** On REMOTE files, defer the background warm briefly so the initial open/scan/optical loads
+ *  — and an immediate user render — win the one connection first. The warm then runs only if a
+ *  render hasn't already built the cache (it bails via shouldStop), so it can't regress a
+ *  render-immediately workload while still warming the cache for a user who explores first. */
+const REMOTE_PREFETCH_DELAY_MS = 1500;
+
 export function startIonPrefetch(ctx: EngineContext, respond?: Respond): void {
   const ef = ctx.active;
   const gen = ctx.gen;
-  if (!ef || !ef.grid || !ctx.preloadEnabled || ctx.remote) return; // skip remote — see ctx.remote
+  if (!ef || !ef.grid || !ctx.preloadEnabled) return;
   const grid = ef.grid;
-  void prefetchIonCache(ef.reader, grid, {
-    mutex: ctx.mutex,
-    shouldStop: () => ctx.gen !== gen || (ctx.ionCache?.complete ?? false),
-    isUserActive: () =>
-      typeof performance !== "undefined"
-        ? performance.now() - ctx.lastUserActivity < PREFETCH_COOLDOWN_MS
-        : false,
-    cooldownMs: PREFETCH_COOLDOWN_MS,
-    budgetRemaining: () => ctx.budget.remaining(),
-  })
-    .then(({ cache }) => {
-      // Commit only if still the current file and a render hasn't already built it.
-      if (ctx.gen === gen && cache && !ctx.ionCache) {
-        ctx.ionCache = cache;
-        ctx.budget.add(cache.bytes);
-        if (respond) emitIonIndexReady(cache, respond);
-      }
+  const reader = ef.reader;
+  const launch = () => {
+    // Superseded by a newer open/close, or a render already warmed it → don't start.
+    if (ctx.gen !== gen || ctx.ionCache?.complete) return;
+    void prefetchIonCache(reader, grid, {
+      mutex: ctx.mutex,
+      shouldStop: () => ctx.gen !== gen || (ctx.ionCache?.complete ?? false),
+      isUserActive: () =>
+        typeof performance !== "undefined"
+          ? performance.now() - ctx.lastUserActivity < PREFETCH_COOLDOWN_MS
+          : false,
+      cooldownMs: PREFETCH_COOLDOWN_MS,
+      budgetRemaining: () => ctx.budget.remaining(),
     })
-    .catch(() => {
-      // Background warming is best-effort; a failure just means the first render is cold.
-    });
+      .then(({ cache }) => {
+        // Commit only if still the current file and a render hasn't already built it.
+        if (ctx.gen === gen && cache && !ctx.ionCache) {
+          ctx.ionCache = cache;
+          ctx.budget.add(cache.bytes);
+          if (respond) emitIonIndexReady(cache, respond);
+        }
+      })
+      .catch(() => {
+        // Background warming is best-effort; a failure just means the first render is cold.
+      });
+  };
+  // Remote: defer (bandwidth contention — the documented Explorer lesson) so it yields to the
+  // open/first-render; local: decode-only, start now. The interruptible prefetch (mutex +
+  // activity cooldown) keeps it from starving foreground reads once it does run.
+  if (ctx.remote) setTimeout(launch, REMOTE_PREFETCH_DELAY_MS);
+  else launch();
 }
 
 /**
@@ -274,6 +290,10 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
             limitBytes: ctx.budget.remaining(),
             onProgress: (doneN, totalN) =>
               respond({ type: "renderProgress", requestId: req.requestId, done: doneN, total: totalN }),
+            // Progressive preview: stream the partial image so the UI fills in during a cold
+            // build (the copy is fresh per call, so transferring it never detaches the render).
+            onPreview: (img, previewStats) =>
+              respond({ type: "renderPreview", requestId: req.requestId, ionImage: img, stats: previewStats }, buffersOf(img)),
           },
         );
         // Account the ion cache against the shared budget when it changes (a fresh build

@@ -140,6 +140,7 @@ export class EngineClosedError extends Error {
 export type EngineEventMap = {
   progress: Extract<WorkerResponse, { type: "progress" }>;
   renderProgress: Extract<WorkerResponse, { type: "renderProgress" }>;
+  renderPreview: Extract<WorkerResponse, { type: "renderPreview" }>;
   ionIndexPreloading: Extract<WorkerResponse, { type: "ionIndexPreloading" }>;
   ionIndexPreloadAborted: Extract<WorkerResponse, { type: "ionIndexPreloadAborted" }>;
   ionIndexReady: Extract<WorkerResponse, { type: "ionIndexReady" }>;
@@ -425,20 +426,28 @@ export class EngineClient {
     mz: number,
     tolDa: number,
     onProgress?: (done: number, total: number) => void,
+    onPreview?: (ionImage: Float32Array, stats: IonImageStats) => void,
   ): Promise<RenderIonImageResult> {
-    let off: () => void = () => {};
+    const offs: Array<() => void> = [];
     const p = this.request<RenderIonImageResult>((requestId) => {
       if (onProgress) {
-        off = this.on("renderProgress", (ev) => {
-          if (ev.requestId === requestId) onProgress(ev.done, ev.total);
-        });
+        offs.push(
+          this.on("renderProgress", (ev) => {
+            if (ev.requestId === requestId) onProgress(ev.done, ev.total);
+          }),
+        );
+      }
+      if (onPreview) {
+        offs.push(
+          this.on("renderPreview", (ev) => {
+            if (ev.requestId === requestId) onPreview(ev.ionImage, ev.stats);
+          }),
+        );
       }
       return { type: "renderIonImage", mz, tolDa, requestId };
     });
-    void p.then(
-      () => off(),
-      () => off(),
-    );
+    const detach = () => offs.forEach((o) => o());
+    void p.then(detach, detach);
     return p;
   }
 
@@ -540,6 +549,7 @@ export class EngineClient {
       // unsolicited / streaming events -------------------------------------
       case "progress":
       case "renderProgress":
+      case "renderPreview":
       case "ionIndexPreloading":
       case "ionIndexPreloadAborted":
       case "ionIndexReady":
