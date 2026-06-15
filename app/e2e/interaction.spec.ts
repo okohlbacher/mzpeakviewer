@@ -84,6 +84,8 @@ test("Structure: index.json first, then the Parquet payload, then embedded files
   await page.getByTestId("accordion-advanced").click();
   await page.getByTestId("nav-tab-structure").click();
   await expect(page.getByTestId("structure-view")).toBeVisible();
+  // archiveList populates the member list asynchronously — wait for it before reading.
+  await expect(page.locator('[data-testid="structure-members"] button').first()).toBeVisible({ timeout: 15_000 });
 
   // Category of each member row, in render order.
   const cats = await page

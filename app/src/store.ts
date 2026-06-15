@@ -1,7 +1,7 @@
 // Unified zustand store for the mzPeak viewer shell.
 // Models @mzpeak/contracts UnifiedState extended with loaded payload fields.
 
-import { create } from "zustand";
+import { create, type StoreApi } from "zustand";
 import type {
   CapabilityModel,
   FileStats,
@@ -137,6 +137,112 @@ export function seriesToPoints(s: ChromatogramSeries): { time: number; intensity
 }
 
 // ---------------------------------------------------------------------------
+// Shared open helpers (openFile and openUrl were ~95% identical — ~110 dup lines).
+// ---------------------------------------------------------------------------
+
+/** Cleared payload + loading phase for a new open. `fileName`/`sourceUrl` are per-open and
+ *  spread on top. Includes the loading flags both open paths previously omitted (A7). */
+const INITIAL_OPEN_STATE = {
+  phase: "loading",
+  error: null,
+  capabilities: null,
+  stats: null,
+  fileMeta: null,
+  manifest: null,
+  grid: null,
+  ticColumn: null,
+  opticalImages: [],
+  ionImage: null,
+  ionStats: null,
+  multiChannel: null,
+  ionCacheReady: false,
+  channels: [],
+  fileSize: null,
+  view: "summary",
+  selector: null,
+  msLevelFilter: null,
+  metadataReveal: null,
+  spectrum: null,
+  spectrumLoading: false,
+  browse: null,
+  chrom: null,
+  chromLoading: false,
+  notices: [],
+} satisfies Partial<AppState>;
+
+/**
+ * The shared post-`engine.open` tail: commit the opened payload, then fire the off-critical-
+ * path follow-ups (scanBreakdown → stats/browse/ticColumn, studyMeta → channels, pre-select
+ * spectrum 0). Stale-guarded against `currentOpenSeq` throughout. Used by both openFile and
+ * openUrl so they can't drift (e.g. the scanBreakdown-failure notice is now surfaced by BOTH;
+ * openUrl previously swallowed it).
+ */
+async function finishOpen(
+  set: StoreApi<AppState>["setState"],
+  get: StoreApi<AppState>["getState"],
+  seq: number,
+  opened: Awaited<ReturnType<typeof engine.open>>,
+): Promise<void> {
+  if (seq !== currentOpenSeq) return;
+  const isImaging = opened.capabilities.imaging.isImaging;
+  set({
+    phase: "ready",
+    capabilities: opened.capabilities,
+    stats: opened.stats,
+    fileMeta: opened.fileMeta,
+    manifest: opened.manifest,
+    grid: opened.grid,
+    ticColumn: opened.tic,
+    opticalImages: opened.opticalImages,
+    fileSize: opened.fileSize,
+    // Default accordion: Advanced closed; MSI open only for imaging files.
+    expanded: { advanced: false, imaging: isImaging },
+    notices: opened.mixedRepresentationWarning
+      ? [{ id: "mixed-repr", severity: "warning" as const, message: opened.mixedRepresentationWarning }]
+      : [],
+  });
+
+  // scanBreakdown → detailed stats + browse index + the AUTHORITATIVE ticColumn (not inferred).
+  void engine
+    .scanBreakdown()
+    .then(({ stats, browse, ticColumn }) => {
+      if (seq !== currentOpenSeq) return;
+      set((s) => ({
+        stats: { ...s.stats, ...stats },
+        browse,
+        capabilities: s.capabilities
+          ? { ...s.capabilities, chromatograms: { ...s.capabilities.chromatograms, ticColumn } }
+          : s.capabilities,
+      }));
+    })
+    .catch(() => {
+      // Non-fatal, but surface a dismissible notice so the missing detailed stats aren't silent.
+      if (seq !== currentOpenSeq) return;
+      set((s) => ({
+        notices: [
+          ...s.notices.filter((n) => n.id !== "scan-breakdown"),
+          {
+            id: "scan-breakdown",
+            severity: "warning" as const,
+            message: "Detailed stats (m/z range, MS levels) couldn’t be computed for this file.",
+          },
+        ],
+      }));
+    });
+
+  // Isobaric (TMT/iTRAQ) channels for the run, off the critical path.
+  void engine.studyMeta().then((s) => {
+    if (seq === currentOpenSeq) set({ channels: s.channels });
+  }).catch(() => {});
+
+  // Pre-select spectrum 0 when the file has spectra.
+  if (opened.stats && opened.stats.numSpectra > 0) {
+    if (seq !== currentOpenSeq) return;
+    await get().selectSpectrum(0);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
@@ -201,144 +307,23 @@ export const useStore = create<AppState>((set, get) => ({
   // selectSpectrum(0) is still in-flight from overwriting B's state.
   // -------------------------------------------------------------------------
   openFile: async (file: File) => {
-    // Bump the sequence number BEFORE any async work so in-flight promises
-    // from any previous openFile will see their seq as stale.
-    const seq = ++currentOpenSeq;
-
-    set({
-      phase: "loading",
-      error: null,
-      capabilities: null,
-      stats: null,
-      fileMeta: null,
-      manifest: null,
-      grid: null,
-      ticColumn: null,
-      opticalImages: [],
-      ionImage: null,
-      ionStats: null,
-      multiChannel: null,
-      ionCacheReady: false,
-      channels: [],
-      fileName: file.name,
-      fileSize: null,
-      sourceUrl: null, // local file — not shareable by URL
-      view: "summary",
-      selector: null,
-      msLevelFilter: null,
-      metadataReveal: null,
-      spectrum: null,
-      browse: null,
-      chrom: null,
-      notices: [],
-    });
-
+    const seq = ++currentOpenSeq; // bump BEFORE any async work so in-flight opens go stale
+    set({ ...INITIAL_OPEN_STATE, fileName: file.name, sourceUrl: null }); // local → not shareable
     try {
       const bytes = await file.arrayBuffer();
       const opened = await engine.open({ kind: "file", bytes, name: file.name });
-
-      // Stale guard: if a newer openFile was called while we were awaiting, drop.
-      if (seq !== currentOpenSeq) return;
-
-      const isImaging = opened.capabilities.imaging.isImaging;
-
-      set({
-        phase: "ready",
-        capabilities: opened.capabilities,
-        stats: opened.stats,
-        fileMeta: opened.fileMeta,
-        manifest: opened.manifest,
-        grid: opened.grid,
-        ticColumn: opened.tic,
-        opticalImages: opened.opticalImages,
-        fileSize: opened.fileSize,
-        // Default accordion: Advanced closed; MSI open only for imaging files
-        expanded: { advanced: false, imaging: isImaging },
-        notices: opened.mixedRepresentationWarning
-          ? [
-              {
-                id: "mixed-repr",
-                severity: "warning" as const,
-                message: opened.mixedRepresentationWarning,
-              },
-            ]
-          : [],
-      });
-
-      // Kick off the scan-breakdown to populate browse index + stats.
-      // FINDING 2: use the authoritative `ticColumn` field from the engine
-      // result rather than guessing from browse.tic values (a valid all-zero
-      // TIC would have been misread as absent).
-      void engine.scanBreakdown().then(({ stats, browse, ticColumn }) => {
-        // Stale guard: drop if a newer openFile started while we were in-flight.
-        if (seq !== currentOpenSeq) return;
-        set((s) => ({
-          stats: { ...s.stats, ...stats },
-          browse,
-          capabilities: s.capabilities
-            ? {
-                ...s.capabilities,
-                chromatograms: {
-                  ...s.capabilities.chromatograms,
-                  // Source ticColumn directly from the engine — not inferred.
-                  ticColumn,
-                },
-              }
-            : s.capabilities,
-        }));
-      }).catch(() => {
-        // Non-fatal: scan breakdown failing doesn't break the core UI, but the
-        // detailed stats (m/z range, MS levels, per-pixel TIC) won't fill in — surface
-        // a dismissible notice rather than leaving the partial open-time stats silent.
-        if (seq !== currentOpenSeq) return;
-        set((s) => ({
-          notices: [
-            ...s.notices.filter((n) => n.id !== "scan-breakdown"),
-            {
-              id: "scan-breakdown",
-              severity: "warning" as const,
-              message: "Detailed stats (m/z range, MS levels) couldn’t be computed for this file.",
-            },
-          ],
-        }));
-      });
-
-      // Resolve isobaric (TMT/iTRAQ) channels for the run (off the critical path).
-      void engine.studyMeta().then((s) => {
-        if (seq === currentOpenSeq) set({ channels: s.channels });
-      }).catch(() => {});
-
-      // Pre-select spectrum 0 if file has spectra.
-      // The stale guard is also enforced inside selectSpectrum via the engine's
-      // SupersededError / CancelledError handling.
-      if (opened.stats && opened.stats.numSpectra > 0) {
-        // Stale guard: only issue the select if we're still the current open.
-        if (seq !== currentOpenSeq) return;
-        await get().selectSpectrum(0);
-      }
-
+      await finishOpen(set, get, seq, opened);
     } catch (err) {
-      // Stale guard: only apply error state if we're still the current open.
-      if (seq !== currentOpenSeq) return;
-      set({
-        phase: "error",
-        error: err instanceof Error ? err.message : String(err),
-      });
+      if (seq !== currentOpenSeq) return; // newer open superseded us
+      set({ phase: "error", error: err instanceof Error ? err.message : String(err) });
     }
   },
 
-  // -------------------------------------------------------------------------
-  // openUrl — open a remote .mzpeak by URL (deep-link ?file= path).
-  //
-  // Mirrors openFile exactly (same stale-async race guard via currentOpenSeq,
-  // same post-open set, same scanBreakdown follow-up + pre-select spectrum 0),
-  // but the engine fetches the bytes itself via {kind:"url"} (HTTP range reads),
-  // so there is no local arrayBuffer step. fileName is derived from the URL.
-  // -------------------------------------------------------------------------
+  // openUrl — remote .mzpeak by URL (deep-link ?file= / cloud demo / paste). Same flow as
+  // openFile (shared finishOpen), but the engine fetches via {kind:"url"} HTTP range reads.
   openUrl: async (url: string) => {
     const seq = ++currentOpenSeq;
-
-    // Derive a display name from the URL path's last segment.
+    // Display name from the URL's last path segment.
     let displayName = url;
     try {
       const u = new URL(url, typeof location !== "undefined" ? location.href : undefined);
@@ -347,104 +332,13 @@ export const useStore = create<AppState>((set, get) => ({
     } catch {
       // Non-absolute / unparseable: keep the raw url as the display name.
     }
-
-    set({
-      phase: "loading",
-      error: null,
-      capabilities: null,
-      stats: null,
-      fileMeta: null,
-      manifest: null,
-      grid: null,
-      ticColumn: null,
-      opticalImages: [],
-      ionImage: null,
-      ionStats: null,
-      multiChannel: null,
-      ionCacheReady: false,
-      channels: [],
-      fileName: displayName,
-      fileSize: null,
-      sourceUrl: url, // remote source — the shareable URI for deep links
-      view: "summary",
-      selector: null,
-      msLevelFilter: null,
-      metadataReveal: null,
-      spectrum: null,
-      browse: null,
-      chrom: null,
-      notices: [],
-    });
-
+    set({ ...INITIAL_OPEN_STATE, fileName: displayName, sourceUrl: url }); // remote → shareable URI
     try {
       const opened = await engine.open({ kind: "url", url });
-
-      // Stale guard: if a newer open was called while we were awaiting, drop.
-      if (seq !== currentOpenSeq) return;
-
-      const isImaging = opened.capabilities.imaging.isImaging;
-
-      set({
-        phase: "ready",
-        capabilities: opened.capabilities,
-        stats: opened.stats,
-        fileMeta: opened.fileMeta,
-        manifest: opened.manifest,
-        grid: opened.grid,
-        ticColumn: opened.tic,
-        opticalImages: opened.opticalImages,
-        fileSize: opened.fileSize,
-        expanded: { advanced: false, imaging: isImaging },
-        notices: opened.mixedRepresentationWarning
-          ? [
-              {
-                id: "mixed-repr",
-                severity: "warning" as const,
-                message: opened.mixedRepresentationWarning,
-              },
-            ]
-          : [],
-      });
-
-      // Kick off the scan-breakdown to populate browse index + stats.
-      void engine
-        .scanBreakdown()
-        .then(({ stats, browse, ticColumn }) => {
-          if (seq !== currentOpenSeq) return;
-          set((s) => ({
-            stats: { ...s.stats, ...stats },
-            browse,
-            capabilities: s.capabilities
-              ? {
-                  ...s.capabilities,
-                  chromatograms: {
-                    ...s.capabilities.chromatograms,
-                    ticColumn,
-                  },
-                }
-              : s.capabilities,
-          }));
-        })
-        .catch(() => {
-          // Non-fatal: scan breakdown failing doesn't break the core UI
-        });
-
-      // Resolve isobaric (TMT/iTRAQ) channels for the run (off the critical path).
-      void engine.studyMeta().then((s) => {
-        if (seq === currentOpenSeq) set({ channels: s.channels });
-      }).catch(() => {});
-
-      // Pre-select spectrum 0 if file has spectra.
-      if (opened.stats && opened.stats.numSpectra > 0) {
-        if (seq !== currentOpenSeq) return;
-        await get().selectSpectrum(0);
-      }
+      await finishOpen(set, get, seq, opened);
     } catch (err) {
       if (seq !== currentOpenSeq) return;
-      set({
-        phase: "error",
-        error: err instanceof Error ? err.message : String(err),
-      });
+      set({ phase: "error", error: err instanceof Error ? err.message : String(err) });
     }
   },
 

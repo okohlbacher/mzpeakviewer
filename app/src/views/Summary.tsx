@@ -4,15 +4,7 @@ import { useEffect, useRef } from "react";
 import type { ImagingGridWire } from "@mzpeak/contracts";
 import { useStore } from "../store";
 import { StatRow, Badge, Panel } from "@mzpeak/ui-kit";
-import { rasterizeTic } from "./render";
-
-function fmtBytes(b: number | null | undefined): string {
-  if (b == null) return "—";
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
+import { rasterizeTic, formatBytes } from "./render";
 
 function fmtRange(r: [number, number] | null, digits = 2): string {
   if (!r) return "—";
@@ -58,7 +50,7 @@ export function Summary() {
       {/* File section */}
       <Panel title="File" defaultOpen testid="summary-file-panel">
         <StatRow label="Name" value={fileName ?? "—"} testid="summary-filename" />
-        <StatRow label="Size" value={fmtBytes(fileSize)} />
+        <StatRow label="Size" value={formatBytes(fileSize)} />
         <StatRow
           label="Spectra"
           value={stats.numSpectra.toLocaleString()}
@@ -226,7 +218,7 @@ export function Summary() {
                       {entry.role ?? "—"}
                     </td>
                     <td style={{ padding: "0.2rem 0.5rem", color: "var(--text-secondary)" }}>
-                      {fmtBytes(entry.bytes)}
+                      {formatBytes(entry.bytes)}
                     </td>
                   </tr>
                 ))}

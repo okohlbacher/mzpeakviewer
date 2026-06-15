@@ -10,17 +10,12 @@ import { engine } from "../engine";
 import type { ArchiveMemberList, ParquetFooter, ParquetColumn, ColumnSample } from "@mzpeak/contracts";
 import { Button } from "@mzpeak/ui-kit";
 import { AdvancedTabs } from "./AdvancedTabs";
+import { formatBytes } from "./render";
 
 type Member = ArchiveMemberList["members"][number];
 
 const SAMPLE_ROWS = 50_000; // rows read for the on-demand histogram/stats
 
-function fmtBytes(n: number | null | undefined): string {
-  if (n == null) return "—";
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
 function fmtNum(n: number | null | undefined): string {
   return n == null ? "—" : n.toLocaleString();
 }
@@ -180,7 +175,7 @@ export function Structure() {
                     </span>
                     <span style={{ color: "var(--text-muted, #94a3b8)", flexShrink: 0, display: "flex", gap: "0.5rem", alignItems: "center" }}>
                       {manifest && <span style={{ color: "var(--accent, #3b54da)", fontFamily: "var(--font-sans)", fontSize: "0.7rem" }}>View JSON →</span>}
-                      {fmtBytes(m.bytes)}
+                      {formatBytes(m.bytes)}
                     </span>
                   </button>
                 </li>
@@ -211,7 +206,7 @@ function ParquetInspector({ footer }: { footer: ParquetFooter }) {
       <p style={{ margin: "0 0 0.75rem", color: "var(--text-muted, #6b757e)", fontSize: "var(--text-sm, 0.82rem)" }}>
         <strong>{footer.numRows.toLocaleString()}</strong> rows · <strong>{footer.columns.length}</strong> columns ·{" "}
         <strong>{footer.numRowGroups}</strong> row group{footer.numRowGroups === 1 ? "" : "s"} ·{" "}
-        {fmtBytes(totalComp)} compressed / {fmtBytes(totalRaw)} raw{ratio > 0 ? ` (${ratio.toFixed(1)}×)` : ""}
+        {formatBytes(totalComp)} compressed / {formatBytes(totalRaw)} raw{ratio > 0 ? ` (${ratio.toFixed(1)}×)` : ""}
         {footer.createdBy ? ` · ${footer.createdBy}` : ""}
       </p>
       <table style={{ borderCollapse: "collapse", fontSize: "var(--text-sm, 0.82rem)", width: "100%" }}>
@@ -244,7 +239,7 @@ function ParquetInspector({ footer }: { footer: ParquetFooter }) {
                   <td style={{ padding: "0.25rem 0.6rem" }}>{c.logicalType ?? c.type}</td>
                   <td style={{ padding: "0.25rem 0.6rem" }}>{c.codec ?? "—"}</td>
                   <td style={{ padding: "0.25rem 0.6rem", textAlign: "right" }}>{fmtNum(c.numValues)}</td>
-                  <td style={{ padding: "0.25rem 0.6rem", textAlign: "right" }}>{fmtBytes(c.compressedBytes)}</td>
+                  <td style={{ padding: "0.25rem 0.6rem", textAlign: "right" }}>{formatBytes(c.compressedBytes)}</td>
                   <td style={{ padding: "0.25rem 0.6rem", textAlign: "right" }}>{share.toFixed(0)}%</td>
                 </tr>
                 {isOpen && (

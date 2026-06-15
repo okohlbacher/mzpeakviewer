@@ -39,7 +39,7 @@ import type {
   ParquetFooter,
 } from "@mzpeak/contracts";
 import { adaptParquetFooter, type FooterColumnInput, type FooterInput } from "../adapt/footer";
-import type { Reader } from "../reader/explorer/open";
+import type { Reader } from "../reader/openUrl";
 
 // ── Reader/store structural views (the opaque Reader's internals we touch) ───────
 

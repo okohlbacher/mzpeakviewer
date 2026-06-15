@@ -22,6 +22,7 @@ import { rebuildCoordMap } from "../adapt/grid";
 import { computeIonImageStats } from "../adapt/ionImage";
 import { adaptSpectrum } from "../adapt/spectrum";
 import { harvestDataArraysOrNull } from "../reader/arrays";
+import { readMsLevels } from "../reader/columns";
 import { streamSpectraDataArrays, type Reader } from "../reader/openUrl";
 import { IonCacheBuilder, type SpectraArrayCache, type CompactSpectrum } from "./cache";
 import type { Mutex } from "./mutex";
@@ -36,30 +37,6 @@ const PREFETCH_SLICE_MS = 30;
  *  ONE slice — bounds starvation under steady navigation (which keeps refreshing the
  *  cooldown), so the warm cache still completes eventually. */
 const MAX_PREFETCH_STARVE_MS = 4000;
-
-/** Promoted per-spectrum MS-level column (mirrors open.ts buildTic / spectrum.ts). */
-const MS_LEVEL_COL = "MS_1000511_ms_level";
-
-/** Bulk-read the promoted MS-level column vectorized; null when the column is absent. */
-function readMsLevels(reader: Reader): Int16Array | null {
-  const sm = (reader as unknown as {
-    spectrumMetadata?: {
-      spectra?: { getChild?: (n: string) => { get(i: number): unknown } | null } | null;
-      length?: number;
-    } | null;
-  }).spectrumMetadata;
-  const spectra = sm?.spectra;
-  if (!spectra || typeof spectra.getChild !== "function") return null;
-  const col = spectra.getChild(MS_LEVEL_COL);
-  if (!col) return null;
-  const n = sm?.length ?? 0;
-  const levels = new Int16Array(n);
-  for (let i = 0; i < n; i++) {
-    const v = col.get(i);
-    levels[i] = typeof v === "number" && Number.isFinite(v) ? v : 0;
-  }
-  return levels;
-}
 
 /**
  * Build the "include this spectrum in the ion image?" predicate enforcing the MS1-ONLY

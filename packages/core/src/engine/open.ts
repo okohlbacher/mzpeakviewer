@@ -29,6 +29,7 @@ import { flattenGrid } from "../adapt/grid";
 import { fileMeta, manifest as readManifest } from "../reader/fileMeta";
 import { openBlob, openUrl, type Reader } from "../reader/openUrl";
 import { CorruptFileError, UnsupportedEncodingError } from "../reader/errors";
+import { readMsLevels } from "../reader/columns";
 import { buildImagingGrid } from "../reader/grid";
 import { extractCoords, readGridGeometry } from "../reader/scanCoords";
 import {
@@ -40,8 +41,6 @@ import type { ImagingGrid } from "../reader/imagingTypes";
 
 // MS:1000285 = total ion current (promoted column name in the spectrum meta bag).
 const TIC_COL = "MS_1000285_total_ion_current_unit_MS_1000131";
-// MS:1000511 = ms level (promoted column) — used to restrict the TIC to MS1 spectra.
-const MS_LEVEL_COL = "MS_1000511_ms_level";
 
 /** What the engine `open` returns. The live reader stays in-process. */
 export type EngineFile = {
@@ -119,29 +118,6 @@ function readAllTics(reader: Reader): Float64Array | null {
   return tics;
 }
 
-/**
- * Bulk-read the promoted per-spectrum MS-level column (MS:1000511) vectorized, so the
- * imaging TIC can be restricted to MS1. `0` for an absent/non-finite level (treated as
- * "unannotated", which the MS1 fallback handles). Returns `null` when the column is
- * absent (caller then doesn't filter).
- */
-function readAllMsLevels(reader: Reader): Int16Array | null {
-  const sm = reader.spectrumMetadata as unknown as
-    | { spectra?: SpectraStruct | null; length?: number }
-    | null
-    | undefined;
-  const spectra = sm?.spectra;
-  if (!spectra || typeof spectra.getChild !== "function") return null;
-  const col = spectra.getChild(MS_LEVEL_COL);
-  if (!col) return null;
-  const n = sm?.length ?? spectra.length ?? 0;
-  const levels = new Int16Array(n);
-  for (let i = 0; i < n; i++) {
-    const v = col.get(i);
-    levels[i] = typeof v === "number" && Number.isFinite(v) ? v : 0;
-  }
-  return levels;
-}
 
 /**
  * Read one spectrum's TIC from the metadata table (NaN when absent). GUARDED: some
@@ -176,7 +152,7 @@ function readSpectrumTic(reader: Reader, index: number): number {
 function buildTic(reader: Reader, grid: ImagingGrid): Float32Array {
   const tic = new Float32Array(grid.width * grid.height);
   const allTics = readAllTics(reader);
-  const allLevels = readAllMsLevels(reader);
+  const allLevels = readMsLevels(reader);
   // Does any grid spectrum carry MS level 1? If not, don't filter (fallback).
   let hasMs1 = false;
   if (allLevels) {

@@ -18,7 +18,7 @@
 import type { ChromRequest } from "@mzpeak/contracts";
 import type { ChromatogramSeries } from "@mzpeak/contracts";
 import { adaptChromatogram, type ChromInput } from "../adapt/chrom";
-import type { Reader } from "../reader/explorer/open";
+import type { Reader } from "../reader/openUrl";
 import {
   chromatogramIds,
   extractChromatogram,

@@ -8,7 +8,7 @@
 // the columnar mapping is the pure adapt/browse.ts adapter. No signal arrays are read.
 import type { FileStats, BrowseIndex, Presence } from "@mzpeak/contracts";
 import { buildBrowseIndex, type BrowseRow } from "../adapt/browse";
-import type { Reader } from "../reader/explorer/open";
+import type { Reader } from "../reader/openUrl";
 import { computeFastSummary, scanSpectra } from "../reader/explorer/summary";
 import type { SpectrumIndexRow } from "../reader/explorer/types";
 

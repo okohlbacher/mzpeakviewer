@@ -279,3 +279,13 @@ export function formatCompact(v: number): string {
   if (abs >= 1e5 || abs < 1e-3) return v.toExponential(1);
   return Number(v.toPrecision(4)).toLocaleString();
 }
+
+/** Human byte size up to GB (single shared impl — Summary + Structure had divergent copies,
+ *  one of which stopped at MB and would print "1234.5 MB" for a >1 GB member). */
+export function formatBytes(b: number | null | undefined): string {
+  if (b == null) return "—";
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
