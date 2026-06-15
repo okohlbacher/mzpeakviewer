@@ -76,7 +76,7 @@ describe("engine multi-channel render round-trip against real imaging.mzpeak", (
       null,
       { mz: mzB, tolDa: TOL },
     ];
-    const result = await engineRenderMultiChannel(opened.reader, g, channels);
+    const result = (await engineRenderMultiChannel(opened.reader, g, channels)).channels;
 
     // length parity + position alignment
     expect(result.length).toBe(channels.length);
@@ -107,7 +107,7 @@ describe("engine multi-channel render round-trip against real imaging.mzpeak", (
 
   it("returns an all-null array when every channel is null", async () => {
     const g = opened.grid!;
-    const result = await engineRenderMultiChannel(opened.reader, g, [null, null]);
+    const result = (await engineRenderMultiChannel(opened.reader, g, [null, null])).channels;
     expect(result).toEqual([null, null]);
   }, 120_000);
 });

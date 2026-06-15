@@ -331,7 +331,26 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
           respond({ type: "multiChannelResult", requestId: req.requestId, channels: req.channels.map(() => null) });
           return;
         }
-        const channels = await engineRenderMultiChannel(active.reader, active.grid, req.channels);
+        const prevMc = ctx.ionCache;
+        const { channels, cache: mcCache } = await engineRenderMultiChannel(active.reader, active.grid, req.channels, {
+          cache: ctx.ionCache,
+          limitBytes: ctx.budget.remaining(),
+          // Progressive preview: stream partial channel images (copies) so the RGB composite
+          // fills in during a cold build.
+          onPreview: (chs) =>
+            respond(
+              { type: "multiChannelPreview", requestId: req.requestId, channels: chs },
+              buffersOf(...chs.filter((c): c is Float32Array => c !== null)),
+            ),
+        });
+        // Multi-channel now warms the SHARED ion cache (one streamed build, reused by later
+        // single/multi renders) and accounts it against the budget — mirrors renderIonImage.
+        if (mcCache !== prevMc) {
+          if (prevMc) ctx.budget.sub(prevMc.bytes);
+          if (mcCache) ctx.budget.add(mcCache.bytes);
+          ctx.ionCache = mcCache;
+          if (mcCache && mcCache.complete) emitIonIndexReady(mcCache, respond);
+        }
         respond(
           { type: "multiChannelResult", requestId: req.requestId, channels },
           buffersOf(...channels.filter((c): c is Float32Array => c !== null)),

@@ -135,6 +135,28 @@ describe("EngineClient", () => {
     expect(onPreview).toHaveBeenCalledTimes(1); // no delivery after settle
   });
 
+  it("(b3) renderMultiChannel forwards multiChannelPreview partials to onPreview for THIS request only", async () => {
+    const fw = new FakeWorker();
+    const client = new EngineClient(fw);
+    fw.push({ type: "ready" });
+
+    const onPreview = vi.fn();
+    const p = client.renderMultiChannel([{ mz: 150, tolDa: 0.5 }, null], onPreview);
+    const { msg } = fw.last();
+
+    const partial = [new Float32Array([1, 2]), null];
+    fw.push({ type: "multiChannelPreview", requestId: msg.requestId, channels: partial });
+    fw.push({ type: "multiChannelPreview", requestId: msg.requestId + 999, channels: [new Float32Array([0]), null] });
+    expect(onPreview).toHaveBeenCalledTimes(1);
+    expect(onPreview).toHaveBeenCalledWith(partial);
+
+    const final = [new Float32Array([3, 4]), null];
+    fw.push({ type: "multiChannelResult", requestId: msg.requestId, channels: final });
+    await expect(p).resolves.toEqual(final);
+    fw.push({ type: "multiChannelPreview", requestId: msg.requestId, channels: [new Float32Array([9]), null] });
+    expect(onPreview).toHaveBeenCalledTimes(1); // detached after settle
+  });
+
   it("(c) an {type:error, requestId} rejects the right promise", async () => {
     const fw = new FakeWorker();
     const client = new EngineClient(fw);

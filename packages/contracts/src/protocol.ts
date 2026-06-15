@@ -142,6 +142,9 @@ export type WorkerResponse =
   // build streams, so the UI shows it filling in (perceived speed). ionImage.buffer TRANSFERRED.
   | { type: "renderPreview"; requestId: number; ionImage: Float32Array; stats: IonImageStats }
   | { type: "multiChannelResult"; requestId: number; channels: (Float32Array | null)[] }
+  // Progressive PREVIEW of a cold RGB render: partial channel images (copies) emitted as the
+  // single streamed build fills in. Non-null channel buffers TRANSFERRED.
+  | { type: "multiChannelPreview"; requestId: number; channels: (Float32Array | null)[] }
   | { type: "ionIndexPreloading" }
   | { type: "ionIndexPreloadAborted" }
   | { type: "ionIndexReady"; points: number }

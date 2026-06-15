@@ -265,7 +265,10 @@ function ImagingInner({
     setBusy(true);
     setError(null);
     try {
-      const images = await engine.renderMultiChannel(reqs);
+      const images = await engine.renderMultiChannel(reqs, (partial) =>
+        // Progressive preview: draw each partial RGB composite as the cold build fills in.
+        setMultiChannelStore(partial),
+      );
       setMultiChannelStore(images);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

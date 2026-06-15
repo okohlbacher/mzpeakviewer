@@ -375,6 +375,128 @@ export async function engineRenderIonImage(
   return { ionImage, stats, cache };
 }
 
+// ── Multi-channel (RGB-overlay) render ────────────────────────────────────────
+
+/** One channel of a multi-channel overlay (mirrors contracts' ChannelRequest core). */
+export type MultiChannelSpec = { mz: number; tolDa: number };
+
+export type RenderMultiChannelOptions = {
+  /** Reuse/populate the shared session cache of decoded grid-cell spectra. */
+  cache?: SpectraArrayCache | null;
+  /** Max bytes the cache may hold before this file is rendered uncached. */
+  limitBytes?: number;
+  /** Progressive preview: COPIES of the partial channel images, emitted ~every 500ms during
+   *  a cold build so the RGB composite fills in. Not called on the instant cache-hit path. */
+  onPreview?: (channels: (Float32Array | null)[]) => void;
+};
+
+/**
+ * Render an RGB-overlay's worth of ion images — one per channel SLOT, POSITION-ALIGNED with
+ * `channels` (null slot → null result, IV parity). Unlike a per-channel loop, this does ONE
+ * streamed pass over spectra_data and computes EVERY active channel's window-sum per spectrum
+ * (so a cold N-channel render streams once, not N times), building the SHARED compact ion
+ * cache as it goes; a warm cache makes all channels an instant binary-search re-sum. Each
+ * channel's pixel values are byte-identical to the single-channel `engineRenderIonImage` (same
+ * data-array source, same inclusive `[mz−tolDa, mz+tolDa]` window, computed from the same f64
+ * stream on the build path). Returns the channel images + the (built or reused) cache.
+ */
+export async function engineRenderMultiChannel(
+  reader: Reader,
+  gridWire: ImagingGridWire,
+  channels: (MultiChannelSpec | null)[],
+  opts?: RenderMultiChannelOptions,
+): Promise<{ channels: (Float32Array | null)[]; cache: SpectraArrayCache | null }> {
+  const dense = gridWire.width * gridWire.height;
+  const images: (Float32Array | null)[] = channels.map((ch) => (ch ? new Float32Array(dense) : null));
+  const active: number[] = [];
+  const lo = new Array<number>(channels.length).fill(0);
+  const hi = new Array<number>(channels.length).fill(0);
+  for (let i = 0; i < channels.length; i++) {
+    const ch = channels[i];
+    if (ch) { active.push(i); lo[i] = ch.mz - ch.tolDa; hi[i] = ch.mz + ch.tolDa; }
+  }
+  if (active.length === 0) return { channels: images, cache: opts?.cache ?? null };
+
+  const coordToSpectrum = rebuildCoordMap(gridWire);
+  const isMs1 = makeMs1Only(reader, coordToSpectrum.values());
+  const spectrumToCoord = new Map<number, number>();
+  for (const [coordKey, si] of coordToSpectrum) {
+    if (coordKey >= 0 && coordKey < dense && isMs1(si)) spectrumToCoord.set(si, coordKey);
+  }
+
+  // Progressive preview: snapshot all channel images (copies) periodically (build path only).
+  const onPreview = opts?.onPreview;
+  let lastPreview = 0;
+  const previewTick = () => {
+    if (!onPreview) return;
+    const t = now();
+    if (t - lastPreview >= PREVIEW_INTERVAL_MS) {
+      lastPreview = t;
+      onPreview(images.map((im) => (im ? im.slice() : null)));
+    }
+  };
+
+  // Write every active channel's window-sum for one spectrum.
+  const writeScan = (coordKey: number, mz: ArrayLike<number>, inten: ArrayLike<number>) => {
+    for (const i of active) images[i]![coordKey] = windowSumScan(mz, inten, lo[i]!, hi[i]!);
+  };
+
+  // ── CACHE-HIT: every channel from the in-memory compact arrays (binary-search when sorted) ──
+  const cache = opts?.cache;
+  if (cache?.complete) {
+    const byIndex = cache.byIndex;
+    const sorted = cache.sorted;
+    for (const [si, coordKey] of spectrumToCoord) {
+      const arrs = byIndex.get(si);
+      if (!arrs) continue;
+      for (const i of active)
+        images[i]![coordKey] = sorted
+          ? windowSumSorted(arrs.mz, arrs.intensity, lo[i]!, hi[i]!)
+          : windowSumScan(arrs.mz, arrs.intensity, lo[i]!, hi[i]!);
+    }
+    return { channels: images, cache };
+  }
+
+  // ── BUILD: ONE streamed pass — all channels per spectrum (exact f64) + build the compact cache ──
+  const building = new Map<number, CompactSpectrum>();
+  let bytes = 0;
+  let cacheable = true;
+  let sortedAll = true;
+  const limitBytes = opts?.limitBytes ?? DEFAULT_CACHE_LIMIT_BYTES;
+  const remember = (index: number, mzArr: Float64Array, inArr: Float32Array) => {
+    if (!cacheable) return;
+    const { entry, sorted } = compactSpectrum(mzArr, inArr);
+    bytes += entry.mz.byteLength + entry.intensity.byteLength;
+    if (bytes > limitBytes) { cacheable = false; building.clear(); return; }
+    if (!sorted) sortedAll = false;
+    building.set(index, entry);
+  };
+
+  const filled = new Set<number>();
+  for await (const { index, mz: mzArr, intensity: inArr } of streamSpectraDataArrays(reader)) {
+    const coordKey = spectrumToCoord.get(index);
+    if (coordKey === undefined) continue;
+    writeScan(coordKey, mzArr, inArr);
+    filled.add(coordKey);
+    remember(index, mzArr, inArr);
+    previewTick();
+  }
+  // Centroid-only fallback for any uncovered cell (rare for data-array imaging files).
+  for (const [coordKey, si] of coordToSpectrum) {
+    if (coordKey < 0 || coordKey >= dense || filled.has(coordKey)) continue;
+    if (!isMs1(si)) continue;
+    const arrs = await readSpectrumArrays(reader, si);
+    if (!arrs) continue;
+    writeScan(coordKey, arrs.mz, arrs.intensity);
+    remember(si, arrs.mz, arrs.intensity);
+  }
+
+  const builtCache: SpectraArrayCache | null = cacheable
+    ? { byIndex: building, complete: true, bytes, sorted: sortedAll }
+    : null;
+  return { channels: images, cache: builtCache };
+}
+
 /** Cooperative control for the interruptible background prefetch. */
 export type PrefetchControl = {
   /** Serializes reader access against dispatched user reads (the non-reentrant reader). */

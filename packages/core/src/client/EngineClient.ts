@@ -141,6 +141,7 @@ export type EngineEventMap = {
   progress: Extract<WorkerResponse, { type: "progress" }>;
   renderProgress: Extract<WorkerResponse, { type: "renderProgress" }>;
   renderPreview: Extract<WorkerResponse, { type: "renderPreview" }>;
+  multiChannelPreview: Extract<WorkerResponse, { type: "multiChannelPreview" }>;
   ionIndexPreloading: Extract<WorkerResponse, { type: "ionIndexPreloading" }>;
   ionIndexPreloadAborted: Extract<WorkerResponse, { type: "ionIndexPreloadAborted" }>;
   ionIndexReady: Extract<WorkerResponse, { type: "ionIndexReady" }>;
@@ -451,15 +452,29 @@ export class EngineClient {
     return p;
   }
 
-  /** Render an RGB multi-channel overlay (one image per non-null channel). */
+  /**
+   * Render an RGB multi-channel overlay (one image per non-null channel). `onPreview` (if
+   * given) fires from the worker's `multiChannelPreview` events for THIS request only — partial
+   * channel images as the cold build streams — and is detached when the render settles.
+   */
   renderMultiChannel(
     channels: (ChannelRequest | null)[],
+    onPreview?: (channels: (Float32Array | null)[]) => void,
   ): Promise<(Float32Array | null)[]> {
-    return this.request<(Float32Array | null)[]>((requestId) => ({
-      type: "renderMultiChannel",
-      channels,
-      requestId,
-    }));
+    let off: () => void = () => {};
+    const p = this.request<(Float32Array | null)[]>((requestId) => {
+      if (onPreview) {
+        off = this.on("multiChannelPreview", (ev) => {
+          if (ev.requestId === requestId) onPreview(ev.channels);
+        });
+      }
+      return { type: "renderMultiChannel", channels, requestId };
+    });
+    void p.then(
+      () => off(),
+      () => off(),
+    );
+    return p;
   }
 
   /**
@@ -550,6 +565,7 @@ export class EngineClient {
       case "progress":
       case "renderProgress":
       case "renderPreview":
+      case "multiChannelPreview":
       case "ionIndexPreloading":
       case "ionIndexPreloadAborted":
       case "ionIndexReady":
