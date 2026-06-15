@@ -23,6 +23,7 @@ import { computeIonImageStats } from "../adapt/ionImage";
 import { adaptSpectrum } from "../adapt/spectrum";
 import { harvestDataArraysOrNull } from "../reader/arrays";
 import { streamSpectraDataArrays, type Reader } from "../reader/openUrl";
+import { IonCacheBuilder, type SpectraArrayCache, type CompactSpectrum } from "./cache";
 import type { Mutex } from "./mutex";
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -124,43 +125,10 @@ async function readSpectrumArrays(
  * (still correct, just re-streamed each time). The cache is owned by the worker session
  * and dropped on open/close (see dispatch.ts) so it never leaks across files.
  */
-/**
- * COMPACT per-spectrum arrays held ONLY to recompute ion images (MSI). m/z is stored as
- * f32 (not f64): f32 precision is ~1.2e-4 Da at m/z 1000 — far finer than any practical
- * window tolerance — so it never changes which points fall in an ion-image window, while
- * halving the m/z footprint. Intensity is already f32. This is NOT a spectrum-display
- * structure: id / representation / RT and full f64 m/z are re-read on demand (cheap), per
- * the "metadata refetched quickly" design note.
- */
-export type CompactSpectrum = { mz: Float32Array; intensity: Float32Array };
-
-export type SpectraArrayCache = {
-  /** spectrumIndex → compact point arrays, for every filled grid cell with data. */
-  byIndex: Map<number, CompactSpectrum>;
-  /** True once a full pass populated every available filled-cell spectrum. */
-  complete: boolean;
-  /** Approximate bytes held (mz f32 + intensity f32), for the budget check. */
-  bytes: number;
-  /** True when every cached spectrum's m/z is ascending (the sortingRank-0 axis) — lets the
-   *  cache-hit path binary-search the window instead of scanning all points. A file with any
-   *  non-ascending spectrum sets this false and falls back to a full scan (always correct). */
-  sorted: boolean;
-};
-
-/** Downcast m/z to f32 (intensity already f32), reporting whether the m/z is ascending. */
-function compactSpectrum(
-  mz: ArrayLike<number>,
-  intensity: Float32Array,
-): { entry: CompactSpectrum; sorted: boolean } {
-  const n = mz.length;
-  const m32 = new Float32Array(n);
-  let sorted = true;
-  for (let i = 0; i < n; i++) {
-    m32[i] = mz[i]!;
-    if (i > 0 && m32[i]! < m32[i - 1]!) sorted = false;
-  }
-  return { entry: { mz: m32, intensity }, sorted };
-}
+// The compact ion-cache types + the shared build/owner primitives live in cache.ts (the single
+// shared cache module) so every imaging op and any future tab reuses them. Re-exported (below,
+// from the local import) for existing importers (dispatch, tests).
+export type { SpectraArrayCache, CompactSpectrum };
 
 /** First index i with a[i] >= x (binary search over an ascending array). */
 function lowerBound(a: ArrayLike<number>, x: number): number {
@@ -323,22 +291,9 @@ export async function engineRenderIonImage(
   // 34,840-pixel image never finishes). Same data-array source IV/`harvestDataArraysOrNull`
   // prefers, so the summed values are identical. Decoded grid-cell arrays are cached as we
   // go (until the budget is hit), so later renders take the cache-hit path above. ──────
-  const building = new Map<number, CompactSpectrum>();
-  let bytes = 0;
-  let cacheable = true;
-  let sortedAll = true;
-  const remember = (index: number, mzArr: Float64Array, inArr: Float32Array) => {
-    if (!cacheable) return;
-    const { entry, sorted } = compactSpectrum(mzArr, inArr); // f32 m/z (compact)
-    bytes += entry.mz.byteLength + entry.intensity.byteLength;
-    if (bytes > limitBytes) {
-      cacheable = false; // too big for this session — render uncached from here on
-      building.clear();
-      return;
-    }
-    if (!sorted) sortedAll = false;
-    building.set(index, entry);
-  };
+  // Cache decoded grid-cell arrays as we go (shared IonCacheBuilder — f32 compaction + budget +
+  // sortedness bookkeeping), so later renders take the cache-hit path above.
+  const builder = new IonCacheBuilder(() => limitBytes);
 
   const filled = new Set<number>();
   for await (const { index, mz: mzArr, intensity: inArr } of streamSpectraDataArrays(reader)) {
@@ -346,7 +301,7 @@ export async function engineRenderIonImage(
     if (coordKey === undefined) continue; // spectrum not mapped to a grid cell — not cached
     ionImage[coordKey] = windowSum(mzArr, inArr);
     filled.add(coordKey);
-    remember(index, mzArr, inArr);
+    builder.add(index, mzArr, inArr);
     done++;
     tick();
     previewTick();
@@ -363,16 +318,13 @@ export async function engineRenderIonImage(
     tick();
     if (!arrs) continue; // absent / undecodable spectrum contributes nothing
     ionImage[coordKey] = windowSum(arrs.mz, arrs.intensity);
-    remember(spectrumIndex, arrs.mz, arrs.intensity);
+    builder.add(spectrumIndex, arrs.mz, arrs.intensity);
   }
   tick(true);
 
   const stats = computeIonImageStats(ionImage, gridWire.presenceMask);
   // Commit the cache only if it held the whole grid within budget — else null (uncached).
-  const cache: SpectraArrayCache | null = cacheable
-    ? { byIndex: building, complete: true, bytes, sorted: sortedAll }
-    : null;
-  return { ionImage, stats, cache };
+  return { ionImage, stats, cache: builder.finish() };
 }
 
 // ── Multi-channel (RGB-overlay) render ────────────────────────────────────────
@@ -457,20 +409,9 @@ export async function engineRenderMultiChannel(
     return { channels: images, cache };
   }
 
-  // ── BUILD: ONE streamed pass — all channels per spectrum (exact f64) + build the compact cache ──
-  const building = new Map<number, CompactSpectrum>();
-  let bytes = 0;
-  let cacheable = true;
-  let sortedAll = true;
+  // ── BUILD: ONE streamed pass — all channels per spectrum + build the shared compact cache ──
   const limitBytes = opts?.limitBytes ?? DEFAULT_CACHE_LIMIT_BYTES;
-  const remember = (index: number, mzArr: Float64Array, inArr: Float32Array) => {
-    if (!cacheable) return;
-    const { entry, sorted } = compactSpectrum(mzArr, inArr);
-    bytes += entry.mz.byteLength + entry.intensity.byteLength;
-    if (bytes > limitBytes) { cacheable = false; building.clear(); return; }
-    if (!sorted) sortedAll = false;
-    building.set(index, entry);
-  };
+  const builder = new IonCacheBuilder(() => limitBytes);
 
   const filled = new Set<number>();
   for await (const { index, mz: mzArr, intensity: inArr } of streamSpectraDataArrays(reader)) {
@@ -478,7 +419,7 @@ export async function engineRenderMultiChannel(
     if (coordKey === undefined) continue;
     writeScan(coordKey, mzArr, inArr);
     filled.add(coordKey);
-    remember(index, mzArr, inArr);
+    builder.add(index, mzArr, inArr);
     previewTick();
   }
   // Centroid-only fallback for any uncovered cell (rare for data-array imaging files).
@@ -488,13 +429,10 @@ export async function engineRenderMultiChannel(
     const arrs = await readSpectrumArrays(reader, si);
     if (!arrs) continue;
     writeScan(coordKey, arrs.mz, arrs.intensity);
-    remember(si, arrs.mz, arrs.intensity);
+    builder.add(si, arrs.mz, arrs.intensity);
   }
 
-  const builtCache: SpectraArrayCache | null = cacheable
-    ? { byIndex: building, complete: true, bytes, sorted: sortedAll }
-    : null;
-  return { channels: images, cache: builtCache };
+  return { channels: images, cache: builder.finish() };
 }
 
 /** Cooperative control for the interruptible background prefetch. */
@@ -541,10 +479,9 @@ export async function prefetchIonCache(
   }
   const total = spectrumToCoord.size;
 
-  const building = new Map<number, CompactSpectrum>();
-  let bytes = 0;
+  // Shared compact-cache accumulator (budget consulted live against the shared remaining).
+  const builder = new IonCacheBuilder(control.budgetRemaining);
   let done = 0;
-  let sortedAll = true;
 
   // Pause loop: return false if we should stop while waiting. Bails after
   // MAX_PREFETCH_STARVE_MS of continuous activity so a steadily-navigating user can't
@@ -562,7 +499,6 @@ export async function prefetchIonCache(
   const filled = new Set<number>();
   const it = streamSpectraDataArrays(reader)[Symbol.asyncIterator]();
   let streamDone = false;
-  let overBudget = false;
   try {
     while (!streamDone) {
       if (!(await waitWhileUserActive())) return { cache: null, stopped: true };
@@ -578,18 +514,15 @@ export async function prefetchIonCache(
           const { index, mz, intensity } = res.value;
           const coordKey = spectrumToCoord.get(index);
           if (coordKey !== undefined) {
-            const { entry, sorted } = compactSpectrum(mz, intensity); // f32 m/z (compact)
-            bytes += entry.mz.byteLength + entry.intensity.byteLength;
-            if (bytes > control.budgetRemaining()) { overBudget = true; return; }
-            if (!sorted) sortedAll = false;
-            building.set(index, entry);
+            builder.add(index, mz, intensity);
+            if (builder.overBudget) return;
             filled.add(coordKey);
             done++;
           }
           if (nowMs() - start > PREFETCH_SLICE_MS) return; // end the slice, yield below
         }
       });
-      if (overBudget) return { cache: null, stopped: false }; // too big to cache
+      if (builder.overBudget) return { cache: null, stopped: false }; // too big to cache
       control.onProgress?.(done, total);
       await sleep(0); // ONE yield per slice (lets a queued user read take the mutex)
     }
@@ -607,14 +540,11 @@ export async function prefetchIonCache(
     done++;
     control.onProgress?.(done, total);
     if (!arrs) continue;
-    const { entry, sorted } = compactSpectrum(arrs.mz, arrs.intensity);
-    bytes += entry.mz.byteLength + entry.intensity.byteLength;
-    if (bytes > control.budgetRemaining()) return { cache: null, stopped: false };
-    if (!sorted) sortedAll = false;
-    building.set(spectrumIndex, entry);
+    builder.add(spectrumIndex, arrs.mz, arrs.intensity);
+    if (builder.overBudget) return { cache: null, stopped: false };
   }
 
-  return { cache: { byIndex: building, complete: true, bytes, sorted: sortedAll }, stopped: false };
+  return { cache: builder.finish(), stopped: false };
 }
 
 // ── Mean / ROI spectrum ──────────────────────────────────────────────────────

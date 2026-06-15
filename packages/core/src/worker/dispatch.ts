@@ -13,7 +13,7 @@
 import type { WorkerRequest, ReaderErrorClass, UnsupportedFinding } from "@mzpeak/contracts";
 import { openEngineFile, openEngineUrl, type EngineFile } from "../engine/open";
 import { readEngineSpectrumCached, prefetchSpectrumCache } from "../engine/spectrum";
-import { CacheBudget, SpectrumLruCache } from "../engine/cache";
+import { CacheBudget, SpectrumLruCache, IonCacheStore } from "../engine/cache";
 import { engineScanBreakdown } from "../engine/scanBreakdown";
 import { engineExtractChrom, type ChromContext } from "../engine/chrom";
 import { engineRenderIonImage, engineMeanSpectrum, engineRoiSpectrum, prefetchIonCache, type SpectraArrayCache } from "../engine/imaging";
@@ -32,9 +32,10 @@ export type EngineContext = {
   gen: number;
   /** Cached scan context so extractChrom can reuse rows + representation counts. */
   scan: ChromContext | null;
-  /** Decoded grid-cell spectra from the first ion render, so later renders re-sum from
-   *  memory (no re-stream). Dropped on every open/close — never leaks across files. */
-  ionCache: SpectraArrayCache | null;
+  /** The ONE shared ion cache (compact decoded grid-cell spectra) — read/written by every
+   *  imaging op (ion image, RGB multi-channel, mean/ROI) and the background prefetch via this
+   *  central store. Dropped on every open/close — never leaks across files. */
+  ionCache: IonCacheStore;
   /** ONE memory-sized byte budget shared by the ion cache + the spectrum LRU. */
   budget: CacheBudget;
   /** LRU of decoded per-spectrum (m/z, intensity, msLevel) — accelerates repeat
@@ -61,7 +62,7 @@ export function createContext(): EngineContext {
     active: null,
     gen: 0,
     scan: null,
-    ionCache: null,
+    ionCache: new IonCacheStore(budget),
     budget,
     spectrumCache: new SpectrumLruCache(budget),
     mutex: new Mutex(),
@@ -104,10 +105,10 @@ export function startIonPrefetch(ctx: EngineContext, respond?: Respond): void {
   const reader = ef.reader;
   const launch = () => {
     // Superseded by a newer open/close, or a render already warmed it → don't start.
-    if (ctx.gen !== gen || ctx.ionCache?.complete) return;
+    if (ctx.gen !== gen || ctx.ionCache.isWarm) return;
     void prefetchIonCache(reader, grid, {
       mutex: ctx.mutex,
-      shouldStop: () => ctx.gen !== gen || (ctx.ionCache?.complete ?? false),
+      shouldStop: () => ctx.gen !== gen || ctx.ionCache.isWarm,
       isUserActive: () =>
         typeof performance !== "undefined"
           ? performance.now() - ctx.lastUserActivity < PREFETCH_COOLDOWN_MS
@@ -117,9 +118,8 @@ export function startIonPrefetch(ctx: EngineContext, respond?: Respond): void {
     })
       .then(({ cache }) => {
         // Commit only if still the current file and a render hasn't already built it.
-        if (ctx.gen === gen && cache && !ctx.ionCache) {
-          ctx.ionCache = cache;
-          ctx.budget.add(cache.bytes);
+        if (ctx.gen === gen && cache && !ctx.ionCache.current) {
+          ctx.ionCache.commit(cache);
           if (respond) emitIonIndexReady(cache, respond);
         }
       })
@@ -181,7 +181,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         const g = ++ctx.gen;
         ctx.active = null;
         ctx.scan = null;
-        ctx.ionCache = null; // decoded-spectra cache is per-file — drop it
+        ctx.ionCache.clear(); // decoded-spectra cache is per-file — drop it
         ctx.spectrumCache.clear(); // per-file spectrum LRU — drop it
         ctx.budget.resetUsage(); // both caches cleared → reset the shared usage
         ctx.remote = false; // reset per-open so a failed/superseded open can't leave a stale prefetch gate
@@ -221,7 +221,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         ctx.gen++;
         ctx.active = null;
         ctx.scan = null;
-        ctx.ionCache = null;
+        ctx.ionCache.clear();
         ctx.spectrumCache.clear();
         ctx.budget.resetUsage();
         ctx.remote = false;
@@ -278,14 +278,13 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
           respond({ type: "renderResult", requestId: req.requestId, ionImage: null, stats: null });
           return;
         }
-        const prev = ctx.ionCache;
         const { ionImage, stats, cache } = await engineRenderIonImage(
           active.reader,
           active.grid,
           req.mz,
           req.tolDa,
           {
-            cache: ctx.ionCache,
+            cache: ctx.ionCache.current,
             // Only the budget still free after the spectrum LRU's current usage.
             limitBytes: ctx.budget.remaining(),
             onProgress: (doneN, totalN) =>
@@ -296,17 +295,9 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
               respond({ type: "renderPreview", requestId: req.requestId, ionImage: img, stats: previewStats }, buffersOf(img)),
           },
         );
-        // Account the ion cache against the shared budget when it changes (a fresh build
-        // commits a new cache; a cache-hit reuses the same ref and leaves usage unchanged).
-        if (cache !== prev) {
-          if (prev) ctx.budget.sub(prev.bytes);
-          if (cache) ctx.budget.add(cache.bytes);
-          ctx.ionCache = cache;
-          // A render that built the cache itself (beating the background prefetch) must
-          // still emit the warm signal — otherwise it's lost (the prefetch's commit is
-          // gated on !ctx.ionCache and won't fire). Fires at most once per file.
-          if (cache && cache.complete) emitIonIndexReady(cache, respond);
-        }
+        // Commit through the shared store (handles budget accounting). A render that built the
+        // cache itself (beating the prefetch) must still emit the warm signal — once per file.
+        if (ctx.ionCache.commit(cache) && cache && cache.complete) emitIonIndexReady(cache, respond);
         respond({ type: "renderResult", requestId: req.requestId, ionImage, stats }, buffersOf(ionImage));
         return;
       }
@@ -314,13 +305,13 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
       case "meanSpectrum": {
         // Reuse the warm ion cache (decoded grid spectra) so the mean is instant instead
         // of up to MAX_SAMPLES random-access getSpectrum reads.
-        const spectrum = await engineMeanSpectrum(requireActive(ctx).reader, ctx.ionCache);
+        const spectrum = await engineMeanSpectrum(requireActive(ctx).reader, ctx.ionCache.current);
         respond({ type: "meanSpectrumResult", requestId: req.requestId, spectrum }, buffersOf(spectrum.mz, spectrum.intensity));
         return;
       }
 
       case "roiSpectrum": {
-        const spectrum = await engineRoiSpectrum(requireActive(ctx).reader, req.spectrumIndices, ctx.ionCache);
+        const spectrum = await engineRoiSpectrum(requireActive(ctx).reader, req.spectrumIndices, ctx.ionCache.current);
         respond({ type: "meanSpectrumResult", requestId: req.requestId, spectrum }, buffersOf(spectrum.mz, spectrum.intensity));
         return;
       }
@@ -331,9 +322,8 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
           respond({ type: "multiChannelResult", requestId: req.requestId, channels: req.channels.map(() => null) });
           return;
         }
-        const prevMc = ctx.ionCache;
         const { channels, cache: mcCache } = await engineRenderMultiChannel(active.reader, active.grid, req.channels, {
-          cache: ctx.ionCache,
+          cache: ctx.ionCache.current,
           limitBytes: ctx.budget.remaining(),
           // Progressive preview: stream partial channel images (copies) so the RGB composite
           // fills in during a cold build.
@@ -343,14 +333,9 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
               buffersOf(...chs.filter((c): c is Float32Array => c !== null)),
             ),
         });
-        // Multi-channel now warms the SHARED ion cache (one streamed build, reused by later
-        // single/multi renders) and accounts it against the budget — mirrors renderIonImage.
-        if (mcCache !== prevMc) {
-          if (prevMc) ctx.budget.sub(prevMc.bytes);
-          if (mcCache) ctx.budget.add(mcCache.bytes);
-          ctx.ionCache = mcCache;
-          if (mcCache && mcCache.complete) emitIonIndexReady(mcCache, respond);
-        }
+        // Multi-channel warms the SHARED ion cache too (one streamed build, reused by later
+        // single/multi renders) via the same store/commit path as renderIonImage.
+        if (ctx.ionCache.commit(mcCache) && mcCache && mcCache.complete) emitIonIndexReady(mcCache, respond);
         respond(
           { type: "multiChannelResult", requestId: req.requestId, channels },
           buffersOf(...channels.filter((c): c is Float32Array => c !== null)),

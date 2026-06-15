@@ -139,3 +139,122 @@ export class SpectrumLruCache {
     this.bytes = 0;
   }
 }
+
+// ── Ion cache: the COMPACT decoded grid-cell spectra ──────────────────────────
+//
+// The single shared store every imaging operation reads/writes — the single-channel ion
+// image, the RGB multi-channel overlay, the mean/ROI traces, and the background prefetch —
+// owned centrally by `IonCacheStore` so any view or image type goes through ONE API instead
+// of threading a cache object around. Factored out of imaging.ts so the compaction + budget +
+// commit bookkeeping lives in one place.
+
+/**
+ * COMPACT per-spectrum arrays held ONLY to recompute ion images (MSI). m/z is f32: f32
+ * precision is ~1.2e-4 Da at m/z 1000 — far finer than any practical window tolerance — so it
+ * never changes which points fall in an ion-image window, while halving the m/z footprint.
+ * Intensity is already f32. NOT a spectrum-display structure: id / representation / RT and full
+ * f64 m/z are re-read on demand (cheap), per the "metadata refetched quickly" design note.
+ */
+export type CompactSpectrum = { mz: Float32Array; intensity: Float32Array };
+
+/** The whole-grid compact spectra cache + the flags consumers need to read it correctly. */
+export type SpectraArrayCache = {
+  /** spectrumIndex → compact point arrays, for every filled grid cell with data. */
+  byIndex: Map<number, CompactSpectrum>;
+  /** True once a full pass populated every available filled-cell spectrum. */
+  complete: boolean;
+  /** Approximate bytes held (mz f32 + intensity f32), for the budget check. */
+  bytes: number;
+  /** True when every cached spectrum's m/z is ascending (the sortingRank-0 axis) — lets a
+   *  consumer binary-search the window instead of scanning all points; false → full scan. */
+  sorted: boolean;
+};
+
+/**
+ * Accumulates compact grid-cell spectra during a build, bounded by a live byte budget. Shared
+ * by the single-channel render, the RGB multi-channel render, and the background prefetch so
+ * the f32 compaction + budget + sortedness bookkeeping lives in ONE place. m/z is stored as
+ * f32: an already-f32 input array is kept as-is (no copy — the common case once the ion stream
+ * is f32); an f64 input is downcast.
+ */
+export class IonCacheBuilder {
+  private readonly building = new Map<number, CompactSpectrum>();
+  private heldBytes = 0;
+  private ok = true;
+  private sortedAll = true;
+
+  /** @param remaining live byte budget available to the cache (consulted before each add). */
+  constructor(private readonly remaining: () => number) {}
+
+  /** Cache one spectrum (m/z coerced to f32). No-op once over budget (the caller keeps
+   *  rendering uncached; check {@link overBudget} to stop early, e.g. the prefetch). */
+  add(index: number, mz: ArrayLike<number>, intensity: Float32Array): void {
+    if (!this.ok) return;
+    const mz32 = mz instanceof Float32Array ? mz : Float32Array.from(mz);
+    const sz = mz32.byteLength + intensity.byteLength;
+    if (this.heldBytes + sz > this.remaining()) {
+      this.ok = false; // too big for this session → render uncached from here on
+      this.building.clear();
+      return;
+    }
+    let sorted = true;
+    for (let i = 1; i < mz32.length; i++) if (mz32[i]! < mz32[i - 1]!) { sorted = false; break; }
+    if (!sorted) this.sortedAll = false;
+    this.heldBytes += sz;
+    this.building.set(index, { mz: mz32, intensity });
+  }
+
+  get overBudget(): boolean {
+    return !this.ok;
+  }
+
+  /** The committable cache, or null if it didn't fit the budget. */
+  finish(): SpectraArrayCache | null {
+    return this.ok
+      ? { byIndex: this.building, complete: true, bytes: this.heldBytes, sorted: this.sortedAll }
+      : null;
+  }
+}
+
+/**
+ * Central owner of the ONE ion cache. Every imaging op reads `current` / `lookup` and commits
+ * a freshly-built cache via `commit` (which keeps the shared byte budget in sync). Dropped on
+ * file open/close. This is the single shared resource every tab / image type uses.
+ */
+export class IonCacheStore {
+  private cache: SpectraArrayCache | null = null;
+  constructor(private readonly budget: CacheBudget) {}
+
+  get current(): SpectraArrayCache | null {
+    return this.cache;
+  }
+  /** True once the cache holds the whole grid (so renders take the instant cache-hit path). */
+  get isWarm(): boolean {
+    return this.cache?.complete ?? false;
+  }
+  /** A cached pixel's compact arrays, or undefined — the lookup any consumer (ion/multi/mean/
+   *  ROI, or a future tab) uses to read a spectrum from the warm cache. */
+  lookup(index: number): CompactSpectrum | undefined {
+    return this.cache?.byIndex.get(index);
+  }
+  /** Commit a freshly-built cache (no-op if the same ref); updates the shared budget. Returns
+   *  whether the cache reference changed (so the caller can emit the warm signal once). */
+  commit(built: SpectraArrayCache | null): boolean {
+    if (built === this.cache) return false;
+    if (this.cache) this.budget.sub(this.cache.bytes);
+    if (built) this.budget.add(built.bytes);
+    this.cache = built;
+    return true;
+  }
+  /** Drop the cache (file open/close), releasing its budget. */
+  clear(): void {
+    if (this.cache) this.budget.sub(this.cache.bytes);
+    this.cache = null;
+  }
+  /** Total decoded points held (for the `ionIndexReady` signal). */
+  pointCount(): number {
+    let n = 0;
+    if (this.cache) for (const a of this.cache.byIndex.values()) n += a.mz.length;
+    return n;
+  }
+}
