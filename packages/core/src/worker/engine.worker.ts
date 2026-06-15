@@ -41,8 +41,9 @@ scope.addEventListener("message", (e: MessageEvent<WorkerRequest>) => {
     .runExclusive(() => dispatch(msg, ctx, respond))
     .then(() => {
       // After an imaging file opens, warm its ion cache in the background (interruptible,
-      // yields to user reads via the same mutex) so the first ion render is instant.
-      if (msg && msg.type === "open") startIonPrefetch(ctx);
+      // yields to user reads via the same mutex) so the first ion render is instant. The
+      // `respond` lets the prefetch emit `ionIndexReady` when warming completes.
+      if (msg && msg.type === "open") startIonPrefetch(ctx, respond);
     })
     .catch((err) => {
       // eslint-disable-next-line no-console

@@ -59,6 +59,9 @@ export interface AppState {
   ionImage: Float32Array | null;
   ionStats: IonImageStats | null;
   multiChannel: (Float32Array | null)[] | null;
+  /** True once the background prefetch has warmed the ion-image cache for the open file
+   *  (any m/z then renders instantly). Reset on every open. */
+  ionCacheReady: boolean;
 
   // SDRF/ISA isobaric channel assignments for the open run (empty for label-free).
   channels: ChannelAssignment[];
@@ -155,6 +158,7 @@ export const useStore = create<AppState>((set, get) => ({
   ionImage: null,
   ionStats: null,
   multiChannel: null,
+  ionCacheReady: false,
 
   // sdrf channels
   channels: [],
@@ -209,6 +213,7 @@ export const useStore = create<AppState>((set, get) => ({
       ionImage: null,
       ionStats: null,
       multiChannel: null,
+      ionCacheReady: false,
       channels: [],
       fileName: file.name,
       fileSize: null,
@@ -350,6 +355,7 @@ export const useStore = create<AppState>((set, get) => ({
       ionImage: null,
       ionStats: null,
       multiChannel: null,
+      ionCacheReady: false,
       channels: [],
       fileName: displayName,
       fileSize: null,
@@ -459,6 +465,7 @@ export const useStore = create<AppState>((set, get) => ({
       ionImage: null,
       ionStats: null,
       multiChannel: null,
+      ionCacheReady: false,
       channels: [],
       fileName: null,
       fileSize: null,
@@ -571,6 +578,14 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => ({ expanded: { ...s.expanded, [key]: !s.expanded[key] } }));
   },
 }));
+
+// The background ion-cache prefetch (worker) emits `ionIndexReady` once warming completes
+// for the open file — capture it in the store so any view can show "ion images ready"
+// even if the user wasn't on the Imaging tab when it finished. A new open resets the flag
+// (above) and the worker only emits for the current file (gen-guarded), so no stale set.
+engine.on("ionIndexReady", () => {
+  useStore.setState({ ionCacheReady: true });
+});
 
 // Re-export helpers so views can use them without importing contracts directly
 export { showChromatograms };

@@ -154,6 +154,8 @@ function ImagingInner({
   const ionImage = useStore((s) => s.ionImage);
   const ionStats = useStore((s) => s.ionStats);
   const setIonImageStore = useStore((s) => s.setIonImage);
+  // True once the background prefetch has warmed the ion-image cache (any m/z is instant).
+  const ionCacheReady = useStore((s) => s.ionCacheReady);
 
   // ── Multi-channel (RGB) state ─────────────────────────────────────────────
   const [channels, setChannels] = useState<{ mz: string; tol: string }[]>([
@@ -484,6 +486,30 @@ function ImagingInner({
             <button type="button" onClick={() => void renderIon()} disabled={!ionInputsValid || busy} style={btnStyle}>
               {busy ? "Rendering…" : "Render"}
             </button>
+            {ionCacheReady && !busy && (
+              <span
+                data-testid="ion-cache-ready"
+                title="The background prefetch has decoded this file's spectra into memory — any m/z window now renders instantly, with no further network reads."
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "0.3rem",
+                  height: 30,
+                  padding: "0 0.55rem",
+                  fontSize: "0.75rem",
+                  color: "var(--success, #2e9e5b)",
+                  background: "var(--success-subtle, #eafaf0)",
+                  border: "1px solid var(--success-soft, #43a047)",
+                  borderRadius: 6,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+                Ion images ready · instant
+              </span>
+            )}
           </>
         )}
 

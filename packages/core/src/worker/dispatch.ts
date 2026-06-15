@@ -76,7 +76,7 @@ const PREFETCH_COOLDOWN_MS = 350;
  * bail the moment the file changes or a render already built the cache. Commits to the
  * shared budget only on full success; a stopped/over-budget run leaves no trace.
  */
-export function startIonPrefetch(ctx: EngineContext): void {
+export function startIonPrefetch(ctx: EngineContext, respond?: Respond): void {
   const ef = ctx.active;
   const gen = ctx.gen;
   if (!ef || !ef.grid || !ctx.preloadEnabled) return;
@@ -96,6 +96,11 @@ export function startIonPrefetch(ctx: EngineContext): void {
       if (ctx.gen === gen && cache && !ctx.ionCache) {
         ctx.ionCache = cache;
         ctx.budget.add(cache.bytes);
+        // Signal the UI that ion images are now warm (any m/z renders instantly). `points`
+        // = total decoded points held (the whole grid's spectra, not specific m/z windows).
+        let points = 0;
+        for (const a of cache.byIndex.values()) points += a.mz.length;
+        respond?.({ type: "ionIndexReady", points });
       }
     })
     .catch(() => {
