@@ -130,6 +130,10 @@ The truly large win is structural: a server-side **pre-binned ion index** or a d
   - Imaging: all MS1 → prefetch = all grid spectra (no change, but now it warms both caches).
   - LC/DDA (TMT): skips 67% of spectra → ~3× less prefetch traffic, leaving MS2 to be fetched on demand only when the user actually opens an MS2 scan.
 - **Adversarial nuance:** the *ion image itself* still needs every grid spectrum it sums; MS-scoping reduces the *speculative prefetch*, not the ion render's own working set. For imaging these coincide; keep them conceptually separate so an LC ion-image (if ever MS2-targeted) isn't starved by an MS1-only prefetch policy.
+- **⚠ Correction after measuring the TMT file (2026-06-15):** the earlier "skips 67% → ~3× less traffic" assumed MS1 profile + MS2 elsewhere. In reality the TMT/DDA demo is **entirely centroided** — *both* MS1 (10,305) and MS2 (21,093) live in **`spectra_peaks`**, with **zero `spectra_data`**. Consequences for an LC prefetch:
+  1. The Stage-1/2 bulk path (`streamSpectraDataArrays`, which reads `spectra_data`) yields **nothing** for such files — it's an imaging/profile path. An LC prefetch needs a **separate `spectra_peaks` bulk stream** (`reader.spectrumPeaks().enumerate()`), not yet built.
+  2. MS1/MS2 centroids are **interleaved** in `spectra_peaks` row groups (acquisition order), so an MS1-only filter saves **cache memory, not bandwidth** (you still stream the row groups that also hold MS2). A true bandwidth cut would need slow per-spectrum MS1 reads — the anti-pattern.
+  3. Net: the LC/DDA prefetch is a larger, lower-certainty piece than the imaging one (and LC files are smaller, so the cold-read pain is milder). **Recommend deferring** unless LC spectrum-navigation latency is a measured pain point; the spectrum LRU read-through (Stage 1) already makes *repeat* LC navigation instant.
 
 ### R4 — "ion image computed more efficiently"
 Covered in §2/§3: compute is already 47 ms; efficiency = I/O (parallel reads + warm cache), not the kernel.
@@ -151,7 +155,7 @@ Covered in §2/§3: compute is already 47 ms; efficiency = I/O (parallel reads +
 
 1. ✅ **Spectrum prefetch cache** — done (`f62c28b`): memory-sized, shared with the ion cache (R2), stores `mz`+`intensity`+`msLevel` only (R3).
 2. ✅ **User reads override prefetch** — done (`c133e2f`): the reader mutex bounds preemption to one in-flight 30 ms slice; activity stamp + 350 ms cooldown back the prefetch off (R1, soft preempt).
-3. ◻ **MS0/1-only prefetch worklist** (R3) — partial: the ion-cache prefetch covers all grid cells (imaging = all MS1). The LC/DDA spectrum-LRU prefetch that *skips MS2* (the ~3× win on the TMT file) is not yet wired — the cache already stores `msLevel` for it.
+3. ◻ **MS0/1-only prefetch worklist** (R3) — partial: the ion-cache prefetch covers all grid cells (imaging = all MS1). An LC/DDA spectrum-LRU prefetch is **not wired and recommended-deferred** — measuring the TMT file showed it's *all centroid in `spectra_peaks`* (no `spectra_data`), so it needs a separate peaks bulk-stream and the MS2-skip is a memory (not bandwidth) saving (see §5 R3 correction). The LRU already stores `msLevel` if/when it's built.
 4. ✅ **Background prefetch on open** — done (`c133e2f`): interruptible, time-sliced, warms the ion cache; can't starve foreground (mutex + cooldown).
 5. ◻ **Parallel range reads** over HTTP/2 + signal-aware reader for true interrupt (R1 option 2) — **deferred** (Stage 3, operator decision): needs `mzpeakts` submodule changes for modest gain now that Stage 2 hides the latency.
 6. ◻ **Confirm HTTP/2 in-browser** (§6) — DevTools Protocol column; the CDN supports `h2` (ALPN) but verify the custom hostname doesn't fall back to http/1.1.
