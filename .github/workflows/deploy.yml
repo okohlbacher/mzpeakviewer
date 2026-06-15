@@ -6,15 +6,9 @@ name: Deploy to GitHub Pages
 # branch-based Pages source (Settings → Pages → Deploy from branch: gh-pages /), so no
 # Pages-config switch and no serving gap.
 
-# BLOCKED (2026-06-15): auto-trigger is disabled because the vendor/mzpeakts submodule is
-# pinned to commit 14848342 ("numpress: wire SLOF + PIC decode") which is NOT pushed to the
-# public okohlbacher/mzpeakts (only b826397/4067f84 are there), so a fresh CI clone can't
-# fetch the reader. Re-enable `push` once that commit is published to okohlbacher/mzpeakts
-# (or the submodule is re-pinned to a public commit). Until then this runs manually only,
-# and gh-pages is deployed by hand from a local checkout.
 on:
-  # push:
-  #   branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 # Allow the job to push the built site to the gh-pages branch via GITHUB_TOKEN.
