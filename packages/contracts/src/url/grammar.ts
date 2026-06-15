@@ -66,7 +66,9 @@ const VALID_VIEWS = new Set<View>([
   "chromatograms",
   "metadata",
   "structure",
+  "overview", // imaging TIC overview — was missing, so ?view=overview didn't deep-link
   "ion",
+  "multi", // RGB multi-channel — was missing, so serialize(view=multi) didn't round-trip
   "optical",
   "overlay",
   "grid",
@@ -140,32 +142,42 @@ function quadOf(s: string | undefined): [number, number, number, number] | null 
   return parts as [number, number, number, number];
 }
 
-/** `ion=mz[,tol]` → {mz,tolDa}. tol defaults applied by the caller, not here. */
+/** Parse a number, treating an absent/empty/whitespace field as "absent" (null) rather than
+ *  letting `Number("")===0` slip through as a real 0. */
+function optTol(part: string | undefined, fallback: number): number | null {
+  if (part == null || part.trim() === "") return fallback;
+  const n = Number(part);
+  return Number.isFinite(n) ? n : null; // garbage (e.g. "abc") → reject
+}
+
+/** `ion=mz[,tol]` → {mz,tolDa}. An empty/absent tol → DEFAULT_TOL_DA (not 0). */
 function ionOf(s: string | undefined): { mz: number; tolDa: number } | null {
   if (s == null) return null;
   const parts = s.split(",");
   const mz = Number(parts[0]);
   if (!Number.isFinite(mz)) return null;
-  const tol = parts.length > 1 ? Number(parts[1]) : DEFAULT_TOL_DA;
-  if (!Number.isFinite(tol)) return null;
+  const tol = optTol(parts[1], DEFAULT_TOL_DA);
+  if (tol == null) return null;
   return { mz, tolDa: tol };
 }
 
-/** `ch=mz,tol,color` → one channel. */
+/** `ch=mz,tol[,color]` → one channel. Empty tol → DEFAULT_TOL_DA; the color may itself contain
+ *  commas (e.g. `rgb(1,2,3)`), so everything after the 2nd field is the color. */
 function channelOf(s: string): { mz: number; tolDa: number; color: string } | null {
   const parts = s.split(",");
   if (parts.length < 2) return null;
   const mz = Number(parts[0]);
-  const tol = Number(parts[1]);
-  if (!Number.isFinite(mz) || !Number.isFinite(tol)) return null;
-  return { mz, tolDa: tol, color: parts[2] ?? "" };
+  if (!Number.isFinite(mz)) return null;
+  const tol = optTol(parts[1], DEFAULT_TOL_DA);
+  if (tol == null) return null;
+  return { mz, tolDa: tol, color: parts.slice(2).join(",") };
 }
 
-/** `xic=mz,delta` → {mz,tolDa}. */
+/** `xic=mz,delta` → {mz,tolDa}. delta is required (no default); empty/garbage → reject. */
 function xicOf(s: string | undefined): { mz: number; tolDa: number } | null {
   if (s == null) return null;
   const parts = s.split(",");
-  if (parts.length !== 2) return null;
+  if (parts.length !== 2 || !parts[1]?.trim()) return null;
   const mz = Number(parts[0]);
   const d = Number(parts[1]);
   if (!Number.isFinite(mz) || !Number.isFinite(d)) return null;

@@ -155,3 +155,35 @@ describe("strict value parsing", () => {
     expect(resolve({ mz: "100,500" } as RawParams, "lc").view.spectrumZoom).toEqual([100, 500]);
   });
 });
+
+describe("Wave-1 fixes: imaging views + empty-tol/color parsing", () => {
+  it("overview and multi imaging views deep-link and round-trip", () => {
+    expect(resolve({ view: "overview" }, "imaging").view.view).toBe("overview");
+    expect(resolve({ view: "multi" }, "imaging").view.view).toBe("multi");
+    // serialize(view=multi) → resolve must read it back (was broken: not in VALID_VIEWS).
+    const p = serialize(vs({ view: "multi", channels: [{ mz: 100, tolDa: 0.1, color: "red" }] }), "imaging");
+    expect(resolve(parseSearch(`?${p.toString()}`), "imaging").view.view).toBe("multi");
+    const o = serialize(vs({ view: "overview" }), "imaging");
+    expect(resolve(parseSearch(`?${o.toString()}`), "imaging").view.view).toBe("overview");
+  });
+
+  it("ion= with an empty tol defaults to DEFAULT_TOL_DA (not a zero-width window)", () => {
+    expect(resolve({ ion: "445.1," }, "imaging").view.ion).toEqual({ mz: 445.1, tolDa: DEFAULT_TOL_DA });
+    expect(resolve({ ion: "445.1" }, "imaging").view.ion).toEqual({ mz: 445.1, tolDa: DEFAULT_TOL_DA });
+    expect(resolve({ ion: "445.1,0.2" }, "imaging").view.ion).toEqual({ mz: 445.1, tolDa: 0.2 });
+    expect(resolve({ ion: "445.1,abc" }, "imaging").view.ion).toBeNull(); // garbage tol rejected
+  });
+
+  it("channel color preserves commas (functional CSS colors)", () => {
+    const ch = resolve({ ch: ["100,0.1,rgb(1,2,3)"] }, "imaging").view.channels[0];
+    expect(ch).toEqual({ mz: 100, tolDa: 0.1, color: "rgb(1,2,3)" });
+    // empty channel tol also defaults
+    const ch2 = resolve({ ch: ["200,,#abcdef"] }, "imaging").view.channels[0];
+    expect(ch2).toEqual({ mz: 200, tolDa: DEFAULT_TOL_DA, color: "#abcdef" });
+  });
+
+  it("xic= with an empty delta is rejected (delta is required)", () => {
+    expect(resolve({ xic: "445.1," }, "lc").view.xic).toBeNull();
+    expect(resolve({ xic: "445.1,0.5" }, "lc").view.xic).toEqual({ mz: 445.1, tolDa: 0.5 });
+  });
+});

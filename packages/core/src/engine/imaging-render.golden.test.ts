@@ -133,5 +133,8 @@ describe("engine imaging RENDER round-trip against real imaging.mzpeak", () => {
     expect(mean.mz.length).toBe(mean.intensity.length);
     // Honest id: a consumer can tell this is a SAMPLED mean, not an exact all-pixel one.
     expect(mean.id).toBe("mean-sampled");
+    // f32 axis CONSISTENTLY: the cold mean's reference m/z is f32-precision (built as a
+    // Float32Array, then widened to f64 for the wire) — so it matches the warm-cache mean.
+    for (let i = 0; i < mean.mz.length; i++) expect(mean.mz[i]).toBe(Math.fround(mean.mz[i]!));
   }, 120_000);
 });

@@ -195,6 +195,17 @@ function ImagingInner({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
 
+  // ── Reset optical state when the FILE changes (new opticalImages set) ──────
+  // Bump the gen so any in-flight decode from the previous file is dropped, clear the per-path
+  // decode/error caches, and re-seed the selected path. Without this the gen guard was dead
+  // (never incremented) and the caches leaked across an imaging→imaging file switch.
+  useEffect(() => {
+    opticalGen.current++;
+    setDecoded({});
+    setOpticalErr({});
+    setSelectedOpticalPath(opticalImages[0]?.archivePath ?? null);
+  }, [opticalImages]);
+
   // ── Subscribe to optical-decode events once ───────────────────────────────
   useEffect(() => {
     const offResult = engine.on("opticalImageResult", (ev) => {

@@ -28,6 +28,7 @@ import { buildCapabilityModel } from "../adapt/capability";
 import { flattenGrid } from "../adapt/grid";
 import { fileMeta, manifest as readManifest } from "../reader/fileMeta";
 import { openBlob, openUrl, type Reader } from "../reader/openUrl";
+import { CorruptFileError, UnsupportedEncodingError } from "../reader/errors";
 import { buildImagingGrid } from "../reader/grid";
 import { extractCoords, readGridGeometry } from "../reader/scanCoords";
 import {
@@ -202,12 +203,32 @@ function buildTic(reader: Reader, grid: ImagingGrid): Float32Array {
   return tic;
 }
 
+/**
+ * Classify an open/parse failure into the reader taxonomy so the dispatcher maps it to a
+ * specific wire class (not the catch-all "internal"). UnsupportedEncodingError passes through
+ * (it carries findings). A remote fetch/CORS/404 failure is tagged `network`. Anything else at
+ * the open boundary means we got bytes that aren't a readable mzPeak (bad ZIP / missing index /
+ * corrupt parquet) → CorruptFileError (→ "parse"). Always throws.
+ */
+function rethrowOpenError(e: unknown, remote: boolean): never {
+  if (e instanceof UnsupportedEncodingError || e instanceof CorruptFileError) throw e;
+  const msg = e instanceof Error ? e.message : String(e);
+  if (remote && (e instanceof TypeError || /failed to fetch|networkerror|\bcors\b|err_|load failed|404|not found/i.test(msg))) {
+    throw Object.assign(new Error(`Could not fetch the file: ${msg}`), { engineClass: "network" });
+  }
+  throw new CorruptFileError(msg);
+}
+
 /** Open local bytes (Blob path) and assemble the wire payload. */
 export async function openEngineFile(
   bytes: ArrayBuffer | Uint8Array,
   _name?: string,
 ): Promise<EngineFile> {
-  return assembleEngineFile(await openBlob(toBlob(bytes)));
+  try {
+    return await assembleEngineFile(await openBlob(toBlob(bytes)));
+  } catch (e) {
+    rethrowOpenError(e, false); // local bytes → any failure is a parse/corrupt error
+  }
 }
 
 /**
@@ -217,7 +238,11 @@ export async function openEngineFile(
  * `fetch().arrayBuffer()` the whole archive).
  */
 export async function openEngineUrl(url: string | URL): Promise<EngineFile> {
-  return assembleEngineFile(await openUrl(url));
+  try {
+    return await assembleEngineFile(await openUrl(url));
+  } catch (e) {
+    rethrowOpenError(e, true);
+  }
 }
 
 /**

@@ -562,14 +562,18 @@ const MAX_SAMPLES = 300;
 const MAX_ROI = 100;
 
 type MeanAccumulator = {
-  refMz: Float64Array | null;
+  // f32 reference axis CONSISTENTLY (the cold f64 source is downcast on capture), so a
+  // mean/ROI spectrum is identical whether built from the f32 warm cache or a cold f64 read —
+  // matching the f32 ion pipeline. (adaptSpectrum widens it to f64 for the wire; the VALUES
+  // are f32-precision either way.) Intensity sum stays f64 for accumulation accuracy.
+  refMz: Float32Array | null;
   intensitySum: Float64Array | null; // per-bin running sum (indexed by ref bin)
   countPerBin: Int32Array | null; // per-bin contributing-spectrum count
   contributed: number;
 };
 
 /** Nearest reference-bin index for `mzVal` via binary search (IV inner loop). */
-function nearestBin(refMz: Float64Array, mzVal: number): number {
+function nearestBin(refMz: Float32Array, mzVal: number): number {
   let lo = 0;
   let hi = refMz.length - 1;
   while (lo < hi) {
@@ -592,9 +596,9 @@ function accumulate(
   if (n === 0) return;
 
   if (acc.refMz === null) {
-    // First spectrum defines the reference axis (sorted ascending — IV sorts here;
-    // engine/spectrum.ts already returns sorted, finite pairs, so this is stable).
-    const ref = new Float64Array(n);
+    // First spectrum defines the reference axis (sorted ascending). f32 axis: an f64 source
+    // is downcast here so the axis is f32-precision regardless of cache state (see type doc).
+    const ref = new Float32Array(n);
     const sum = new Float64Array(n);
     const cnt = new Int32Array(n);
     for (let i = 0; i < n; i++) {

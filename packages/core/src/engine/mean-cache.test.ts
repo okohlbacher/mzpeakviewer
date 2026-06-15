@@ -42,6 +42,13 @@ describe("G — mean/ROI reuse the warm ion cache (no random-access getSpectrum)
     expect(Array.from(mean.intensity)).toEqual([4, 8]);
   });
 
+  it("warm mean's reference m/z axis is f32-precision (consistent with the cold path)", async () => {
+    // Non-integer m/z so f32 vs f64 differ: the axis must come out f32-rounded.
+    const cache = cacheOf({ 0: { mz: [100.123, 200.456], intensity: [1, 2] } });
+    const mean = await engineMeanSpectrum(fakeReader(1), cache);
+    for (let i = 0; i < mean.mz.length; i++) expect(mean.mz[i]).toBe(Math.fround(mean.mz[i]!));
+  });
+
   it("ROI mean is computed from the cache (getSpectrum never called)", async () => {
     const cache = cacheOf({
       5: { mz: [100, 200], intensity: [10, 20] },

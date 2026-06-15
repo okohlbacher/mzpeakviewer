@@ -13,7 +13,7 @@
 // aria-selected, roving tabindex, Enter/Space/Arrow key handling.
 // Accordions are button[aria-expanded] per ARIA disclosure pattern.
 
-import { useRef, type KeyboardEvent, useCallback } from "react";
+import { useRef, type KeyboardEvent, useCallback, useEffect } from "react";
 import "@mzpeak/ui-kit/styles.css";
 import "@fontsource/ibm-plex-sans/400.css";
 import "@fontsource/ibm-plex-sans/500.css";
@@ -107,14 +107,13 @@ function Sidebar() {
   const imagingViews: View[] = ["overview", "ion", "multi", "grid", "optical", "overlay"];
   const activeNeedsAdvanced = advancedViews.includes(view) && !expanded.advanced;
   const activeNeedsImaging = imagingViews.includes(view) && isImaging && !expanded.imaging;
-  if (activeNeedsAdvanced) {
-    // Expand synchronously via the store action on next render — use useEffect
-    // equivalent: schedule a microtask so we don't call set inside render.
-    Promise.resolve().then(() => toggleAccordion("advanced"));
-  }
-  if (activeNeedsImaging) {
-    Promise.resolve().then(() => toggleAccordion("imaging"));
-  }
+  // When the active view is inside a collapsed accordion, auto-expand it so the active tab is
+  // reachable in the roving set. In an effect (not render) — calling the store setter during
+  // render is a setState-in-render; the booleans flip false once expanded, so it can't loop.
+  useEffect(() => {
+    if (activeNeedsAdvanced) toggleAccordion("advanced");
+    if (activeNeedsImaging) toggleAccordion("imaging");
+  }, [activeNeedsAdvanced, activeNeedsImaging, toggleAccordion]);
 
   const tabRefs = useRef<Map<View, HTMLButtonElement>>(new Map());
 
