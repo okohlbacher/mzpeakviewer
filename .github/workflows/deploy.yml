@@ -1,0 +1,64 @@
+name: Deploy to GitHub Pages
+
+# Auto-build the unified viewer and publish it to the gh-pages branch on every push to
+# main. Mirrors scripts/bootstrap.sh (the reader submodule must be built before the
+# workspace install) + the VITE_BASE=/mzpeakviewer/ project-page build. Keeps the existing
+# branch-based Pages source (Settings → Pages → Deploy from branch: gh-pages /), so no
+# Pages-config switch and no serving gap.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Allow the job to push the built site to the gh-pages branch via GITHUB_TOKEN.
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with the mzpeakts reader submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # bootstrap step 2: the apps alias their bundler at the reader's TS source but consume
+      # it as `file:../vendor/mzpeakts/lib`, so the reader must be installed + built first.
+      - name: Build the vendored reader
+        run: cd vendor/mzpeakts/lib && npm ci && npm run build
+
+      - name: Install workspace
+        run: npm install
+
+      # @mzpeak/core consumes @mzpeak/contracts' dist types.
+      - name: Build contracts
+        run: npm run build -w @mzpeak/contracts
+
+      - name: Typecheck (gate — don't publish a broken build)
+        run: npm run typecheck
+
+      - name: Build app for the project page
+        run: VITE_BASE=/mzpeakviewer/ npm --workspace @mzpeak/app run build
+
+      - name: Publish dist to gh-pages
+        run: |
+          touch app/dist/.nojekyll
+          cd app/dist
+          git init -q
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -q -m "Deploy ${GITHUB_SHA::7} (workflow)"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
