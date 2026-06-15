@@ -8,14 +8,10 @@
 // fast-path load (reads only mzpeak_index.json). That import is the ONLY other
 // mzpeakts import allowed — kept in the Worker module to stay within the
 // reader/ encapsulation boundary.
-import { MzPeakReader, ZipStorage, data as mzdata } from "mzpeakts";
+import { MzPeakReader, ZipStorage } from "mzpeakts";
 import { HttpReader } from "@zip.js/zip.js";
 import { detectUnsupported } from "./capability";
 import { UnsupportedEncodingError } from "./errors";
-
-// mzpeakts names the reconstructed point columns by their human-readable CV name.
-const MZ_ARRAY_KEY = "m/z array";
-const INTENSITY_ARRAY_KEY = "intensity array";
 
 /**
  * Opaque reader handle. The concrete type is mzpeakts' `MzPeakReader`, but
@@ -161,23 +157,14 @@ export async function* streamSpectraPeaksArrays(
   yield* streamArrays(dr);
 }
 
-/** Shared core: enumerate a mzpeakts DataArraysReader (data OR peaks) once, row group by
- *  row group, yielding decoded (mz, intensity) per entry. */
-async function* streamArrays(
+/** Shared core: stream a mzpeakts DataArraysReader (data OR peaks) once, yielding decoded
+ *  (mz, intensity) typed arrays per entry. Delegates to the reader's FAST point-layout path
+ *  (`streamPointArrays`): one linear pass per batch + zero-copy slices instead of the generic
+ *  per-entry Arrow machinery (the dominant cost of a cold ion render). The reader falls back
+ *  internally to the generic per-entry decode for chunk/numpress layouts. */
+function streamArrays(
   dataReader: Awaited<ReturnType<Reader["spectrumData"]>>,
 ): AsyncGenerator<StreamedSpectrumArrays> {
-  if (!dataReader) return;
-  for await (const [idx, table] of dataReader.enumerate()) {
-    // Non-tabular layout (ColumnMap) → skip. Duck-typed so we don't depend on an
-    // `instanceof Arrow.Table` across module-instance boundaries.
-    const t = table as { schema?: unknown; getChildAt?: unknown };
-    if (!t || !t.schema || typeof t.getChildAt !== "function") continue;
-    const packed = mzdata.packTableIntoDataArrays(table as Parameters<typeof mzdata.packTableIntoDataArrays>[0]);
-    // The m/z and intensity point columns are numeric at runtime; `packTableIntoDataArrays`
-    // types its values as a broad union (incl. string[]/BigInt64Array), so narrow here.
-    const mzRaw = packed[MZ_ARRAY_KEY] as unknown as ArrayLike<number> | undefined;
-    const inRaw = packed[INTENSITY_ARRAY_KEY] as unknown as ArrayLike<number> | undefined;
-    if (!mzRaw || !inRaw) continue;
-    yield { index: Number(idx), mz: Float64Array.from(mzRaw), intensity: Float32Array.from(inRaw) };
-  }
+  if (!dataReader) return (async function* () {})();
+  return dataReader.streamPointArrays();
 }
