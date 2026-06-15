@@ -12,7 +12,7 @@
 
 import type { WorkerRequest, ReaderErrorClass, UnsupportedFinding } from "@mzpeak/contracts";
 import { openEngineFile, openEngineUrl, type EngineFile } from "../engine/open";
-import { readEngineSpectrumCached } from "../engine/spectrum";
+import { readEngineSpectrumCached, prefetchSpectrumCache } from "../engine/spectrum";
 import { CacheBudget, SpectrumLruCache } from "../engine/cache";
 import { engineScanBreakdown } from "../engine/scanBreakdown";
 import { engineExtractChrom, type ChromContext } from "../engine/chrom";
@@ -106,6 +106,30 @@ export function startIonPrefetch(ctx: EngineContext, respond?: Respond): void {
     .catch(() => {
       // Background warming is best-effort; a failure just means the first render is cold.
     });
+}
+
+/**
+ * Fire-and-forget background prefetch of the SPECTRUM LRU for a NON-imaging (LC/DDA) file —
+ * warms MS0/1 spectra so first-time navigation is instant. Interruptible (shares the reader
+ * mutex + user-activity cooldown); the LRU's budget bounds memory. No-op for imaging files
+ * (those use `startIonPrefetch`) or when preload is disabled.
+ */
+export function startSpectrumPrefetch(ctx: EngineContext): void {
+  const ef = ctx.active;
+  const gen = ctx.gen;
+  if (!ef || ef.grid || !ctx.preloadEnabled) return; // imaging → ion prefetch handles it
+  void prefetchSpectrumCache(ef.reader, ctx.spectrumCache, {
+    mutex: ctx.mutex,
+    shouldStop: () => ctx.gen !== gen,
+    isUserActive: () =>
+      typeof performance !== "undefined"
+        ? performance.now() - ctx.lastUserActivity < PREFETCH_COOLDOWN_MS
+        : false,
+    cooldownMs: PREFETCH_COOLDOWN_MS,
+    budgetRemaining: () => ctx.budget.remaining(),
+  }).catch(() => {
+    // Best-effort; on failure first navigation is just cold.
+  });
 }
 
 /** Map a thrown reader error to a wire error class (+ findings when present). */

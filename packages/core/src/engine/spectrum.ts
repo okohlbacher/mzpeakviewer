@@ -19,9 +19,20 @@
 import type { SpectrumArrays as WireSpectrumArrays } from "@mzpeak/contracts";
 import { adaptSpectrum } from "../adapt/spectrum";
 import { spectrumMeta } from "../reader/fileMeta";
-import type { Reader } from "../reader/openUrl";
+import { streamSpectraDataArrays, streamSpectraPeaksArrays, type Reader } from "../reader/openUrl";
 import type { SpectrumRepresentation } from "../reader/types";
 import type { SpectrumLruCache } from "./cache";
+import type { PrefetchControl } from "./imaging";
+
+// Promoted per-spectrum columns (CV-accession-derived names) read vectorized for the
+// LC prefetch — no per-record materialization.
+const MS_LEVEL_COL = "MS_1000511_ms_level";
+const REPR_COL = "MS_1000525_spectrum_representation";
+const REPR_PROFILE_ACC = "MS:1000128";
+const REPR_CENTROID_ACC = "MS:1000127";
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const nowMs = (): number => (typeof performance !== "undefined" ? performance.now() : Date.now());
+const PREFETCH_SLICE_MS = 30;
 
 // mzpeakts names the reconstructed data-array columns by their human-readable CV name.
 const MZ_KEY = "m/z array";
@@ -195,6 +206,104 @@ export async function readEngineSpectrum(
     intensity: recon.intensity,
     representation: recon.representation,
   });
+}
+
+/** Minimal view over the promoted per-spectrum Arrow columns. */
+type Col = { get(i: number): unknown } | null | undefined;
+function readCols(reader: Reader): { n: number; lvl: Col; repr: Col } {
+  const sm = reader.spectrumMetadata as unknown as
+    | { length?: number; spectra?: { getChild?: (n: string) => Col } | null }
+    | null
+    | undefined;
+  const spectra = sm?.spectra;
+  const get = (name: string): Col =>
+    spectra && typeof spectra.getChild === "function" ? spectra.getChild(name) : null;
+  return { n: sm?.length ?? 0, lvl: get(MS_LEVEL_COL), repr: get(REPR_COL) };
+}
+
+/**
+ * Background-prefetch the SPECTRUM LRU for a non-imaging (LC/DDA) file: stream the signal
+ * sources ONCE and cache the **MS0/1** spectra (skipping MS2, per the design requirement)
+ * so first-time navigation to any MS1 spectrum is instant instead of a cold row-group read.
+ *
+ * Routing correctness: each spectrum is cached from the source its declared representation
+ * routes to — profile/unknown from `spectra_data`, centroid from `spectra_peaks` — which is
+ * exactly what `readEngineSpectrumCached` would reconstruct on a miss, so a cache hit never
+ * returns mismatched arrays. (LC/DDA spectra usually live in `spectra_peaks` as centroids.)
+ *
+ * Cooperative + interruptible (same `PrefetchControl` as the ion prefetch): reads run under
+ * the mutex, pause on user activity, time-slice (30 ms), and bail on `shouldStop`. The LRU's
+ * own budget eviction bounds memory. MS-scoping saves cache memory; it does not save
+ * bandwidth (MS1/MS2 interleave in the peaks row groups).
+ */
+export async function prefetchSpectrumCache(
+  reader: Reader,
+  cache: SpectrumLruCache,
+  control: PrefetchControl,
+): Promise<{ cached: number; stopped: boolean }> {
+  const { lvl, repr } = readCols(reader);
+  let cached = 0;
+
+  const msLevelOf = (i: number): number | null => {
+    const v = lvl?.get(i);
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  };
+  // MS0/1 only — skip MS2+. null/unknown level is treated as MS1 (kept).
+  const isMs01 = (i: number): boolean => {
+    const m = msLevelOf(i);
+    return m === null || m <= 1;
+  };
+  const reprOf = (i: number): SpectrumRepresentation => {
+    const v = repr?.get(i);
+    if (v === REPR_PROFILE_ACC) return "profile";
+    if (v === REPR_CENTROID_ACC) return "centroid";
+    return null;
+  };
+
+  const waitWhileUserActive = async (): Promise<boolean> => {
+    while (control.isUserActive()) {
+      if (control.shouldStop()) return false;
+      await sleep(control.cooldownMs);
+    }
+    return !control.shouldStop();
+  };
+
+  // Drive one bulk stream through the time-sliced mutex loop, caching entries `accept`s.
+  const drain = async (
+    stream: AsyncGenerator<{ index: number; mz: Float64Array; intensity: Float32Array }>,
+    accept: (index: number) => boolean,
+  ): Promise<boolean> => {
+    const it = stream[Symbol.asyncIterator]();
+    let done = false;
+    try {
+      while (!done) {
+        if (!(await waitWhileUserActive())) return false;
+        await control.mutex.runExclusive(async () => {
+          const start = nowMs();
+          for (;;) {
+            const res = await it.next();
+            if (res.done) { done = true; return; }
+            const { index, mz, intensity } = res.value;
+            if (accept(index)) {
+              cache.set(index, { mz, intensity, msLevel: msLevelOf(index) });
+              cached++;
+            }
+            if (nowMs() - start > PREFETCH_SLICE_MS) return;
+          }
+        });
+        await sleep(0);
+      }
+    } finally {
+      if (it.return) await it.return(undefined);
+    }
+    return true;
+  };
+
+  // Profile/unknown spectra from spectra_data; centroid spectra from spectra_peaks.
+  const okData = await drain(streamSpectraDataArrays(reader), (i) => isMs01(i) && reprOf(i) !== "centroid");
+  if (!okData) return { cached, stopped: true };
+  const okPeaks = await drain(streamSpectraPeaksArrays(reader), (i) => isMs01(i) && reprOf(i) === "centroid");
+  return { cached, stopped: !okPeaks };
 }
 
 /**

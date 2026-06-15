@@ -124,11 +124,44 @@ export type StreamedSpectrumArrays = {
 export async function* streamSpectraDataArrays(
   reader: Reader,
 ): AsyncGenerator<StreamedSpectrumArrays> {
-  const dataReader = await reader.spectrumData();
+  // An absent OR empty (0-row-group) spectra_data parquet makes mzpeakts throw
+  // ("Empty Parquet file") — common for all-centroid LC/DDA files. Treat as no stream.
+  let dr: Awaited<ReturnType<Reader["spectrumData"]>>;
+  try {
+    dr = await reader.spectrumData();
+  } catch {
+    return;
+  }
+  yield* streamArrays(dr);
+}
+
+/**
+ * Same single-pass bulk stream, but over `spectra_peaks` (mzpeakts `reader.spectrumPeaks`)
+ * — the CENTROID source. LC/DDA files store their MS1+MS2 spectra here (not in spectra_data),
+ * so this is the path the LC spectrum prefetch reads. Yields `{index, mz, intensity}` for
+ * every spectrum that has peak rows; empty/absent → yields nothing.
+ */
+export async function* streamSpectraPeaksArrays(
+  reader: Reader,
+): AsyncGenerator<StreamedSpectrumArrays> {
+  let dr: Awaited<ReturnType<Reader["spectrumPeaks"]>>;
+  try {
+    dr = await reader.spectrumPeaks();
+  } catch {
+    return; // absent/empty spectra_peaks → no stream
+  }
+  yield* streamArrays(dr);
+}
+
+/** Shared core: enumerate a mzpeakts DataArraysReader (data OR peaks) once, row group by
+ *  row group, yielding decoded (mz, intensity) per entry. */
+async function* streamArrays(
+  dataReader: Awaited<ReturnType<Reader["spectrumData"]>>,
+): AsyncGenerator<StreamedSpectrumArrays> {
   if (!dataReader) return;
   for await (const [idx, table] of dataReader.enumerate()) {
-    // Non-tabular layout (ColumnMap) → skip; the per-spectrum fallback covers it. Duck-typed
-    // so we don't depend on an `instanceof Arrow.Table` across module-instance boundaries.
+    // Non-tabular layout (ColumnMap) → skip. Duck-typed so we don't depend on an
+    // `instanceof Arrow.Table` across module-instance boundaries.
     const t = table as { schema?: unknown; getChildAt?: unknown };
     if (!t || !t.schema || typeof t.getChildAt !== "function") continue;
     const packed = mzdata.packTableIntoDataArrays(table as Parameters<typeof mzdata.packTableIntoDataArrays>[0]);

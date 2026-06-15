@@ -5,7 +5,7 @@
 // dispatch.ts (node-testable); this file is the only browser-Worker-bound piece and is
 // verified end-to-end in the app (Phase 4).
 import type { WorkerRequest } from "@mzpeak/contracts";
-import { dispatch, createContext, startIonPrefetch } from "./dispatch";
+import { dispatch, createContext, startIonPrefetch, startSpectrumPrefetch } from "./dispatch";
 import { makeRespond } from "./respond";
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
@@ -40,10 +40,13 @@ scope.addEventListener("message", (e: MessageEvent<WorkerRequest>) => {
   void ctx.mutex
     .runExclusive(() => dispatch(msg, ctx, respond))
     .then(() => {
-      // After an imaging file opens, warm its ion cache in the background (interruptible,
-      // yields to user reads via the same mutex) so the first ion render is instant. The
-      // `respond` lets the prefetch emit `ionIndexReady` when warming completes.
-      if (msg && msg.type === "open") startIonPrefetch(ctx, respond);
+      // After a file opens, warm the right cache in the background (interruptible; yields to
+      // user reads via the same mutex): imaging → the ion-image cache (emits ionIndexReady);
+      // non-imaging (LC/DDA) → the MS0/1 spectrum LRU. Both no-op when not applicable.
+      if (msg && msg.type === "open") {
+        startIonPrefetch(ctx, respond);
+        startSpectrumPrefetch(ctx);
+      }
     })
     .catch((err) => {
       // eslint-disable-next-line no-console
