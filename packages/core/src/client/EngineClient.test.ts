@@ -220,19 +220,18 @@ describe("EngineClient", () => {
     expect(oldResolved).not.toHaveBeenCalled();
   });
 
-  it("(f) a file open transfers the bytes buffer in the transfer list", () => {
+  it("(f) a file open passes the Blob and carries NO transfer list (Blob clones by reference)", () => {
     const fw = new FakeWorker();
     const client = new EngineClient(fw);
     fw.push({ type: "ready" });
 
-    const bytes = new ArrayBuffer(8);
-    void client.open({ kind: "file", bytes, name: "sample.mzpeak" });
+    const blob = new Blob([new Uint8Array(8)]);
+    void client.open({ kind: "file", blob, name: "sample.mzpeak" });
 
     const { msg, transfer } = fw.last();
     expect((msg as any).type).toBe("open");
-    expect(transfer).toBeDefined();
-    expect(transfer).toContain(bytes);
-    expect(transfer).toHaveLength(1);
+    expect((msg as any).source.blob).toBe(blob); // passed by reference, not copied
+    expect(transfer).toBeUndefined(); // a Blob is not a Transferable — nothing to move
   });
 
   it("(f.2) a url open carries NO transfer list", () => {

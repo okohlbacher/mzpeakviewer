@@ -181,19 +181,9 @@ const RESOLVE_TYPE: Partial<Record<WorkerRequest["type"], WorkerResponse["type"]
   renderMultiChannel: "multiChannelResult",
 };
 
-// ---------------------------------------------------------------------------
-// Transfer-list extraction — pull the transferable buffer(s) out of an outbound
-// request payload so postMessage moves them zero-copy. Only `open` with a file
-// source carries a transferable buffer on the INBOUND side (the request bytes).
-// (Outbound result transfers are the worker's concern, not the client's.)
-// ---------------------------------------------------------------------------
-
-function transferListFor(req: WorkerRequest): Transferable[] | undefined {
-  if (req.type === "open" && req.source.kind === "file") {
-    return [req.source.bytes];
-  }
-  return undefined;
-}
+// No inbound request carries a Transferable: a file open now passes a Blob (cloned
+// BY REFERENCE — no byte copy, nothing to transfer), and a URL open passes a string.
+// Outbound result transfers (fresh typed arrays) are the worker's concern.
 
 export class EngineClient {
   private readonly worker: WorkerLike;
@@ -278,7 +268,7 @@ export class EngineClient {
         resolve: resolve as (v: unknown) => void,
         reject,
       });
-      this.send(req, transferListFor(req));
+      this.send(req);
     });
   }
 
@@ -287,7 +277,7 @@ export class EngineClient {
   // -------------------------------------------------------------------------
 
   /**
-   * Open a file (transfers `bytes`) or URL. Resolves with the opened payload. The
+   * Open a file (a Blob, read lazily) or URL. Resolves with the opened payload. The
    * engine is single-open: a new open SUPERSEDES any in-flight open (its Promise
    * rejects with SupersededError, and a buffered-but-unsent open is removed from the
    * outbox so two opens can't both run on the worker — review M6).

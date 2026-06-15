@@ -54,15 +54,6 @@ export type EngineFile = {
   opticalImages: OpticalImageMeta[];
 };
 
-function toBlob(bytes: ArrayBuffer | Uint8Array): Blob {
-  // mzpeakts reads via zip.js BlobReader; wrap the bytes in a Blob (node-proven path).
-  // Pass the typed-array VIEW directly — do NOT `.slice()` it: a slice copies the whole
-  // file, doubling peak memory (a 3.5 GB input → ~7 GB transient → OOM). The Blob shares
-  // the existing buffer; in the worker the bytes are transferred in and owned here.
-  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  return new Blob([u8 as unknown as BlobPart]);
-}
-
 /** Parse embedded optical-image descriptors from the index metadata.imaging block. */
 function parseOpticalImages(imagingMeta: unknown): OpticalImageMeta[] {
   if (!imagingMeta || typeof imagingMeta !== "object") return [];
@@ -195,15 +186,26 @@ function rethrowOpenError(e: unknown, remote: boolean): never {
   throw new CorruptFileError(msg);
 }
 
-/** Open local bytes (Blob path) and assemble the wire payload. */
+/**
+ * Open a local File/Blob and assemble the wire payload. zip.js reads the Blob LAZILY
+ * (Blob.slice on demand via BlobReader) — only the ZIP directory + the Parquet pages
+ * actually needed, never a whole-file read. This is the local mirror of openEngineUrl's
+ * HTTP range reads: a multi-GB archive opens in metadata-time with no whole-file memory
+ * cost (the old path slurped the entire file into an ArrayBuffer → OOM at ~3.5 GB).
+ *
+ * The production caller (the worker) ALWAYS passes a Blob, which streams through to the
+ * lazy reader untouched. Raw ArrayBuffer/Uint8Array is accepted only as a test-harness
+ * convenience (small in-memory fixtures) and wrapped in a Blob with no copy.
+ */
 export async function openEngineFile(
-  bytes: ArrayBuffer | Uint8Array,
+  src: Blob | ArrayBuffer | Uint8Array,
   _name?: string,
 ): Promise<EngineFile> {
+  const blob = src instanceof Blob ? src : new Blob([src as unknown as BlobPart]);
   try {
-    return await assembleEngineFile(await openBlob(toBlob(bytes)));
+    return await assembleEngineFile(await openBlob(blob));
   } catch (e) {
-    rethrowOpenError(e, false); // local bytes → any failure is a parse/corrupt error
+    rethrowOpenError(e, false); // local file → any failure is a parse/corrupt error
   }
 }
 

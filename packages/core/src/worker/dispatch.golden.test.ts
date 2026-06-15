@@ -18,24 +18,24 @@ async function run(ctx: EngineContext, req: WorkerRequest): Promise<WorkerRespon
 }
 
 describe("worker dispatch — real imaging fixture", () => {
-  let bytes: ArrayBuffer;
+  let blob: Blob;
   let ctx: EngineContext;
 
   beforeAll(async () => {
     const buf = await readFile(FIXTURE);
-    bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    blob = new Blob([buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)]);
     ctx = createContext();
   });
 
   it("open → opened with imaging capabilities + a grid + a TIC", async () => {
-    const res = await run(ctx, { type: "open", requestId: 1, source: { kind: "file", bytes, name: "imaging.mzpeak" } });
+    const res = await run(ctx, { type: "open", requestId: 1, source: { kind: "file", blob, name: "imaging.mzpeak" } });
     expect(res.type).toBe("opened");
     if (res.type !== "opened") return;
     expect(res.capabilities.imaging.isImaging).toBe(true);
     expect(res.stats?.numSpectra).toBeGreaterThan(0);
     expect(res.grid).not.toBeNull();
     expect(res.tic).not.toBeNull();
-    expect(res.fileSize).toBe(bytes.byteLength);
+    expect(res.fileSize).toBe(blob.size);
   });
 
   it("selectSpectrum → spectrumResult with mz/intensity + representation, echoing selectId", async () => {

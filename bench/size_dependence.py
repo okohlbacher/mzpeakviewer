@@ -104,8 +104,8 @@ def main():
         b = _fit(ax, x, y, c, est)
         summ.append((name, b, float(np.median(y))))
 
-    ax.set_xscale("log")  # 20 MB → 3.3 GB spans >2 decades
-    ax.set_xlabel("File size (MB, log scale)")
+    ax.set_xlim(left=0)  # linear size axis
+    ax.set_xlabel("File size (MB)")
     ax.set_ylabel("Open → first spectrum (ms)")
     ax.set_ylim(bottom=0)
     ax.set_title("Access time vs file size — Local / Local S3 / Remote S3 "

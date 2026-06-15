@@ -44,10 +44,17 @@ import type { CapabilityModel, Presence } from "./capability";
 /** One channel of a multi-channel ion-image overlay. */
 export type ChannelRequest = { mz: number; tolDa: number; color?: string };
 
-/** Where a file's bytes come from. `file` transfers the ArrayBuffer (zero-copy). */
+/**
+ * Where a file's bytes come from.
+ *  - `url`  : zip.js reads it via HTTP RANGE requests (only metadata + needed pages).
+ *  - `file` : a local File/Blob, read LAZILY via zip.js BlobReader (Blob.slice on demand) —
+ *             same range-read discipline as `url`, never a whole-file read. The Blob is
+ *             structured-cloned BY REFERENCE across the worker boundary (no byte copy), so
+ *             even a multi-GB archive opens in metadata-time with no whole-file memory cost.
+ */
 export type OpenSource =
   | { kind: "url"; url: string }
-  | { kind: "file"; bytes: ArrayBuffer; name: string };
+  | { kind: "file"; blob: Blob; name: string };
 
 /** Chromatogram extraction mode (Explorer parity). */
 export type ChromRequest =

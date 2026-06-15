@@ -310,8 +310,11 @@ export const useStore = create<AppState>((set, get) => ({
     const seq = ++currentOpenSeq; // bump BEFORE any async work so in-flight opens go stale
     set({ ...INITIAL_OPEN_STATE, fileName: file.name, sourceUrl: null }); // local → not shareable
     try {
-      const bytes = await file.arrayBuffer();
-      const opened = await engine.open({ kind: "file", bytes, name: file.name });
+      // Pass the File straight through (it IS a Blob). zip.js reads it lazily via
+      // Blob.slice — only the ZIP directory + needed Parquet pages, never the whole
+      // file. The Blob clones by reference across the worker boundary (no byte copy),
+      // so even a multi-GB archive opens in metadata-time. (Mirrors the URL path.)
+      const opened = await engine.open({ kind: "file", blob: file, name: file.name });
       await finishOpen(set, get, seq, opened);
     } catch (err) {
       if (seq !== currentOpenSeq) return; // newer open superseded us

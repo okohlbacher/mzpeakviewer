@@ -188,7 +188,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         clearStructureCache(); // path-keyed footer cache must not leak across files
         const ef =
           req.source.kind === "file"
-            ? await openEngineFile(req.source.bytes, req.source.name)
+            ? await openEngineFile(req.source.blob, req.source.name)
             : await openEngineUrl(req.source.url);
         if (ctx.gen !== g) return; // superseded by a newer open/close — drop silently
         ctx.active = ef;
@@ -204,7 +204,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
             grid: ef.grid,
             tic: ef.tic,
             opticalImages: ef.opticalImages,
-            fileSize: req.source.kind === "file" ? req.source.bytes.byteLength : null,
+            fileSize: req.source.kind === "file" ? req.source.blob.size : null,
             mixedRepresentationWarning: null,
           },
           // Transfer ONLY the fresh TIC; the worker RETAINS the grid arrays (needed
