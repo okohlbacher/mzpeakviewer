@@ -141,8 +141,3 @@ export function currentShareUrl(): string {
   const mode = modeFromCapabilities();
   return buildShareUrl(v, mode, origin, pathname);
 }
-
-/** Test/debug hook: expose the source URL the current file was opened from. */
-export function sourceUrl(): string | null {
-  return useStore.getState().sourceUrl;
-}

@@ -153,3 +153,26 @@ Structure column inspector.
 **Sequencing note:** Wave 1 before Wave 3 (fix bugs in the duplicated code before merging it, so the
 merge is provably behavior-preserving). Wave 5 can run alongside 1–3 (write the store/cache tests
 first so the dedup refactors are gated). Wave 6 is independent.
+
+---
+
+## Status (updated 2026-06-15)
+
+**Waves 1–3 DONE + deployed** (commits c7fb598, b590781, 41435d9; gh-pages 41435d9). A round-2
+adversarial re-review (two reviewers over the full diff) found **no regressions and no new bugs** —
+every change traced clean (stale-async guards intact, no dropped open-state field, f32 binning
+equals f64 within the 0.5-Da bin, the dropped `spectra.length` fallback is provably equal to
+`sm.length`, all deletions left zero dangling refs, the wire-union routing stays safe). Also removed
+the dead `urlSync.sourceUrl()` export it surfaced.
+
+**Deferred** (judgment calls, not done): C3 `streamGridSpectra` build-helper (re-refactoring the
+3 render/prefetch builders just validated for f32/parity — regression risk > value); C3
+saveBlob/blit utils + the different-shape MS1 predicate; B5 `preload`/`cache` URL params and the
+render.ts TIC-normalization params (both reserved feature-stubs — "wire or remove" later).
+
+**Remaining: Waves 4–6.** Wave 4 (split `Imaging.tsx`; view-registry; ViewState contract-vs-app
+scope). Wave 5 (the test nets — app-store tests F1, IonCacheStore tests F2, a real cold==warm
+ion-render equality guard F3, prefetch-lifecycle F4 — high value, still open). Wave 6 (docs G1–G5:
+refresh the stale HEAD/counts/submodule/phase across CLAUDE.md + .planning/* + README, fix the
+"remote suppressed" + stale-timing comments, reconcile the perf doc, add an architecture/onboarding
+section; + the Structure column-inspector keyboard a11y E3).
