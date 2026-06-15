@@ -138,16 +138,12 @@ export class EngineClosedError extends Error {
 // ---------------------------------------------------------------------------
 
 export type EngineEventMap = {
-  progress: Extract<WorkerResponse, { type: "progress" }>;
   renderProgress: Extract<WorkerResponse, { type: "renderProgress" }>;
   renderPreview: Extract<WorkerResponse, { type: "renderPreview" }>;
   multiChannelPreview: Extract<WorkerResponse, { type: "multiChannelPreview" }>;
-  ionIndexPreloading: Extract<WorkerResponse, { type: "ionIndexPreloading" }>;
-  ionIndexPreloadAborted: Extract<WorkerResponse, { type: "ionIndexPreloadAborted" }>;
   ionIndexReady: Extract<WorkerResponse, { type: "ionIndexReady" }>;
   opticalImageResult: Extract<WorkerResponse, { type: "opticalImageResult" }>;
   opticalImageError: Extract<WorkerResponse, { type: "opticalImageError" }>;
-  opticalImageSkipped: Extract<WorkerResponse, { type: "opticalImageSkipped" }>;
   /** A global/unattributed engine error (no requestId/selectId — e.g. WASM init). */
   error: Extract<WorkerResponse, { type: "error" }>;
 };
@@ -557,17 +553,13 @@ export class EngineClient {
       // gen-echoed optical events ------------------------------------------
       case "opticalImageResult":
       case "opticalImageError":
-      case "opticalImageSkipped":
         this.emit(msg.type, msg);
         return;
 
       // unsolicited / streaming events -------------------------------------
-      case "progress":
       case "renderProgress":
       case "renderPreview":
       case "multiChannelPreview":
-      case "ionIndexPreloading":
-      case "ionIndexPreloadAborted":
       case "ionIndexReady":
         this.emit(msg.type, msg);
         return;

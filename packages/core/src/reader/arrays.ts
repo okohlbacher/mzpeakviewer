@@ -3,7 +3,7 @@
 // Keeps m/z at float64 precision (PITFALLS 9) and intensity at float32. Returns
 // `Float64Array`/`Float32Array` only — no Arrow Vectors leak upward.
 import type { Reader } from "./openUrl";
-import type { SpectrumArrays, SpectrumRepresentation } from "./types";
+import type { SpectrumArrays } from "./types";
 
 // mzpeakts names the reconstructed columns by their human-readable CV name.
 const MZ_KEY = "m/z array";
@@ -73,43 +73,6 @@ function fromCentroids(spectrum: RawSpectrum, index: number): SpectrumArrays {
 }
 
 /**
- * Read + reconstruct spectrum `index` into `{ mz, intensity }`.
- *
- * Legacy try-order variant (callers WITHOUT a representation — the numeric index
- * input on non-imaging files). For profile/point spectra mzpeakts populates
- * `spectrum.dataArrays`; for centroid spectra it populates `spectrum.centroids`.
- * Tries dataArrays first, then falls back to centroids, else throws.
- *
- * Representation-aware routing (DATA-03 / IMAGING-SPEC C6) lives in
- * `getSpectrumArraysFor`; prefer it whenever a representation is known.
- */
-export async function getSpectrumArrays(
-  reader: Reader,
-  index: number,
-): Promise<SpectrumArrays> {
-  const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
-  if (!spectrum) {
-    throw new Error(`No spectrum at index ${index}`);
-  }
-
-  const da = spectrum.dataArrays;
-  if (da && da[MZ_KEY] && da[INTENSITY_KEY]) {
-    return fromDataArrays(spectrum, index);
-  }
-
-  // Centroid fallback (spectra_peaks).
-  const centroids = spectrum.centroids;
-  if (centroids && centroids.length > 0) {
-    return fromCentroids(spectrum, index);
-  }
-
-  // No decodable signal arrays — fail loud rather than render silent zeros.
-  throw new Error(
-    `Spectrum ${index} has no reconstructable m/z + intensity arrays`,
-  );
-}
-
-/**
  * Ion-image / mean source read: harvest one spectrum's (mz, intensity) DIRECTLY
  * from the DATA-ARRAY source (spectra_data point intensities), falling back to the
  * centroid source (spectra_peaks) only when the spectrum has no data arrays.
@@ -148,29 +111,4 @@ export async function harvestDataArraysOrNull(
     return { mz: arr.mz, intensity: arr.intensity };
   }
   return null; // no decodable signal — caller skips this spectrum
-}
-
-/**
- * Read + reconstruct spectrum `index`, routing the source by `representation`
- * (DATA-03 / IMAGING-SPEC C6) rather than incidental try-order:
- *   - `"centroid"` → centroid source (spectra_peaks); empty → named throw.
- *   - `"profile"` or `null` → data-array source (spectra_data); profile-default.
- *
- * This is the deterministic, testable file-routing variant the store uses so a
- * centroid spectrum is never read as profile zeros and vice versa.
- */
-export async function getSpectrumArraysFor(
-  reader: Reader,
-  index: number,
-  representation: SpectrumRepresentation,
-): Promise<SpectrumArrays> {
-  const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
-  if (!spectrum) {
-    throw new Error(`No spectrum at index ${index}`);
-  }
-  if (representation === "centroid") {
-    return fromCentroids(spectrum, index);
-  }
-  // Profile or null (unknown MS:1000525) → documented profile/dataArrays default.
-  return fromDataArrays(spectrum, index);
 }

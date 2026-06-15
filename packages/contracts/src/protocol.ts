@@ -34,7 +34,6 @@ import type {
   StudyMeta,
   ReaderErrorClass,
   UnsupportedFinding,
-  LoadStage,
 } from "./wire";
 import type { CapabilityModel, Presence } from "./capability";
 
@@ -103,7 +102,6 @@ export type WorkerResponse =
   // Posted once after the worker registers onmessage (past WASM top-level await).
   // The main thread buffers requests until this lands so a fast open isn't dropped.
   | { type: "ready" }
-  | { type: "progress"; stage: LoadStage }
   // Unified open result — capabilities drive the whole shell. grid/tic are null
   // for non-imaging files. tic.buffer is TRANSFERRED.
   | {
@@ -145,13 +143,10 @@ export type WorkerResponse =
   // Progressive PREVIEW of a cold RGB render: partial channel images (copies) emitted as the
   // single streamed build fills in. Non-null channel buffers TRANSFERRED.
   | { type: "multiChannelPreview"; requestId: number; channels: (Float32Array | null)[] }
-  | { type: "ionIndexPreloading" }
-  | { type: "ionIndexPreloadAborted" }
   | { type: "ionIndexReady"; points: number }
   // rgba.buffer TRANSFERRED; gen echoed for stale-result rejection.
   | { type: "opticalImageResult"; archivePath: string; gen: number; width: number; height: number; rgba: Uint8ClampedArray }
   | { type: "opticalImageError"; archivePath: string; gen: number; message: string }
-  | { type: "opticalImageSkipped"; archivePath: string; gen: number }
   // control --------------------------------------------------------------
   | { type: "cancelled"; cancelId: number }
   // `requestId` correlates a request-failure; `selectId` correlates a selectSpectrum

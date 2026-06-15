@@ -20,7 +20,6 @@ function fmtRange(r: [number, number] | null, digits = 2): string {
 }
 
 export function Summary() {
-  const phase = useStore((s) => s.phase);
   const stats = useStore((s) => s.stats);
   const caps = useStore((s) => s.capabilities);
   const fileName = useStore((s) => s.fileName);
@@ -30,46 +29,8 @@ export function Summary() {
   const grid = useStore((s) => s.grid);
   const ticColumn = useStore((s) => s.ticColumn);
 
-  if (phase === "idle") {
-    return (
-      <div
-        data-testid="summary-idle"
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: "0.5rem",
-          padding: "4rem 1rem",
-          color: "var(--text-muted)",
-          textAlign: "center",
-        }}
-      >
-        <svg
-          width="48"
-          height="48"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-          style={{ opacity: 0.4 }}
-        >
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <polyline points="14 2 14 8 20 8" />
-        </svg>
-        <p style={{ margin: 0, fontWeight: "var(--weight-medium)" }}>
-          Open a .mzpeak file to begin
-        </p>
-        <p style={{ margin: 0, fontSize: "var(--text-sm)" }}>
-          Use the file input in the toolbar above
-        </p>
-      </div>
-    );
-  }
-
+  // Summary only mounts when phase==="ready" (App renders <Idle/> otherwise), so the not-ready
+  // guard below is the only reachable empty state — the old phase==="idle" branch was dead UI.
   if (!stats || !caps) return null;
 
   const imaging = caps.imaging;

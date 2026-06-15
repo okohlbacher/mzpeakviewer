@@ -255,13 +255,3 @@ export type ReaderErrorClass =
   | "internal";
 
 export type UnsupportedFinding = { code: string; label: string };
-
-/** Coarse load-pipeline stages for the progress UI. */
-export type LoadStage =
-  | "fetching"
-  | "unzipping"
-  | "manifest"
-  | "metadata"
-  | "grid"
-  | "tic"
-  | "done";

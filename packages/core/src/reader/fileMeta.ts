@@ -6,7 +6,6 @@
 import type { Reader } from "./openUrl";
 import type {
   FileMeta,
-  FileStats,
   ManifestEntry,
   SpectrumMeta,
   SpectrumRepresentation,
@@ -103,17 +102,3 @@ export function spectrumMeta(reader: Reader, index: number): SpectrumMeta {
   };
 }
 
-/**
- * Minimal per-file stats (used by the store test mock and legacy readers).
- * Production code now calls `computeStats` from `stats.ts` which fills
- * all fields including `mzRange`, `msLevels`, and `representationCounts`.
- */
-export function fileStats(reader: Reader): FileStats {
-  return {
-    numSpectra: reader.numSpectra,
-    numEntities: manifest(reader).length,
-    mzRange: null,
-    msLevels: [],
-    representationCounts: { profile: 0, centroid: 0 },
-  };
-}

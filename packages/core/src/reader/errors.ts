@@ -11,8 +11,9 @@
 //                                    from the fetch TypeError, no dedicated class)
 import type { UnsupportedFinding } from "./types";
 
-/** Discriminator string for store.error classification (R-03b). */
-export type ReaderErrorClass = "unsupported-encoding" | "corrupt" | "network";
+// NOTE: the wire error-class discriminator is `ReaderErrorClass` in @mzpeak/contracts (the live
+// type used by dispatch.classifyError + EngineClient). A reader-local copy used to live here but
+// was dead AND its string values disagreed with the contract — removed to avoid two sources.
 
 /**
  * Thrown when a file uses an encoding the bundled mzpeakts reader cannot

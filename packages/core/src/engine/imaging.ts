@@ -447,8 +447,6 @@ export type PrefetchControl = {
   cooldownMs: number;
   /** Bytes still free in the shared cache budget. */
   budgetRemaining: () => number;
-  /** Progress over filled cells (optional). */
-  onProgress?: (done: number, total: number) => void;
 };
 
 /**
@@ -477,11 +475,9 @@ export async function prefetchIonCache(
     if (coordKey >= 0 && coordKey < dense && isMs1(spectrumIndex))
       spectrumToCoord.set(spectrumIndex, coordKey);
   }
-  const total = spectrumToCoord.size;
 
   // Shared compact-cache accumulator (budget consulted live against the shared remaining).
   const builder = new IonCacheBuilder(control.budgetRemaining);
-  let done = 0;
 
   // Pause loop: return false if we should stop while waiting. Bails after
   // MAX_PREFETCH_STARVE_MS of continuous activity so a steadily-navigating user can't
@@ -517,13 +513,11 @@ export async function prefetchIonCache(
             builder.add(index, mz, intensity);
             if (builder.overBudget) return;
             filled.add(coordKey);
-            done++;
           }
           if (nowMs() - start > PREFETCH_SLICE_MS) return; // end the slice, yield below
         }
       });
       if (builder.overBudget) return { cache: null, stopped: false }; // too big to cache
-      control.onProgress?.(done, total);
       await sleep(0); // ONE yield per slice (lets a queued user read take the mutex)
     }
   } finally {
@@ -537,8 +531,6 @@ export async function prefetchIonCache(
     if (!isMs1(spectrumIndex)) continue; // MS2 cell — never cached (parity with the build pass)
     if (!(await waitWhileUserActive())) return { cache: null, stopped: true };
     const arrs = await control.mutex.runExclusive(() => harvestDataArraysOrNull(reader, spectrumIndex));
-    done++;
-    control.onProgress?.(done, total);
     if (!arrs) continue;
     builder.add(spectrumIndex, arrs.mz, arrs.intensity);
     if (builder.overBudget) return { cache: null, stopped: false };
