@@ -48,6 +48,11 @@ export type EngineContext = {
   lastUserActivity: number;
   /** Whether background prefetch on open is enabled (setCacheConfig.preloadEnabled). */
   preloadEnabled: boolean;
+  /** True when the open file was a remote URL (HTTP range reads). Background prefetch is
+   *  SUPPRESSED for remote files: eagerly streaming the whole spectra_data/peaks saturates
+   *  the one connection and starves the foreground open/scan/navigation (mzPeakExplorer's
+   *  documented lesson). Local files prefetch freely (decode-only, no bandwidth contention). */
+  remote: boolean;
 };
 
 export function createContext(): EngineContext {
@@ -62,6 +67,7 @@ export function createContext(): EngineContext {
     mutex: new Mutex(),
     lastUserActivity: 0,
     preloadEnabled: true,
+    remote: false,
   };
 }
 
@@ -79,7 +85,7 @@ const PREFETCH_COOLDOWN_MS = 350;
 export function startIonPrefetch(ctx: EngineContext, respond?: Respond): void {
   const ef = ctx.active;
   const gen = ctx.gen;
-  if (!ef || !ef.grid || !ctx.preloadEnabled) return;
+  if (!ef || !ef.grid || !ctx.preloadEnabled || ctx.remote) return; // skip remote — see ctx.remote
   const grid = ef.grid;
   void prefetchIonCache(ef.reader, grid, {
     mutex: ctx.mutex,
@@ -117,7 +123,7 @@ export function startIonPrefetch(ctx: EngineContext, respond?: Respond): void {
 export function startSpectrumPrefetch(ctx: EngineContext): void {
   const ef = ctx.active;
   const gen = ctx.gen;
-  if (!ef || ef.grid || !ctx.preloadEnabled) return; // imaging → ion prefetch handles it
+  if (!ef || ef.grid || !ctx.preloadEnabled || ctx.remote) return; // imaging → ion prefetch; remote → skip
   void prefetchSpectrumCache(ef.reader, ctx.spectrumCache, {
     mutex: ctx.mutex,
     shouldStop: () => ctx.gen !== gen,
@@ -165,6 +171,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
             : await openEngineUrl(req.source.url);
         if (ctx.gen !== g) return; // superseded by a newer open/close — drop silently
         ctx.active = ef;
+        ctx.remote = req.source.kind === "url"; // gate background prefetch off for cloud files
         respond(
           {
             type: "opened",
