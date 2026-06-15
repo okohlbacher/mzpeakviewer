@@ -124,14 +124,95 @@ async function readSpectrumArrays(
  * (still correct, just re-streamed each time). The cache is owned by the worker session
  * and dropped on open/close (see dispatch.ts) so it never leaks across files.
  */
+/**
+ * COMPACT per-spectrum arrays held ONLY to recompute ion images (MSI). m/z is stored as
+ * f32 (not f64): f32 precision is ~1.2e-4 Da at m/z 1000 — far finer than any practical
+ * window tolerance — so it never changes which points fall in an ion-image window, while
+ * halving the m/z footprint. Intensity is already f32. This is NOT a spectrum-display
+ * structure: id / representation / RT and full f64 m/z are re-read on demand (cheap), per
+ * the "metadata refetched quickly" design note.
+ */
+export type CompactSpectrum = { mz: Float32Array; intensity: Float32Array };
+
 export type SpectraArrayCache = {
-  /** spectrumIndex → decoded point arrays, for every filled grid cell with data. */
-  byIndex: Map<number, { mz: Float64Array; intensity: Float32Array }>;
+  /** spectrumIndex → compact point arrays, for every filled grid cell with data. */
+  byIndex: Map<number, CompactSpectrum>;
   /** True once a full pass populated every available filled-cell spectrum. */
   complete: boolean;
-  /** Approximate bytes held (mz f64 + intensity f32), for the budget check. */
+  /** Approximate bytes held (mz f32 + intensity f32), for the budget check. */
   bytes: number;
+  /** True when every cached spectrum's m/z is ascending (the sortingRank-0 axis) — lets the
+   *  cache-hit path binary-search the window instead of scanning all points. A file with any
+   *  non-ascending spectrum sets this false and falls back to a full scan (always correct). */
+  sorted: boolean;
 };
+
+/** Downcast m/z to f32 (intensity already f32), reporting whether the m/z is ascending. */
+function compactSpectrum(
+  mz: ArrayLike<number>,
+  intensity: Float32Array,
+): { entry: CompactSpectrum; sorted: boolean } {
+  const n = mz.length;
+  const m32 = new Float32Array(n);
+  let sorted = true;
+  for (let i = 0; i < n; i++) {
+    m32[i] = mz[i]!;
+    if (i > 0 && m32[i]! < m32[i - 1]!) sorted = false;
+  }
+  return { entry: { mz: m32, intensity }, sorted };
+}
+
+/** First index i with a[i] >= x (binary search over an ascending array). */
+function lowerBound(a: ArrayLike<number>, x: number): number {
+  let lo = 0;
+  let hi = a.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (a[mid]! < x) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** Window-sum over one spectrum's (mz, intensity): sum intensity where mz ∈ [lo, hi]
+ *  INCLUSIVE on both ends (IV `ionImageFromCache`), NaN/Inf skipped. Full scan — makes no
+ *  ordering assumption. */
+export function windowSumScan(
+  mz: ArrayLike<number>,
+  intensity: ArrayLike<number>,
+  lo: number,
+  hi: number,
+): number {
+  const n = Math.min(mz.length, intensity.length);
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const m = mz[i]!;
+    if (m < lo || m > hi) continue;
+    const v = intensity[i]!;
+    if (Number.isFinite(v)) sum += v;
+  }
+  return sum;
+}
+
+/** Same inclusive [lo, hi] sum for an ASCENDING-m/z spectrum: binary-search the lower bound
+ *  and stop at the first point past hi, so a cache-hit re-render scans only the window slice
+ *  (not all points). Equivalent to {@link windowSumScan} when mz is ascending. */
+export function windowSumSorted(
+  mz: ArrayLike<number>,
+  intensity: ArrayLike<number>,
+  lo: number,
+  hi: number,
+): number {
+  const n = Math.min(mz.length, intensity.length);
+  let sum = 0;
+  for (let i = lowerBound(mz, lo); i < n; i++) {
+    const m = mz[i]!;
+    if (m > hi) break;
+    const v = intensity[i]!;
+    if (Number.isFinite(v)) sum += v;
+  }
+  return sum;
+}
 
 export type RenderIonImageOptions = {
   /** Reuse/populate this session cache of decoded grid-cell spectra. */
@@ -191,26 +272,23 @@ export async function engineRenderIonImage(
   };
 
   // Window-sum over one spectrum's (mz, intensity) — INCLUSIVE [mzStart, mzEnd] (IV
-  // `ionImageFromCache`), NaN/Infinity → 0 (IV buildIonImage T-04-02). Unchanged math.
-  const windowSum = (mzArr: ArrayLike<number>, inArr: ArrayLike<number>): number => {
-    const n = Math.min(mzArr.length, inArr.length);
-    let sum = 0;
-    for (let i = 0; i < n; i++) {
-      const m = mzArr[i]!;
-      if (m < mzStart || m > mzEnd) continue;
-      const v = inArr[i]!;
-      if (Number.isFinite(v)) sum += v;
-    }
-    return sum;
-  };
+  // `ionImageFromCache`), NaN/Infinity skipped. Full scan for the streaming build path.
+  const windowSum = (mzArr: ArrayLike<number>, inArr: ArrayLike<number>): number =>
+    windowSumScan(mzArr, inArr, mzStart, mzEnd);
 
-  // ── CACHE-HIT PATH: re-sum from the in-memory decoded arrays (no network) ───────────
+  // ── CACHE-HIT PATH: re-sum from the in-memory compact arrays (no network) ───────────
   if (opts?.cache?.complete) {
     const byIndex = opts.cache.byIndex;
+    // Binary-search the window when the cache's m/z is ascending (the common case), else a
+    // full scan — both give the identical inclusive [mzStart, mzEnd] sum.
+    const sorted = opts.cache.sorted;
     for (const [spectrumIndex, coordKey] of spectrumToCoord) {
       const arrs = byIndex.get(spectrumIndex);
       // Absent ⇒ that cell contributed nothing on the build pass either → stays 0 (parity).
-      if (arrs) ionImage[coordKey] = windowSum(arrs.mz, arrs.intensity);
+      if (arrs)
+        ionImage[coordKey] = sorted
+          ? windowSumSorted(arrs.mz, arrs.intensity, mzStart, mzEnd)
+          : windowSumScan(arrs.mz, arrs.intensity, mzStart, mzEnd);
       done++;
       tick();
     }
@@ -224,18 +302,21 @@ export async function engineRenderIonImage(
   // 34,840-pixel image never finishes). Same data-array source IV/`harvestDataArraysOrNull`
   // prefers, so the summed values are identical. Decoded grid-cell arrays are cached as we
   // go (until the budget is hit), so later renders take the cache-hit path above. ──────
-  const building = new Map<number, { mz: Float64Array; intensity: Float32Array }>();
+  const building = new Map<number, CompactSpectrum>();
   let bytes = 0;
   let cacheable = true;
+  let sortedAll = true;
   const remember = (index: number, mzArr: Float64Array, inArr: Float32Array) => {
     if (!cacheable) return;
-    bytes += mzArr.byteLength + inArr.byteLength;
+    const { entry, sorted } = compactSpectrum(mzArr, inArr); // f32 m/z (compact)
+    bytes += entry.mz.byteLength + entry.intensity.byteLength;
     if (bytes > limitBytes) {
       cacheable = false; // too big for this session — render uncached from here on
       building.clear();
       return;
     }
-    building.set(index, { mz: mzArr, intensity: inArr });
+    if (!sorted) sortedAll = false;
+    building.set(index, entry);
   };
 
   const filled = new Set<number>();
@@ -266,7 +347,9 @@ export async function engineRenderIonImage(
 
   const stats = computeIonImageStats(ionImage, gridWire.presenceMask);
   // Commit the cache only if it held the whole grid within budget — else null (uncached).
-  const cache: SpectraArrayCache | null = cacheable ? { byIndex: building, complete: true, bytes } : null;
+  const cache: SpectraArrayCache | null = cacheable
+    ? { byIndex: building, complete: true, bytes, sorted: sortedAll }
+    : null;
   return { ionImage, stats, cache };
 }
 
@@ -314,9 +397,10 @@ export async function prefetchIonCache(
   }
   const total = spectrumToCoord.size;
 
-  const building = new Map<number, { mz: Float64Array; intensity: Float32Array }>();
+  const building = new Map<number, CompactSpectrum>();
   let bytes = 0;
   let done = 0;
+  let sortedAll = true;
 
   // Pause loop: return false if we should stop while waiting. Bails after
   // MAX_PREFETCH_STARVE_MS of continuous activity so a steadily-navigating user can't
@@ -350,9 +434,11 @@ export async function prefetchIonCache(
           const { index, mz, intensity } = res.value;
           const coordKey = spectrumToCoord.get(index);
           if (coordKey !== undefined) {
-            bytes += mz.byteLength + intensity.byteLength;
+            const { entry, sorted } = compactSpectrum(mz, intensity); // f32 m/z (compact)
+            bytes += entry.mz.byteLength + entry.intensity.byteLength;
             if (bytes > control.budgetRemaining()) { overBudget = true; return; }
-            building.set(index, { mz, intensity });
+            if (!sorted) sortedAll = false;
+            building.set(index, entry);
             filled.add(coordKey);
             done++;
           }
@@ -377,12 +463,14 @@ export async function prefetchIonCache(
     done++;
     control.onProgress?.(done, total);
     if (!arrs) continue;
-    bytes += arrs.mz.byteLength + arrs.intensity.byteLength;
+    const { entry, sorted } = compactSpectrum(arrs.mz, arrs.intensity);
+    bytes += entry.mz.byteLength + entry.intensity.byteLength;
     if (bytes > control.budgetRemaining()) return { cache: null, stopped: false };
-    building.set(spectrumIndex, { mz: arrs.mz, intensity: arrs.intensity });
+    if (!sorted) sortedAll = false;
+    building.set(spectrumIndex, entry);
   }
 
-  return { cache: { byIndex: building, complete: true, bytes }, stopped: false };
+  return { cache: { byIndex: building, complete: true, bytes, sorted: sortedAll }, stopped: false };
 }
 
 // ── Mean / ROI spectrum ──────────────────────────────────────────────────────
@@ -423,8 +511,8 @@ function nearestBin(refMz: Float64Array, mzVal: number): number {
 /** Fold one spectrum's (mz, intensity) arrays into the running mean accumulator. */
 function accumulate(
   acc: MeanAccumulator,
-  mz: Float64Array,
-  intensity: Float32Array,
+  mz: ArrayLike<number>,
+  intensity: ArrayLike<number>,
 ): void {
   const n = Math.min(mz.length, intensity.length);
   if (n === 0) return;

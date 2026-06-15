@@ -18,15 +18,15 @@ function fakeReader(numSpectra: number): Reader {
 }
 
 function cacheOf(entries: Record<number, { mz: number[]; intensity: number[] }>): SpectraArrayCache {
-  const byIndex = new Map<number, { mz: Float64Array; intensity: Float32Array }>();
+  const byIndex = new Map<number, { mz: Float32Array; intensity: Float32Array }>();
   let bytes = 0;
   for (const [k, v] of Object.entries(entries)) {
-    const mz = Float64Array.from(v.mz);
+    const mz = Float32Array.from(v.mz); // compact cache stores f32 m/z
     const intensity = Float32Array.from(v.intensity);
     byIndex.set(Number(k), { mz, intensity });
     bytes += mz.byteLength + intensity.byteLength;
   }
-  return { byIndex, complete: true, bytes };
+  return { byIndex, complete: true, bytes, sorted: true };
 }
 
 describe("G — mean/ROI reuse the warm ion cache (no random-access getSpectrum)", () => {
