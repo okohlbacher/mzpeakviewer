@@ -99,11 +99,27 @@ type SchemaElement = {
   converted_type?: string;
   logical_type?: { type?: string } | string | null;
 };
+/** A column chunk: its meta_data PLUS the page-index pointers (present iff the writer
+ *  emitted an offset/column index — that's what lets a reader seek within a row group). */
+type ColumnChunk = {
+  meta_data?: ColumnMetaData;
+  offset_index_offset?: bigint | number | null;
+  offset_index_length?: bigint | number | null;
+  column_index_offset?: bigint | number | null;
+  column_index_length?: bigint | number | null;
+};
+type RowGroup = {
+  columns: ColumnChunk[];
+  /** Rows in this row group. */
+  num_rows?: bigint | number;
+  /** Total UNCOMPRESSED bytes in this row group (the per-random-read decode cost). */
+  total_byte_size?: bigint | number;
+};
 type FileMetaData = {
   num_rows: bigint;
   created_by?: string | null;
   schema?: SchemaElement[];
-  row_groups: { columns: { meta_data?: ColumnMetaData }[] }[];
+  row_groups: RowGroup[];
 };
 
 // ── Archive member listing ───────────────────────────────────────────────────────
@@ -359,11 +375,30 @@ export async function engineParquetFooter(
     };
   });
 
+  // Per-row-group footprint (uncompressed bytes + rows) — the signal that exposes a
+  // monolithic single 942 MB row group vs uniform ~25 MB groups. `total_byte_size` is the
+  // footer's uncompressed row-group size; fall back to summing the columns' uncompressed
+  // sizes if a writer omits it. Page index presence: any column chunk carrying an
+  // offset/column-index pointer means a reader can seek WITHIN a group to a spectrum's pages.
+  let hasPageIndex = false;
+  const rowGroupSizes = (meta.row_groups ?? []).map((g) => {
+    let bytes = num(g.total_byte_size);
+    if (bytes === 0) {
+      for (const c of g.columns ?? []) bytes += num(c.meta_data?.total_uncompressed_size);
+    }
+    for (const c of g.columns ?? []) {
+      if (c.offset_index_offset != null || c.column_index_offset != null) hasPageIndex = true;
+    }
+    return { rows: num(g.num_rows), bytes };
+  });
+
   const input: FooterInput = {
     numRows: Number(meta.num_rows),
     numRowGroups: meta.row_groups?.length ?? 0,
     createdBy: meta.created_by ?? null,
     columns,
+    rowGroupSizes,
+    hasPageIndex,
   };
   return adaptParquetFooter(archivePath, input);
 }

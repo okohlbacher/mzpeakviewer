@@ -21,7 +21,7 @@
 // enum order, archive.ts CODECS) before calling this. min/max are stringified for
 // display; everything else passes through, with `undefined` → `null`.
 
-import type { ParquetColumn, ParquetFooter } from "@mzpeak/contracts";
+import type { ParquetColumn, ParquetFooter, RowGroupSize } from "@mzpeak/contracts";
 
 /** One decoded column's raw footer fields (superset of IV ColInfo + Explorer deepColumn). */
 export type FooterColumnInput = {
@@ -60,6 +60,10 @@ export type FooterInput = {
   /** Writer signature from the footer (e.g. "parquet-mr", "mzpeak-rs"); null when absent. */
   createdBy?: string | null;
   columns: FooterColumnInput[];
+  /** Per-row-group uncompressed size + rows, in file order (handler reads it off the footer). */
+  rowGroupSizes?: RowGroupSize[];
+  /** Whether a Parquet page (offset/column) index is present on any column. */
+  hasPageIndex?: boolean | null;
 };
 
 /**
@@ -117,5 +121,7 @@ export function adaptParquetFooter(archivePath: string, input: FooterInput): Par
     numRowGroups: input.numRowGroups,
     columns: input.columns.map(adaptColumn),
     createdBy: input.createdBy ?? null,
+    rowGroupSizes: input.rowGroupSizes ?? [],
+    hasPageIndex: input.hasPageIndex ?? null,
   };
 }

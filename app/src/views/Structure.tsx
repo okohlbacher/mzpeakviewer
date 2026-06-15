@@ -194,8 +194,76 @@ export function Structure() {
   );
 }
 
+/** Median of a numeric array (sorted copy; 0 for empty). */
+function median(xs: number[]): number {
+  if (xs.length === 0) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
+}
+
+/** A row group bigger than this, when it's the only one (or it dwarfs the rest), is the
+ *  monolithic-row-group anti-pattern: a single random spectrum read decodes the whole group. */
+const MONOLITHIC_BYTES = 64_000_000;
+
+/**
+ * Chunk / row-group structure for a parquet member — the signal that distinguishes a
+ * well-chunked file (many uniform ~25 MB groups, seekable) from the monolithic-row-group
+ * anti-pattern (one 942 MB group, no page index → every random read decodes the whole group).
+ * Reads only footer metadata already on `ParquetFooter`. See the converter handoff
+ * (mzML2mzPeak/docs/handoff-mzpeak-profile-rowgroup-chunking-2026-06-15.md).
+ */
+function ChunkStructure({ footer, numSpectra }: { footer: ParquetFooter; numSpectra: number | null }) {
+  const sizes = footer.rowGroupSizes ?? [];
+  if (sizes.length === 0) return null;
+  const bytes = sizes.map((g) => g.bytes);
+  const maxB = Math.max(...bytes);
+  const minB = Math.min(...bytes);
+  const medB = median(bytes);
+  // chunks-per-spectrum for the spectra data facets (1 row = 1 m/z chunk; >1 ⇒ chunked m/z).
+  const isSpectraFacet = /spectra_(data|peaks)\.parquet$/i.test(footer.archivePath);
+  const chunksPerSpec =
+    isSpectraFacet && numSpectra && numSpectra > 0 ? footer.numRows / numSpectra : null;
+  // Monolithic: one big group, OR a single group dwarfing the median (>4×) and over the cap.
+  const monolithic =
+    (footer.numRowGroups === 1 && maxB > MONOLITHIC_BYTES) ||
+    (maxB > MONOLITHIC_BYTES && maxB > 4 * Math.max(1, medB));
+  const pageIdx = footer.hasPageIndex;
+
+  return (
+    <div data-testid="structure-rowgroups" style={{ margin: "0 0 0.75rem", fontSize: "var(--text-sm, 0.8rem)", color: "var(--text-muted, #6b757e)" }}>
+      <span style={{ fontFamily: "var(--font-mono, monospace)" }}>
+        row groups: <strong>{footer.numRowGroups}</strong>
+        {sizes.length > 1
+          ? ` · sizes min ${formatBytes(minB)} / med ${formatBytes(medB)} / max ${formatBytes(maxB)}`
+          : ` · ${formatBytes(maxB)} (${sizes[0]!.rows.toLocaleString()} rows)`}
+        {" · page index: "}
+        <strong style={{ color: pageIdx === false ? "var(--warning, #b45309)" : undefined }}>
+          {pageIdx === true ? "yes" : pageIdx === false ? "no" : "—"}
+        </strong>
+        {chunksPerSpec != null ? ` · ${chunksPerSpec.toFixed(1)} chunks/spectrum` : ""}
+      </span>
+      {monolithic && (
+        <div
+          data-testid="structure-monolithic-warning"
+          style={{
+            marginTop: "0.35rem", padding: "0.3rem 0.5rem", borderRadius: "var(--radius-sm, 4px)",
+            background: "var(--warning-subtle, #fef3c7)", color: "var(--warning-text, #92400e)",
+            border: "1px solid var(--warning, #f59e0b)", fontFamily: "var(--font-sans)", fontSize: "0.76rem",
+          }}
+        >
+          ⚠ Single large row group ({formatBytes(maxB)}){pageIdx === false ? " and no page index" : ""} — a
+          random spectrum read must decode the whole group. Re-chunking the writer into smaller row groups
+          (and emitting a page index) would make single-spectrum access fast.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ParquetInspector({ footer }: { footer: ParquetFooter }) {
   const [open, setOpen] = useState<string | null>(null);
+  const numSpectra = useStore((s) => s.stats?.numSpectra ?? null);
   const totalComp = footer.columns.reduce((s, c) => s + (c.compressedBytes ?? 0), 0);
   const totalRaw = footer.columns.reduce((s, c) => s + (c.uncompressedBytes ?? 0), 0);
   const ratio = totalComp > 0 ? totalRaw / totalComp : 0;
@@ -203,12 +271,13 @@ function ParquetInspector({ footer }: { footer: ParquetFooter }) {
   return (
     <div data-testid="structure-footer">
       <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.15rem", wordBreak: "break-all" }}>{footer.archivePath}</h2>
-      <p style={{ margin: "0 0 0.75rem", color: "var(--text-muted, #6b757e)", fontSize: "var(--text-sm, 0.82rem)" }}>
+      <p style={{ margin: "0 0 0.4rem", color: "var(--text-muted, #6b757e)", fontSize: "var(--text-sm, 0.82rem)" }}>
         <strong>{footer.numRows.toLocaleString()}</strong> rows · <strong>{footer.columns.length}</strong> columns ·{" "}
         <strong>{footer.numRowGroups}</strong> row group{footer.numRowGroups === 1 ? "" : "s"} ·{" "}
         {formatBytes(totalComp)} compressed / {formatBytes(totalRaw)} raw{ratio > 0 ? ` (${ratio.toFixed(1)}×)` : ""}
         {footer.createdBy ? ` · ${footer.createdBy}` : ""}
       </p>
+      <ChunkStructure footer={footer} numSpectra={numSpectra} />
       <table style={{ borderCollapse: "collapse", fontSize: "var(--text-sm, 0.82rem)", width: "100%" }}>
         <thead>
           <tr style={{ textAlign: "left", color: "var(--text-muted, #94a3b8)" }}>

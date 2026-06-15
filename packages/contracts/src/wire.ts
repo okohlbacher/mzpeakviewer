@@ -146,6 +146,14 @@ export type ParquetColumn = {
   rowGroups?: number | null;
 };
 
+/** One row group's footprint — what reveals the monolithic-row-group anti-pattern. */
+export type RowGroupSize = {
+  /** Rows (= chunks, for the chunked data facet) in this row group. */
+  rows: number;
+  /** Uncompressed bytes in this row group (the decode cost a single random read pays). */
+  bytes: number;
+};
+
 /** Parquet footer summary for the Structure tab (Phase-3 map: enriched per-column). */
 export type ParquetFooter = {
   archivePath: string;
@@ -154,6 +162,14 @@ export type ParquetFooter = {
   columns: ParquetColumn[];
   /** Writer signature from the footer (e.g. "parquet-mr", "mzpeak-rs"), when present. */
   createdBy?: string | null;
+  /** Per-row-group uncompressed size + row count, in file order. Drives the row-group
+   *  size distribution + the monolithic-group health badge (a 1×942 MB group reads as an
+   *  obvious outlier vs uniform ~25 MB groups). Empty/absent when the footer can't be read. */
+  rowGroupSizes?: RowGroupSize[];
+  /** Whether the file carries a Parquet page (offset/column) index — i.e. whether a reader
+   *  can seek WITHIN a row group to the page(s) for a target spectrum, instead of decoding
+   *  the whole group. `null` when undetermined. */
+  hasPageIndex?: boolean | null;
 };
 
 /**

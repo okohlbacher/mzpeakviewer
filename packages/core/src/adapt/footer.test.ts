@@ -123,4 +123,26 @@ describe("adaptParquetFooter", () => {
     expect(f.columns).toEqual([]);
     expect(f.createdBy).toBeNull();
   });
+
+  it("passes through per-row-group sizes and the page-index flag", () => {
+    const f = adaptParquetFooter("spectra_data.parquet", {
+      ...base,
+      rowGroupSizes: [
+        { rows: 250, bytes: 25_000_000 },
+        { rows: 250, bytes: 26_000_000 },
+      ],
+      hasPageIndex: false,
+    });
+    expect(f.rowGroupSizes).toEqual([
+      { rows: 250, bytes: 25_000_000 },
+      { rows: 250, bytes: 26_000_000 },
+    ]);
+    expect(f.hasPageIndex).toBe(false);
+  });
+
+  it("defaults rowGroupSizes to [] and hasPageIndex to null when absent", () => {
+    const f = adaptParquetFooter("x.parquet", base);
+    expect(f.rowGroupSizes).toEqual([]);
+    expect(f.hasPageIndex).toBeNull();
+  });
 });

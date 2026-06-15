@@ -70,11 +70,20 @@ test("Structure (real clicks): list members → inspect a parquet footer", async
   // Members listed; click the first PARQUET member → its footer columns render.
   // (mzpeak_index.json is now also clickable — a redirect, not a footer — so target
   //  parquet members explicitly via data-parquet.)
-  const parquetBtn = page.locator('[data-testid="structure-members"] button[data-parquet="true"]').first();
+  // Target a NON-empty data parquet (chromatograms_data is empty in this fixture →
+  // 0 row groups → no chunk-structure line, by design).
+  const parquetBtn = page
+    .locator('[data-testid="structure-members"] button[data-parquet="true"]')
+    .filter({ hasText: "spectra_metadata.parquet" });
   await expect(parquetBtn).toBeVisible({ timeout: 15_000 });
   await parquetBtn.click();
   await expect(page.getByTestId("structure-footer")).toBeVisible({ timeout: 20_000 });
   expect(await page.getByTestId("structure-error").count()).toBe(0);
+  // Chunk/row-group structure line renders (row groups · sizes · page index).
+  const rg = page.getByTestId("structure-rowgroups");
+  await expect(rg).toBeVisible();
+  await expect(rg).toContainText("row groups:");
+  await expect(rg).toContainText("page index:");
 });
 
 test("Structure: index.json first, then the Parquet payload, then embedded files", async ({ page }) => {

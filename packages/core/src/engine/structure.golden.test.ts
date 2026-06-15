@@ -80,6 +80,21 @@ describe("Structure golden: engine archive/footer slice against a real lc.mzpeak
     expect(footer.columns.some((c) => c.logicalType != null)).toBe(true);
   });
 
+  // Chunk/row-group structure (Structure tab "chunk scanning"): one entry per row group,
+  // each with a row count + uncompressed byte size; page-index presence is a boolean.
+  it("engineParquetFooter surfaces per-row-group sizes + page-index presence", async () => {
+    const footer = await engineParquetFooter(reader, "spectra_metadata.parquet");
+    expect(footer.rowGroupSizes).toBeDefined();
+    expect(footer.rowGroupSizes!.length).toBe(footer.numRowGroups);
+    for (const g of footer.rowGroupSizes!) {
+      expect(g.rows).toBeGreaterThanOrEqual(0);
+      expect(g.bytes).toBeGreaterThan(0); // a non-empty row group has a real footprint
+    }
+    // Row counts across groups sum to the file's total rows.
+    expect(footer.rowGroupSizes!.reduce((s, g) => s + g.rows, 0)).toBe(footer.numRows);
+    expect(typeof footer.hasPageIndex === "boolean" || footer.hasPageIndex === null).toBe(true);
+  });
+
   // VALUE-SANITY: the spectra_metadata footer numRows must equal the spectrum count
   // determined independently via the scan breakdown.
   it("spectra_metadata numRows == numSpectra (value parity)", async () => {
