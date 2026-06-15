@@ -21,6 +21,7 @@ import { adaptSpectrum } from "../adapt/spectrum";
 import { spectrumMeta } from "../reader/fileMeta";
 import type { Reader } from "../reader/openUrl";
 import type { SpectrumRepresentation } from "../reader/types";
+import type { SpectrumLruCache } from "./cache";
 
 // mzpeakts names the reconstructed data-array columns by their human-readable CV name.
 const MZ_KEY = "m/z array";
@@ -189,6 +190,54 @@ export async function readEngineSpectrum(
   const recon = reconstructSpectrum(spectrum, index, representation);
   return adaptSpectrum({
     index: recon.index,
+    id: recon.id,
+    mz: recon.mz,
+    intensity: recon.intensity,
+    representation: recon.representation,
+  });
+}
+
+/**
+ * Cached variant of {@link readEngineSpectrum}: serves the decoded (m/z, intensity)
+ * arrays from the worker's `SpectrumLruCache` on a hit, avoiding the expensive
+ * `getSpectrum` row-group read. Only the signal arrays + msLevel are cached; the light
+ * metadata (id, representation) is re-read from the in-memory table every call (cheap),
+ * per the "no metadata besides MS level" design requirement.
+ *
+ * Transfer-safety: `adaptSpectrum` ALWAYS copies its inputs (it is the transfer
+ * boundary), so the wire result never aliases — and therefore never detaches — the
+ * cached arrays. The cache keeps the canonical buffers; the response carries copies.
+ */
+export async function readEngineSpectrumCached(
+  reader: Reader,
+  index: number,
+  cache: SpectrumLruCache,
+): Promise<WireSpectrumArrays> {
+  // Light metadata is always cheap (in-memory metadata table): id, representation, msLevel.
+  let representation: SpectrumRepresentation = null;
+  let id = String(index);
+  let msLevel: number | null = null;
+  try {
+    const m = spectrumMeta(reader, index);
+    representation = m.representation;
+    id = m.id;
+    msLevel = m.msLevel;
+  } catch {
+    // keep defaults
+  }
+
+  const hit = cache.get(index);
+  if (hit) {
+    return adaptSpectrum({ index, id, mz: hit.mz, intensity: hit.intensity, representation });
+  }
+
+  const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
+  if (!spectrum) throw new Error(`No spectrum at index ${index}`);
+  const recon = reconstructSpectrum(spectrum, index, representation);
+  // Cache the canonical decoded arrays (adaptSpectrum copies for the wire below).
+  cache.set(index, { mz: recon.mz, intensity: recon.intensity, msLevel });
+  return adaptSpectrum({
+    index,
     id: recon.id,
     mz: recon.mz,
     intensity: recon.intensity,

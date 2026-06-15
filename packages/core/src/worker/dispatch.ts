@@ -12,7 +12,8 @@
 
 import type { WorkerRequest, ReaderErrorClass, UnsupportedFinding } from "@mzpeak/contracts";
 import { openEngineFile, openEngineUrl, type EngineFile } from "../engine/open";
-import { readEngineSpectrum } from "../engine/spectrum";
+import { readEngineSpectrumCached } from "../engine/spectrum";
+import { CacheBudget, SpectrumLruCache } from "../engine/cache";
 import { engineScanBreakdown } from "../engine/scanBreakdown";
 import { engineExtractChrom, type ChromContext } from "../engine/chrom";
 import { engineRenderIonImage, engineMeanSpectrum, engineRoiSpectrum, type SpectraArrayCache } from "../engine/imaging";
@@ -22,9 +23,6 @@ import { engineArchiveList, engineArchiveMemberBytes, engineParquetFooter, engin
 import { engineStudyMeta } from "../engine/studyMeta";
 import { UnsupportedEncodingError, CorruptFileError } from "../reader/errors";
 import { buffersOf, type Respond } from "./respond";
-
-/** Default ion-image cache ceiling (~768 MB of decoded points) until the shell sets one. */
-const DEFAULT_CACHE_LIMIT_BYTES = 768 * 1024 * 1024;
 
 /** Mutable per-session context the worker entry owns one of. */
 export type EngineContext = {
@@ -36,12 +34,16 @@ export type EngineContext = {
   /** Decoded grid-cell spectra from the first ion render, so later renders re-sum from
    *  memory (no re-stream). Dropped on every open/close — never leaks across files. */
   ionCache: SpectraArrayCache | null;
-  /** Ion-cache byte ceiling (setCacheConfig.cacheLimitBytes; default below). */
-  cacheLimitBytes: number;
+  /** ONE memory-sized byte budget shared by the ion cache + the spectrum LRU. */
+  budget: CacheBudget;
+  /** LRU of decoded per-spectrum (m/z, intensity, msLevel) — accelerates repeat
+   *  selectSpectrum + (Stage 2) the background prefetch. Shares `budget`. */
+  spectrumCache: SpectrumLruCache;
 };
 
 export function createContext(): EngineContext {
-  return { active: null, gen: 0, scan: null, ionCache: null, cacheLimitBytes: DEFAULT_CACHE_LIMIT_BYTES };
+  const budget = new CacheBudget();
+  return { active: null, gen: 0, scan: null, ionCache: null, budget, spectrumCache: new SpectrumLruCache(budget) };
 }
 
 /** Map a thrown reader error to a wire error class (+ findings when present). */
@@ -68,6 +70,8 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         ctx.active = null;
         ctx.scan = null;
         ctx.ionCache = null; // decoded-spectra cache is per-file — drop it
+        ctx.spectrumCache.clear(); // per-file spectrum LRU — drop it
+        ctx.budget.resetUsage(); // both caches cleared → reset the shared usage
         clearStructureCache(); // path-keyed footer cache must not leak across files
         const ef =
           req.source.kind === "file"
@@ -101,14 +105,17 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         ctx.active = null;
         ctx.scan = null;
         ctx.ionCache = null;
+        ctx.spectrumCache.clear();
+        ctx.budget.resetUsage();
         return; // no correlated response
       }
 
       case "setCacheConfig":
-        // Wire the ion-cache byte ceiling. `preloadEnabled` is reserved (no eager preload
-        // yet); a positive limit caps how much decoded spectra the ion render may retain.
+        // Override the shared (ion + spectrum) byte ceiling. `preloadEnabled` is reserved
+        // for Stage 2's background prefetch. A positive limit overrides the memory-derived
+        // default; the spectrum LRU evicts immediately if it now exceeds the new ceiling.
         if (Number.isFinite(req.cacheLimitBytes) && req.cacheLimitBytes > 0) {
-          ctx.cacheLimitBytes = req.cacheLimitBytes;
+          ctx.budget.limitBytes = req.cacheLimitBytes;
         }
         return;
 
@@ -120,7 +127,9 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
 
       case "selectSpectrum": {
         const reader = requireActive(ctx).reader;
-        const spectrum = await readEngineSpectrum(reader, req.index);
+        // Read-through the spectrum LRU: a repeat selection returns the cached arrays
+        // (adaptSpectrum copies them for the transfer, so the cache stays intact).
+        const spectrum = await readEngineSpectrumCached(reader, req.index, ctx.spectrumCache);
         respond({ type: "spectrumResult", spectrum, selectId: req.selectId }, buffersOf(spectrum.mz, spectrum.intensity));
         return;
       }
@@ -150,6 +159,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
           respond({ type: "renderResult", requestId: req.requestId, ionImage: null, stats: null });
           return;
         }
+        const prev = ctx.ionCache;
         const { ionImage, stats, cache } = await engineRenderIonImage(
           active.reader,
           active.grid,
@@ -157,12 +167,19 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
           req.tolDa,
           {
             cache: ctx.ionCache,
-            limitBytes: ctx.cacheLimitBytes,
+            // Only the budget still free after the spectrum LRU's current usage.
+            limitBytes: ctx.budget.remaining(),
             onProgress: (doneN, totalN) =>
               respond({ type: "renderProgress", requestId: req.requestId, done: doneN, total: totalN }),
           },
         );
-        ctx.ionCache = cache; // retain (or keep null when the file exceeds the budget)
+        // Account the ion cache against the shared budget when it changes (a fresh build
+        // commits a new cache; a cache-hit reuses the same ref and leaves usage unchanged).
+        if (cache !== prev) {
+          if (prev) ctx.budget.sub(prev.bytes);
+          if (cache) ctx.budget.add(cache.bytes);
+          ctx.ionCache = cache;
+        }
         respond({ type: "renderResult", requestId: req.requestId, ionImage, stats }, buffersOf(ionImage));
         return;
       }
