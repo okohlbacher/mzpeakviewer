@@ -296,7 +296,7 @@ export async function engineRenderIonImage(
   const builder = new IonCacheBuilder(() => limitBytes);
 
   const filled = new Set<number>();
-  for await (const { index, mz: mzArr, intensity: inArr } of streamSpectraDataArrays(reader)) {
+  for await (const { index, mz: mzArr, intensity: inArr } of streamSpectraDataArrays(reader, { mzFloat32: true })) {
     const coordKey = spectrumToCoord.get(index);
     if (coordKey === undefined) continue; // spectrum not mapped to a grid cell — not cached
     ionImage[coordKey] = windowSum(mzArr, inArr);
@@ -414,7 +414,7 @@ export async function engineRenderMultiChannel(
   const builder = new IonCacheBuilder(() => limitBytes);
 
   const filled = new Set<number>();
-  for await (const { index, mz: mzArr, intensity: inArr } of streamSpectraDataArrays(reader)) {
+  for await (const { index, mz: mzArr, intensity: inArr } of streamSpectraDataArrays(reader, { mzFloat32: true })) {
     const coordKey = spectrumToCoord.get(index);
     if (coordKey === undefined) continue;
     writeScan(coordKey, mzArr, inArr);
@@ -497,7 +497,7 @@ export async function prefetchIonCache(
   };
 
   const filled = new Set<number>();
-  const it = streamSpectraDataArrays(reader)[Symbol.asyncIterator]();
+  const it = streamSpectraDataArrays(reader, { mzFloat32: true })[Symbol.asyncIterator]();
   let streamDone = false;
   try {
     while (!streamDone) {

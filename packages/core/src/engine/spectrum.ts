@@ -19,7 +19,7 @@
 import type { SpectrumArrays as WireSpectrumArrays } from "@mzpeak/contracts";
 import { adaptSpectrum } from "../adapt/spectrum";
 import { spectrumMeta } from "../reader/fileMeta";
-import { streamSpectraDataArrays, streamSpectraPeaksArrays, type Reader } from "../reader/openUrl";
+import { streamSpectraDataArrays, streamSpectraPeaksArrays, type Reader, type StreamedSpectrumArrays } from "../reader/openUrl";
 import type { SpectrumRepresentation } from "../reader/types";
 import type { SpectrumLruCache } from "./cache";
 import type { PrefetchControl } from "./imaging";
@@ -275,7 +275,7 @@ export async function prefetchSpectrumCache(
 
   // Drive one bulk stream through the time-sliced mutex loop, caching entries `accept`s.
   const drain = async (
-    stream: AsyncGenerator<{ index: number; mz: Float64Array; intensity: Float32Array }>,
+    stream: AsyncGenerator<StreamedSpectrumArrays>,
     accept: (index: number) => boolean,
   ): Promise<boolean> => {
     const it = stream[Symbol.asyncIterator]();
@@ -290,7 +290,9 @@ export async function prefetchSpectrumCache(
             if (res.done) { done = true; return; }
             const { index, mz, intensity } = res.value;
             if (accept(index)) {
-              cache.set(index, { mz, intensity, msLevel: msLevelOf(index) });
+              // The spectrum-display prefetch streams full f64 m/z (default, no mzFloat32) for
+              // display fidelity, so mz is a Float64Array here.
+              cache.set(index, { mz: mz as Float64Array, intensity, msLevel: msLevelOf(index) });
               cached++;
             }
             if (nowMs() - start > PREFETCH_SLICE_MS) return;

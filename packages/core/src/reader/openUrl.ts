@@ -98,8 +98,17 @@ export async function openBlob(blob: Blob): Promise<Reader> {
 /** One spectrum's plain point arrays, harvested from the bulk spectra_data stream. */
 export type StreamedSpectrumArrays = {
   index: number;
-  mz: Float64Array;
+  /** Float32Array when the caller requested `mzFloat32` (ion-image recompute — ~1e-4 Da is
+   *  ample), else Float64Array (spectrum display). */
+  mz: Float64Array | Float32Array;
   intensity: Float32Array;
+};
+
+/** Options shared by the bulk-stream functions. */
+export type StreamArraysOptions = {
+  /** Decode m/z as f32 (halves the m/z footprint, no f64→f32 downcast downstream). Use for the
+   *  ion-image path; leave false for the spectrum-display prefetch which keeps full f64. */
+  mzFloat32?: boolean;
 };
 
 /**
@@ -119,6 +128,7 @@ export type StreamedSpectrumArrays = {
  */
 export async function* streamSpectraDataArrays(
   reader: Reader,
+  opts?: StreamArraysOptions,
 ): AsyncGenerator<StreamedSpectrumArrays> {
   // An absent OR empty (0-row-group) spectra_data parquet makes mzpeakts throw
   // ("Empty Parquet file") — common for all-centroid LC/DDA files. Treat as no stream.
@@ -133,7 +143,7 @@ export async function* streamSpectraDataArrays(
     if (e instanceof Error && e.message === "Empty Parquet file") return;
     throw e;
   }
-  yield* streamArrays(dr);
+  yield* streamArrays(dr, opts);
 }
 
 /**
@@ -144,6 +154,7 @@ export async function* streamSpectraDataArrays(
  */
 export async function* streamSpectraPeaksArrays(
   reader: Reader,
+  opts?: StreamArraysOptions,
 ): AsyncGenerator<StreamedSpectrumArrays> {
   let dr: Awaited<ReturnType<Reader["spectrumPeaks"]>>;
   try {
@@ -154,7 +165,7 @@ export async function* streamSpectraPeaksArrays(
     if (e instanceof Error && e.message === "Empty Parquet file") return;
     throw e;
   }
-  yield* streamArrays(dr);
+  yield* streamArrays(dr, opts);
 }
 
 /** Shared core: stream a mzpeakts DataArraysReader (data OR peaks) once, yielding decoded
@@ -164,7 +175,8 @@ export async function* streamSpectraPeaksArrays(
  *  internally to the generic per-entry decode for chunk/numpress layouts. */
 function streamArrays(
   dataReader: Awaited<ReturnType<Reader["spectrumData"]>>,
+  opts?: StreamArraysOptions,
 ): AsyncGenerator<StreamedSpectrumArrays> {
   if (!dataReader) return (async function* () {})();
-  return dataReader.streamPointArrays();
+  return dataReader.streamPointArrays(opts?.mzFloat32 ?? false);
 }

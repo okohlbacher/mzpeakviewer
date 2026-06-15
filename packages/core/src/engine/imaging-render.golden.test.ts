@@ -89,9 +89,12 @@ describe("engine imaging RENDER round-trip against real imaging.mzpeak", () => {
     expect(firstSpec).toBe(firstSpectrumIndex);
     const lo = targetMz - TOL;
     const hi = targetMz + TOL;
+    // The ion-image pipeline now streams m/z as f32 (ample for window selection; halves the
+    // footprint), so the hand-sum selects its in-window points from the SAME f32 m/z.
+    const f32Mz = Float32Array.from(rawMz);
     let hand = 0;
-    for (let i = 0; i < rawMz.length; i++) {
-      const m = rawMz[i]!;
+    for (let i = 0; i < f32Mz.length; i++) {
+      const m = f32Mz[i]!;
       if (m < lo || m > hi) continue;
       const v = rawIn[i]!;
       if (Number.isFinite(v)) hand += v;
