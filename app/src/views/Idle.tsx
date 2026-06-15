@@ -135,20 +135,26 @@ export function Idle() {
   return (
     <div data-testid="idle-view" style={{ width: "100%", overflowY: "auto", display: "flex", justifyContent: "center" }}>
       <div style={{ maxWidth: 720, width: "100%", padding: "6vh 1.5rem 3rem", textAlign: "center" }}>
-        {/* OpenMS + mzPeak logos, matched height, each linking to its site. */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "1.25rem", margin: "0 auto 1.1rem" }}>
-          <a href="https://openms.org" target="_blank" rel="noopener noreferrer" aria-label="OpenMS — openms.org" data-testid="logo-openms" style={{ display: "inline-flex" }}>
-            <img src={`${BASE}openms-logo.png`} alt="OpenMS" style={{ height: 54, width: "auto", display: "block" }} />
+        {/* OpenMS + mzPeak logos: two equal-width columns (same horizontal extent),
+            each logo centered + scaled to a shared max width, split by a hairline rule.
+            The aspect ratios differ widely, so we match WIDTH (not height) and let each
+            sit vertically centered in its half. */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "1.5rem", maxWidth: 480, margin: "0 auto 1.25rem" }}>
+          <a href="https://openms.org" target="_blank" rel="noopener noreferrer" aria-label="OpenMS — openms.org" data-testid="logo-openms"
+            style={{ flex: 1, display: "flex", justifyContent: "center", minWidth: 0 }}>
+            <img src={`${BASE}openms-logo.png`} alt="OpenMS" style={{ width: "100%", maxWidth: 190, height: "auto", display: "block" }} />
           </a>
-          <a href="https://mzpeak.org" target="_blank" rel="noopener noreferrer" aria-label="mzPeak — mzpeak.org" data-testid="logo-mzpeak" style={{ display: "inline-flex" }}>
-            <img src={`${BASE}mzpeak-logo.png`} alt="mzPeak" style={{ height: 54, width: "auto", display: "block" }} />
+          <span aria-hidden style={{ width: 1, height: 48, flexShrink: 0, background: "var(--border-default, #e2e8f0)" }} />
+          <a href="https://mzpeak.org" target="_blank" rel="noopener noreferrer" aria-label="mzPeak — mzpeak.org" data-testid="logo-mzpeak"
+            style={{ flex: 1, display: "flex", justifyContent: "center", minWidth: 0 }}>
+            <img src={`${BASE}mzpeak-logo.png`} alt="mzPeak" style={{ width: "100%", maxWidth: 190, height: "auto", display: "block" }} />
           </a>
         </div>
         <h1 style={{ margin: "0 0 0.4rem", fontSize: "1.25rem", color: "var(--text-heading, #1e293b)", fontWeight: "var(--weight-semibold, 600)" }}>
           Explore a mass-spectrometry file
         </h1>
         <p style={{ margin: "0 0 1.5rem", color: "var(--text-muted, #64748b)", fontSize: "var(--text-body, 0.9rem)", lineHeight: 1.5 }}>
-          One viewer for the <strong>mzPeak</strong> mass-spectrometry format — imaging (MSI) and LC-MS alike. Pick an
+          An interactive viewer for the <strong>mzPeak</strong> mass-spectrometry format — imaging (MSI) and LC-MS alike. Pick an
           <em> m/z</em>, get an ion image, click a pixel, see its spectrum. Everything runs in your browser; nothing is uploaded.
         </p>
 
