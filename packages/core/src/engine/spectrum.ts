@@ -33,6 +33,9 @@ const REPR_CENTROID_ACC = "MS:1000127";
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 const nowMs = (): number => (typeof performance !== "undefined" ? performance.now() : Date.now());
 const PREFETCH_SLICE_MS = 30;
+/** Max time the prefetch defers to sustained user activity before forcing one slice
+ *  (bounds starvation under steady navigation). Mirrors imaging.ts. */
+const MAX_PREFETCH_STARVE_MS = 4000;
 
 // mzpeakts names the reconstructed data-array columns by their human-readable CV name.
 const MZ_KEY = "m/z array";
@@ -261,8 +264,10 @@ export async function prefetchSpectrumCache(
   };
 
   const waitWhileUserActive = async (): Promise<boolean> => {
+    const waitStart = nowMs();
     while (control.isUserActive()) {
       if (control.shouldStop()) return false;
+      if (nowMs() - waitStart > MAX_PREFETCH_STARVE_MS) break; // forced progress (see imaging.ts)
       await sleep(control.cooldownMs);
     }
     return !control.shouldStop();

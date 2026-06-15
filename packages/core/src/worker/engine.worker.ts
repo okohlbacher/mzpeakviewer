@@ -40,6 +40,13 @@ scope.addEventListener("message", (e: MessageEvent<WorkerRequest>) => {
   void ctx.mutex
     .runExclusive(() => dispatch(msg, ctx, respond))
     .then(() => {
+      // Re-stamp activity on COMPLETION (not just on receipt above): a long foreground read
+      // (e.g. a cold ion render) can run past the cooldown, and stamping only at receipt
+      // would let the prefetch resume and contend the reader while the user is still waiting
+      // on that very read. Re-stamping here keeps the cooldown measured from when it finished.
+      if (msg && USER_READ_TYPES.has(msg.type)) {
+        ctx.lastUserActivity = typeof performance !== "undefined" ? performance.now() : 0;
+      }
       // After a file opens, warm the right cache in the background (interruptible; yields to
       // user reads via the same mutex): imaging → the ion-image cache (emits ionIndexReady);
       // non-imaging (LC/DDA) → the MS0/1 spectrum LRU. Both no-op when not applicable.

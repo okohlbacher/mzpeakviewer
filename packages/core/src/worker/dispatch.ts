@@ -292,13 +292,15 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
       }
 
       case "meanSpectrum": {
-        const spectrum = await engineMeanSpectrum(requireActive(ctx).reader);
+        // Reuse the warm ion cache (decoded grid spectra) so the mean is instant instead
+        // of up to MAX_SAMPLES random-access getSpectrum reads.
+        const spectrum = await engineMeanSpectrum(requireActive(ctx).reader, ctx.ionCache);
         respond({ type: "meanSpectrumResult", requestId: req.requestId, spectrum }, buffersOf(spectrum.mz, spectrum.intensity));
         return;
       }
 
       case "roiSpectrum": {
-        const spectrum = await engineRoiSpectrum(requireActive(ctx).reader, req.spectrumIndices);
+        const spectrum = await engineRoiSpectrum(requireActive(ctx).reader, req.spectrumIndices, ctx.ionCache);
         respond({ type: "meanSpectrumResult", requestId: req.requestId, spectrum }, buffersOf(spectrum.mz, spectrum.intensity));
         return;
       }

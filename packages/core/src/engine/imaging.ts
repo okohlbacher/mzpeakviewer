@@ -31,6 +31,10 @@ const nowMs = (): number => (typeof performance !== "undefined" ? performance.no
  *  user read interleaves promptly (bounded soft-preempt). One in-memory slice; a single
  *  network row-group read inside it can run longer — same bound as one row-group fetch. */
 const PREFETCH_SLICE_MS = 30;
+/** Max time the background prefetch will defer to sustained user activity before forcing
+ *  ONE slice — bounds starvation under steady navigation (which keeps refreshing the
+ *  cooldown), so the warm cache still completes eventually. */
+const MAX_PREFETCH_STARVE_MS = 4000;
 
 /** Promoted per-spectrum MS-level column (mirrors open.ts buildTic / spectrum.ts). */
 const MS_LEVEL_COL = "MS_1000511_ms_level";
@@ -314,10 +318,14 @@ export async function prefetchIonCache(
   let bytes = 0;
   let done = 0;
 
-  // Pause loop: return false if we should stop while waiting.
+  // Pause loop: return false if we should stop while waiting. Bails after
+  // MAX_PREFETCH_STARVE_MS of continuous activity so a steadily-navigating user can't
+  // starve the warm-up forever (it then takes one slice, which still yields via the mutex).
   const waitWhileUserActive = async (): Promise<boolean> => {
+    const waitStart = nowMs();
     while (control.isUserActive()) {
       if (control.shouldStop()) return false;
+      if (nowMs() - waitStart > MAX_PREFETCH_STARVE_MS) break; // forced progress
       await sleep(control.cooldownMs);
     }
     return !control.shouldStop();
@@ -487,6 +495,7 @@ async function meanSpectrumOver(
   reader: Reader,
   indices: number[],
   id: string,
+  cache?: SpectraArrayCache | null,
 ): Promise<SpectrumArrays> {
   const acc: MeanAccumulator = {
     refMz: null,
@@ -494,8 +503,13 @@ async function meanSpectrumOver(
     countPerBin: null,
     contributed: 0,
   };
+  const cached = cache?.complete ? cache.byIndex : null;
   for (const idx of indices) {
-    const arrs = await readSpectrumArrays(reader, idx);
+    // Prefer the warm ion cache (same DATA-ARRAY source as readSpectrumArrays /
+    // harvestDataArraysOrNull, so identical bytes) — avoids a random-access getSpectrum
+    // per sample (each re-reads a whole row group: minutes over the CDN for data already
+    // in memory). Falls back to the per-spectrum read for any uncached index.
+    const arrs = cached?.get(idx) ?? (await readSpectrumArrays(reader, idx));
     if (!arrs) continue;
     accumulate(acc, arrs.mz, arrs.intensity);
   }
@@ -559,7 +573,10 @@ function uniformSubsample(sorted: number[], cap: number): number[] {
  * the population M (e.g. via a separate side channel) so the UI can show "mean of
  * N / M spectra" — SpectrumArrays itself stays a fixed wire type.
  */
-export async function engineMeanSpectrum(reader: Reader): Promise<SpectrumArrays> {
+export async function engineMeanSpectrum(
+  reader: Reader,
+  cache?: SpectraArrayCache | null,
+): Promise<SpectrumArrays> {
   const total = readerSpectrumCount(reader);
   if (total <= 0) {
     return {
@@ -573,7 +590,7 @@ export async function engineMeanSpectrum(reader: Reader): Promise<SpectrumArrays
   // Uniform subsample of [0, total) to at most MAX_SAMPLES indices (IV step subset).
   const all = Array.from({ length: total }, (_, i) => i);
   const indices = uniformSubsample(all, MAX_SAMPLES);
-  return meanSpectrumOver(reader, indices, "mean-sampled");
+  return meanSpectrumOver(reader, indices, "mean-sampled", cache);
 }
 
 /**
@@ -592,11 +609,13 @@ export async function engineMeanSpectrum(reader: Reader): Promise<SpectrumArrays
 export async function engineRoiSpectrum(
   reader: Reader,
   spectrumIndices: number[],
+  cache?: SpectraArrayCache | null,
 ): Promise<SpectrumArrays> {
   const sorted = Array.from(new Set(spectrumIndices))
     .filter((i) => Number.isInteger(i) && i >= 0)
     .sort((a, b) => a - b);
   // Uniform spread across the SORTED ROI when over the cap (not a head slice).
   const selected = uniformSubsample(sorted, MAX_ROI);
-  return meanSpectrumOver(reader, selected, "roi-mean");
+  // ROI pixels are grid spectra → almost always in the warm ion cache (instant mean).
+  return meanSpectrumOver(reader, selected, "roi-mean", cache);
 }
