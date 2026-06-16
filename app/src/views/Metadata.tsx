@@ -157,7 +157,10 @@ export function Metadata() {
       </div>
 
       {/* ── File metadata ─────────────────────────────────────────────────── */}
-      <Section title="File metadata">
+      <Section
+        title="File metadata"
+        subtitle="Experiment provenance parsed from the Parquet tables — instruments, software, source files, and run info. CV accession codes are resolved to human-readable labels."
+      >
         {fileMeta ? (
           <div style={{ maxWidth: 820 }}>
             <TreeView label="fileDescription" value={fileMeta.fileDescription} defaultOpen={2} {...treeProps} />
@@ -192,7 +195,7 @@ export function Metadata() {
           padding: pulse ? "0.5rem" : 0,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.5rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.25rem" }}>
           <h3 style={{ fontSize: "0.92rem", margin: 0 }}>Manifest</h3>
           <code style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>mzpeak_index.json</code>
           <Button
@@ -206,6 +209,10 @@ export function Metadata() {
             ⭳ Download
           </Button>
         </div>
+        <p style={{ margin: "0 0 0.5rem", color: "var(--text-muted)", fontSize: "var(--text-sm, 0.8rem)", maxWidth: 680 }}>
+          The mzPeak container's table of contents, stored verbatim as <code>mzpeak_index.json</code> inside the ZIP.
+          It has two top-level keys: <strong>files</strong> — the list of Parquet tables in this archive (not shown in File metadata above) — and <strong>metadata</strong> — a compact experiment summary that overlaps with File metadata but is the raw converter output, without CV resolution.
+        </p>
         {manifest.kind === "loading" && <p style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>Loading mzpeak_index.json…</p>}
         {manifest.kind === "error" && (
           <p data-testid="manifest-error" style={{ color: "var(--danger, #c00)", fontSize: "0.82rem" }}>
@@ -227,10 +234,11 @@ export function Metadata() {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
     <section>
-      <h3 style={{ fontSize: "0.92rem", margin: "0 0 0.5rem" }}>{title}</h3>
+      <h3 style={{ fontSize: "0.92rem", margin: "0 0 0.2rem" }}>{title}</h3>
+      {subtitle && <p style={{ margin: "0 0 0.5rem", color: "var(--text-muted)", fontSize: "var(--text-sm, 0.8rem)", maxWidth: 680 }}>{subtitle}</p>}
       {children}
     </section>
   );
