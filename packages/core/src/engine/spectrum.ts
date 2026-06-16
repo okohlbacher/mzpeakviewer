@@ -328,6 +328,7 @@ export async function readEngineSpectrumCached(
   reader: Reader,
   index: number,
   cache: SpectrumLruCache,
+  ionCache?: { lookup(index: number): { mz: Float32Array; intensity: Float32Array } | undefined },
 ): Promise<WireSpectrumArrays> {
   // Light metadata is always cheap (in-memory metadata table): id, representation, msLevel.
   let representation: SpectrumRepresentation = null;
@@ -345,6 +346,16 @@ export async function readEngineSpectrumCached(
   const hit = cache.get(index);
   if (hit) {
     return adaptSpectrum({ index, id, mz: hit.mz, intensity: hit.intensity, representation });
+  }
+
+  // Imaging fast path: the background ion prefetch has already DECODED every grid-pixel
+  // spectrum into the ion cache. Reuse it for a pixel-pick select instead of a cold
+  // random-access getSpectrum (which on large-row-group / no-page-index profile data costs
+  // ~seconds per pixel). The ion cache holds f32 m/z — adaptSpectrum widens to f64; for
+  // display that's lossless enough. Only when the cache is WARM and holds this index.
+  const ionHit = ionCache?.lookup(index);
+  if (ionHit) {
+    return adaptSpectrum({ index, id, mz: ionHit.mz, intensity: ionHit.intensity, representation });
   }
 
   const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;

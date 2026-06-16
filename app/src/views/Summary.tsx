@@ -42,7 +42,6 @@ export function Summary() {
   const caps = useStore((s) => s.capabilities);
   const fileName = useStore((s) => s.fileName);
   const fileSize = useStore((s) => s.fileSize);
-  const manifest = useStore((s) => s.manifest);
   const opticalImages = useStore((s) => s.opticalImages);
   const grid = useStore((s) => s.grid);
   const ticColumn = useStore((s) => s.ticColumn);
@@ -242,57 +241,8 @@ export function Summary() {
       {/* Study (SDRF/ISA) — dataset, isobaric channels, sample characteristics (MG-05) */}
       <StudyPanel channels={channels} study={study} samples={studySamples} sdrfMember={sdrfMember} />
 
-      {/* Manifest */}
-      {manifest && manifest.length > 0 && (
-        <Panel title="Archive members" defaultOpen={false} testid="summary-manifest-panel">
-          <div style={{ overflowX: "auto" }}>
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                fontSize: "var(--text-sm)",
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              <thead>
-                <tr>
-                  {["Path", "Role", "Size"].map((h) => (
-                    <th
-                      key={h}
-                      style={{
-                        textAlign: "left",
-                        padding: "0.25rem 0.5rem",
-                        borderBottom: "1px solid var(--border-default)",
-                        fontFamily: "var(--font-sans)",
-                        color: "var(--text-muted)",
-                        fontWeight: "var(--weight-medium)",
-                        fontSize: "var(--text-xs)",
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {manifest.map((entry, i) => (
-                  <tr key={`${i}:${entry.path}`}>
-                    <td style={{ padding: "0.2rem 0.5rem", color: "var(--text-heading)" }}>
-                      {entry.path}
-                    </td>
-                    <td style={{ padding: "0.2rem 0.5rem", color: "var(--text-muted)" }}>
-                      {entry.role ?? "—"}
-                    </td>
-                    <td style={{ padding: "0.2rem 0.5rem", color: "var(--text-secondary)" }}>
-                      {formatBytes(entry.bytes)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-      )}
+      {/* Archive members are covered by the Advanced ▸ Structure view (with per-member
+          download + deep parquet inspection), so they're intentionally not duplicated here. */}
     </div>
   );
 }

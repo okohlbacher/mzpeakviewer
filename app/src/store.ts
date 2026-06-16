@@ -282,10 +282,12 @@ async function finishOpen(
     if (seq === currentOpenSeq) set({ channels: s.channels, study: s.study ?? null, studySamples: s.samples ?? null, sdrfMember: s.sdrfMember ?? null });
   }).catch(() => {});
 
-  // Pre-select spectrum 0 when the file has spectra.
+  // Pre-load spectrum 0 when the file has spectra — but route=false so the view STAYS on
+  // the default Summary (a plain open shouldn't jump to the Spectra view). Deep links apply
+  // their own ?view=/?spectrum= afterwards via urlSync.applyViewState.
   if (opened.stats && opened.stats.numSpectra > 0) {
     if (seq !== currentOpenSeq) return;
-    await get().selectSpectrum(0);
+    await get().selectSpectrum(0, false);
   }
 }
 

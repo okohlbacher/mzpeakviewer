@@ -315,7 +315,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         // prefetch back-off must accommodate. Reads are mutex-serialized, so the timing
         // is non-reentrant and needs no locking.
         const t0 = nowMs();
-        const spectrum = await readEngineSpectrumCached(reader, req.index, ctx.spectrumCache);
+        const spectrum = await readEngineSpectrumCached(reader, req.index, ctx.spectrumCache, ctx.ionCache);
         recordReadLatency(ctx, nowMs() - t0);
         // Attach the full per-spectrum metadata tree for the Spectra "Spectrum metadata"
         // panel. Read fresh (in-memory, instant) regardless of array cache hit/miss, so a
