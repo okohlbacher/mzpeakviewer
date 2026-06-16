@@ -84,6 +84,16 @@ offline / for local files); how USI's nativeId/scan selectors line up with the a
 absolute-index selector (see the selector-narrowing note in `urlSync.ts`). Spec:
 PSI USI (`https://www.psidev.info/usi`, HUPO-PSI/usi). **Effort:** M.
 
+### MG-09 · About button with version / build info
+Add an "About" affordance (e.g. a button in the top bar or a footer item) surfacing the
+app **version** and **build** — at minimum the app version (Tauri `tauri.conf.json` /
+package version), ideally the git **commit SHA** + **build date**, and the platform (web
+vs desktop). Today nothing in the UI reports which build the user is running, which made
+the "stale `mzpeak.org/view`" confusion hard to diagnose — an About box would have shown
+the running version at a glance. Wire the version/SHA/date in at build time (Vite
+`define` / `import.meta.env` for the web build; Tauri exposes its own version for the
+desktop app). Small modal or popover; include a link to the repo / releases. **Effort:** S.
+
 ---
 
 ## Part B — Inherited from mzPeakIV (imaging features)
