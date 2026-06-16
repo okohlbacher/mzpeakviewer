@@ -117,8 +117,12 @@ export async function hydrateFromLocation(): Promise<void> {
  */
 export function currentShareUrl(): string {
   const s = useStore.getState();
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
+  // In the Tauri desktop app, window.location.origin is "tauri://localhost" which
+  // produces non-shareable links. Always resolve to the canonical web viewer instead.
+  const rawOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  const isTauri = rawOrigin.startsWith("tauri://");
+  const origin = isTauri ? "https://www.mzpeak.org" : rawOrigin;
+  const pathname = isTauri ? "/view/" : (typeof window !== "undefined" ? window.location.pathname : "/");
 
   // Map the app store's narrow selector ({by:"index"}) → grammar selector.
   // The store's only selection provenance is an absolute index; emit it as
