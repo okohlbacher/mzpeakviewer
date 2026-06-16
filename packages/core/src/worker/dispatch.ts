@@ -23,6 +23,7 @@ import { engineGetOpticalImage } from "../engine/optical";
 import { engineArchiveList, engineArchiveMemberBytes, engineParquetFooter, engineSampleColumn, clearStructureCache } from "../engine/structure";
 import { engineStudyMeta } from "../engine/studyMeta";
 import { UnsupportedEncodingError, CorruptFileError } from "../reader/errors";
+import { spectrumMetaTree } from "../reader/fileMeta";
 import { buffersOf, type Respond } from "./respond";
 
 /** Mutable per-session context the worker entry owns one of. */
@@ -316,7 +317,15 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         const t0 = nowMs();
         const spectrum = await readEngineSpectrumCached(reader, req.index, ctx.spectrumCache);
         recordReadLatency(ctx, nowMs() - t0);
-        respond({ type: "spectrumResult", spectrum, selectId: req.selectId }, buffersOf(spectrum.mz, spectrum.intensity));
+        // Attach the full per-spectrum metadata tree for the Spectra "Spectrum metadata"
+        // panel. Read fresh (in-memory, instant) regardless of array cache hit/miss, so a
+        // cached-array hit still carries metadata. Never fatal — a failure just omits it.
+        let meta: unknown;
+        try { meta = spectrumMetaTree(reader, req.index); } catch { meta = undefined; }
+        respond(
+          { type: "spectrumResult", spectrum: { ...spectrum, meta }, selectId: req.selectId },
+          buffersOf(spectrum.mz, spectrum.intensity),
+        );
         return;
       }
 

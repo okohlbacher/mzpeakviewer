@@ -77,6 +77,14 @@ export type SpectrumArrays = {
    * a wire spectrum is structurally assignable to ui-kit's plot input.
    */
   representation: SpectrumRepresentation;
+  /**
+   * Full per-spectrum metadata as a plain, structured-clone-safe tree (scan time,
+   * polarity, base peak, TIC, m/z range, precursor / selected-ion, promoted CV
+   * columns) for the "Spectrum metadata" panel in the Spectra view. Read fresh on
+   * each select (in-memory, cache-independent); omitted for derived spectra (e.g.
+   * mean / ROI) that have no single underlying metadata row. CV-resolved in the UI.
+   */
+  meta?: unknown;
 };
 
 /** Ion-image intensity stats sent with renderResult. */

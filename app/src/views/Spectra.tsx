@@ -1,7 +1,7 @@
 // Spectra view — browse list / index picker → selectSpectrum → SpectrumPlot.
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
-import { SpectrumPlot, Select, Button, spectrumReporters, type SelectOption, type ReporterMarker, type ReporterPeak } from "@mzpeak/ui-kit";
+import { SpectrumPlot, Select, Button, TreeView, spectrumReporters, type SelectOption, type ReporterMarker, type ReporterPeak } from "@mzpeak/ui-kit";
 
 // Categorical palette for isobaric channels — shared by the pills + the peak dots
 // so a channel reads as the same colour in both places.
@@ -426,6 +426,28 @@ export function Spectra() {
             : "profile (line)"}
           {" · scroll to zoom · double-click to reset"}
         </p>
+      )}
+
+      {/* Per-spectrum metadata tree (scan time, polarity, base peak, TIC, m/z range,
+          precursor / selected-ion, promoted CV columns). Restored from mzPeakExplorer's
+          collapsible "Spectrum metadata" panel (dropped in the engine harvest). The
+          CV-aware TreeView resolves accession-named keys to human labels. */}
+      {spectrum && spectrum.meta != null && (
+        <details data-testid="spectrum-metadata-panel" style={{ marginTop: "0.1rem" }}>
+          <summary
+            style={{
+              cursor: "pointer",
+              fontSize: "var(--text-sm)",
+              color: "var(--text-muted)",
+              userSelect: "none",
+            }}
+          >
+            Spectrum metadata
+          </summary>
+          <div style={{ marginTop: "0.5rem", maxWidth: 820 }}>
+            <TreeView label="spectrum" value={spectrum.meta} defaultOpen={2} />
+          </div>
+        </details>
       )}
     </div>
   );

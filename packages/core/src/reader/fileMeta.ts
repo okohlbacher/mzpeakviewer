@@ -102,3 +102,35 @@ export function spectrumMeta(reader: Reader, index: number): SpectrumMeta {
   };
 }
 
+/**
+ * Full per-spectrum metadata as a plain, structured-clone-safe tree for the
+ * "Spectrum metadata" panel in the Spectra view. Restores mzPeakExplorer's
+ * `getSpectrumMetadata`, which was trimmed during the engine harvest (see the note
+ * in reader/explorer/browse.ts). Reads the in-memory record fresh on each select —
+ * instant, independent of the spectrum array cache. CV-resolution is the UI's job
+ * (the TreeView), so we hand over the raw promoted columns under `promotedColumns`.
+ */
+export function spectrumMetaTree(reader: Reader, index: number): unknown {
+  const sm = reader.spectrumMetadata;
+  if (!sm) return null;
+  const rec = sm.get(index) as unknown as {
+    id?: unknown; msLevel?: unknown; time?: unknown;
+    parameters?: unknown; params?: unknown; scans?: unknown;
+    precursors?: unknown; meta?: unknown; isProfile?: boolean;
+  };
+  const rawMeta = (rec.meta ?? {}) as Record<string, unknown>;
+  const reprRaw = rawMeta[REPR_ACCESSION] ?? (rec.isProfile ? REPR_PROFILE : undefined);
+  const msLevelRaw = rawMeta[MS_LEVEL_ACCESSION];
+  return plainify({
+    index,
+    id: rec.id,
+    msLevel: typeof msLevelRaw === "number" ? msLevelRaw : (rec.msLevel ?? null),
+    representation: toRepresentation(reprRaw),
+    time: rec.time,
+    parameters: rec.parameters ?? rec.params,
+    scans: rec.scans,
+    precursors: rec.precursors,
+    promotedColumns: rec.meta,
+  });
+}
+
