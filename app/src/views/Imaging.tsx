@@ -112,7 +112,8 @@ export function Imaging({ mode }: { mode: ImagingMode }) {
       tic={tic}
       opticalImages={opticalImages}
       // route=false: fill the in-place spectrum dock without leaving the imaging view.
-      onPickSpectrum={(idx) => void selectSpectrum(idx, false)}
+      // Pass the pixel coords so the pick round-trips as `px=x,y` in the share URL (MG-01).
+      onPickSpectrum={(idx, pixel) => void selectSpectrum(idx, false, pixel)}
     />
   );
 }
@@ -128,7 +129,7 @@ function ImagingInner({
   grid: ImagingGridWire;
   tic: Float32Array | null;
   opticalImages: OpticalImageMeta[];
-  onPickSpectrum: (spectrumIndex: number) => void;
+  onPickSpectrum: (spectrumIndex: number, pixel: { x: number; y: number }) => void;
 }) {
   const { width, height, originX, originY, presenceMask } = grid;
   const coordMap = useMemo(() => rebuildCoordMap(grid), [grid]);
@@ -136,6 +137,7 @@ function ImagingInner({
   // Selected spectrum (filled in-place by pixel-pick; shared with the Spectra view).
   const spectrum = useStore((s) => s.spectrum);
   const spectrumLoading = useStore((s) => s.spectrumLoading);
+  const selector = useStore((s) => s.selector);
   // The pixel whose spectrum is in the dock (absolute 1-based IMS coords + index).
   const [picked, setPicked] = useState<{ x: number; y: number; index: number } | null>(null);
   const [dockOpen, setDockOpen] = useState(true);
@@ -457,9 +459,18 @@ function ImagingInner({
     if (idx != null) {
       setPicked({ x: x0 + originX, y: y0 + originY, index: idx });
       setDockOpen(true);
-      onPickSpectrum(idx); // fills store.spectrum in-place (route=false)
+      onPickSpectrum(idx, { x: x0 + originX, y: y0 + originY }); // store.spectrum in-place (route=false) + px provenance
     }
   }
+
+  // Reflect a `?px=x,y` deep link (store selector by:"pixel", set by urlSync → selectPixel)
+  // into the dock, so a shared pixel link opens the spectrum the same as a manual pick.
+  useEffect(() => {
+    if (selector?.by !== "pixel") return;
+    if (picked && picked.index === selector.index && picked.x === selector.x && picked.y === selector.y) return;
+    setPicked({ x: selector.x, y: selector.y, index: selector.index });
+    setDockOpen(true);
+  }, [selector, picked]);
 
   function onClick(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!pickable) return;

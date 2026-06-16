@@ -15,6 +15,7 @@ import type {
   ChannelAssignment,
 } from "@mzpeak/contracts";
 import { showChromatograms } from "@mzpeak/contracts";
+import { rebuildCoordMap } from "@mzpeak/core";
 import type { View } from "@mzpeak/contracts";
 import type { SpectrumArrays } from "@mzpeak/ui-kit";
 import { engine } from "./engine";
@@ -85,8 +86,13 @@ export interface AppState {
   view: View;
 
   // spectrum selection
-  /** How the active spectrum was chosen */
-  selector: { by: "index"; index: number } | null;
+  /** How the active spectrum was chosen. `pixel` carries the imaging (x,y) provenance
+   *  (ABSOLUTE IMS coords) so a pixel-pick round-trips as `px=x,y` in the share URL
+   *  instead of losing the coordinate to a bare `spectrum=index` (MG-01). */
+  selector:
+    | { by: "index"; index: number }
+    | { by: "pixel"; x: number; y: number; index: number }
+    | null;
   /** Spectra-view MS-level filter (null = all). Only levels present in the file. */
   msLevelFilter: number | null;
   /** Transient: Structure → "view index.json" jump asks the Metadata view to scroll
@@ -135,7 +141,12 @@ export interface AppState {
   /** Load a spectrum by index. `route` (default true) switches to the Spectra view
    *  on success; pass false to load the spectrum without leaving the current view
    *  (used by the imaging spectrum dock for in-place pixel-pick). */
-  selectSpectrum: (index: number, route?: boolean) => Promise<void>;
+  selectSpectrum: (index: number, route?: boolean, pixel?: { x: number; y: number }) => Promise<void>;
+  /** Select the spectrum at imaging pixel (x,y) (ABSOLUTE IMS coords). Resolves the
+   *  pixel → spectrum index via the loaded grid, records `px` provenance, and loads
+   *  in-place (route=false). Used by an imaging pick and by a `?px=` deep link. No-op
+   *  if there's no grid or the pixel has no spectrum. (MG-01) */
+  selectPixel: (x: number, y: number, route?: boolean) => Promise<void>;
   loadChrom: (req: { mode: "tic" }) => Promise<void>;
   dismissNotice: (id: string) => void;
   toggleAccordion: (key: "advanced" | "imaging") => void;
@@ -451,9 +462,14 @@ export const useStore = create<AppState>((set, get) => ({
   // Stale-async guard: capture openSeq at call time; drop the result if a
   // newer openFile was issued while this request was in-flight.
   // -------------------------------------------------------------------------
-  selectSpectrum: async (index: number, route = true) => {
+  selectSpectrum: async (index: number, route = true, pixel?: { x: number; y: number }) => {
     const seq = currentOpenSeq;
-    set({ spectrumLoading: true, selector: { by: "index", index } });
+    // Pixel provenance (when picked on the imaging grid) makes the selection round-trip
+    // as `px=x,y`; otherwise it's a plain `spectrum=index`.
+    const selector = pixel
+      ? ({ by: "pixel", x: pixel.x, y: pixel.y, index } as const)
+      : ({ by: "index", index } as const);
+    set({ spectrumLoading: true, selector });
     try {
       const spectrum = await engine.selectSpectrum(index);
       // Drop if a newer file was opened while we waited.
@@ -482,6 +498,18 @@ export const useStore = create<AppState>((set, get) => ({
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  },
+
+  selectPixel: async (x: number, y: number, route = false) => {
+    const grid = get().grid;
+    if (!grid) return;
+    // x,y are ABSOLUTE IMS coords; the coord map is keyed by LOCAL cell (y*width+x).
+    const lx = x - grid.originX;
+    const ly = y - grid.originY;
+    if (lx < 0 || lx >= grid.width || ly < 0 || ly >= grid.height) return;
+    const idx = rebuildCoordMap(grid).get(ly * grid.width + lx);
+    if (idx == null) return; // no spectrum at this pixel
+    await get().selectSpectrum(idx, route, { x, y });
   },
 
   // -------------------------------------------------------------------------

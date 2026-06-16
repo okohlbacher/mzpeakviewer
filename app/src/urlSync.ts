@@ -89,8 +89,11 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
           await st.selectSpectrum(sel.scan).catch(() => {});
         }
       }
+    } else if (sel.by === "pixel" && Number.isInteger(sel.x) && Number.isInteger(sel.y)) {
+      // Imaging pixel deep link (MG-01): resolve (x,y) → spectrum via the loaded grid.
+      // route=false keeps the imaging view (already set above) and fills the dock.
+      await st.selectPixel(sel.x, sel.y, false).catch(() => {});
     }
-    // by:"pixel" → no index-only action available; view was already set.
   }
 
   // 3. Chromatogram (only the TIC path is wired in the app store today).
@@ -160,11 +163,12 @@ export function currentShareUrl(): string {
   const origin = isTauri ? "https://www.mzpeak.org" : rawOrigin;
   const pathname = isTauri ? "/view/" : (typeof window !== "undefined" ? window.location.pathname : "/");
 
-  // Map the app store's narrow selector ({by:"index"}) → grammar selector.
-  // The store's only selection provenance is an absolute index; emit it as
-  // `spectrum=index` (the grammar's index-based form) for a stable round-trip.
+  // Map the app store's selector → grammar selector. A pixel pick emits `px=x,y`
+  // (MG-01, imaging provenance preserved); any other selection emits `spectrum=index`.
   let selector: SpectrumSelector = null;
-  if (s.selector && Number.isInteger(s.selector.index) && s.selector.index >= 0) {
+  if (s.selector?.by === "pixel" && Number.isInteger(s.selector.x) && Number.isInteger(s.selector.y)) {
+    selector = { by: "pixel", x: s.selector.x, y: s.selector.y, index: s.selector.index, id: null };
+  } else if (s.selector && Number.isInteger(s.selector.index) && s.selector.index >= 0) {
     selector = { by: "spectrum", index: s.selector.index, id: null };
   }
 
