@@ -46,6 +46,16 @@ investigate the read-only minimal parquet-wasm build (~456 KB brotli vs ~6.5 MB)
 a large bundle-size win. Carried from mzPeakIV "Stack Patterns". **Effort:** M; risk:
 needs codec audit against real files.
 
+### MG-07 · Surface spectrum representation (profile / centroid) more prominently
+Spectra view already prints the representation in the header line
+(`… · centroid · 2213 pts`); promote it to a clearer "spectrum type: profile/centroid"
+label so it reads as a first-class property, not a trailing token. In the Summary /
+dashboard overview, add the representation **mode per MS level** (e.g. MS1 profile, MS2
+centroid) — today the overview shows spectra-per-level counts but not each level's mode.
+Source: `Spectra.tsx` (header meta), `Summary.tsx` (capabilities/MS-levels panel);
+per-level mode comes from the `MS:1000525` representation column already read for the
+browse index. **Effort:** S.
+
 ---
 
 ## Part B — Inherited from mzPeakIV (imaging features)
