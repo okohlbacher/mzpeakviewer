@@ -98,6 +98,84 @@ function MemberIcon({ category }: { category: MemberCategory }) {
   }
 }
 
+// ── Per-member raw download ──────────────────────────────────────────────────────
+// Each archive member downloads AS-IS: the parquet tables are already in the best
+// portable serialization (Apache Parquet — opens directly in pandas / pyarrow / DuckDB /
+// Polars / Arrow), so we save the raw `.parquet` bytes rather than a lossy CSV. The
+// manifest saves as JSON, the SDRF as TSV, images as-is — all just raw member bytes.
+
+// Browsers can't reliably hold an ArrayBuffer past ~2 GiB; members over this can't be
+// downloaded in-browser (the worker would have to materialize the whole thing).
+const DOWNLOAD_HARD_MAX = 2 * 1024 * 1024 * 1024;
+// Above this we confirm first — the full member is read into memory + transferred.
+const DOWNLOAD_CONFIRM_BYTES = 256 * 1024 * 1024;
+
+function mimeForMember(path: string): string {
+  switch (path.split(".").pop()?.toLowerCase()) {
+    case "parquet": return "application/vnd.apache.parquet";
+    case "json": return "application/json";
+    case "tsv": return "text/tab-separated-values";
+    case "csv": return "text/csv";
+    case "png": return "image/png";
+    case "jpg":
+    case "jpeg": return "image/jpeg";
+    case "tif":
+    case "tiff": return "image/tiff";
+    default: return "application/octet-stream";
+  }
+}
+
+/** Download a single archive member's raw bytes (the parquet tables stay parquet). */
+function MemberDownload({ path, bytes }: { path: string; bytes: number | null | undefined }) {
+  const [busy, setBusy] = useState(false);
+  const name = path.split("/").pop() ?? path;
+  const tooBig = typeof bytes === "number" && bytes > DOWNLOAD_HARD_MAX;
+
+  async function download() {
+    if (busy || tooBig) return;
+    if (
+      typeof bytes === "number" && bytes > DOWNLOAD_CONFIRM_BYTES &&
+      !window.confirm(`${name} is ${formatBytes(bytes)} — it will be read fully into memory. Download?`)
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await engine.archiveMemberBytes(path, DOWNLOAD_HARD_MAX);
+      if (res.truncated) {
+        window.alert(`${name} is larger than the in-browser download limit (${formatBytes(DOWNLOAD_HARD_MAX)}); not downloaded (a truncated parquet would be unreadable).`);
+        return;
+      }
+      const url = URL.createObjectURL(new Blob([res.bytes], { type: mimeForMember(path) }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      window.alert(`Couldn't download ${name}: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      disabled={busy || tooBig}
+      title={tooBig ? `Too large to download in-browser (${formatBytes(bytes)})` : `Download ${name}`}
+      aria-label={`Download ${name}`}
+      data-testid={`structure-download-${path}`}
+      onClick={() => void download()}
+    >
+      {busy ? "…" : "⭳"}
+    </Button>
+  );
+}
+
 export function Structure() {
   const phase = useStore((s) => s.phase);
   const setMetadataReveal = useStore((s) => s.setMetadataReveal);
@@ -148,7 +226,7 @@ export function Structure() {
               const manifest = category === "manifest";
               const clickable = m.isParquet || manifest;
               return (
-                <li key={m.path}>
+                <li key={m.path} style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
                   <button
                     onClick={() => (manifest ? setMetadataReveal("manifest") : void pick(m))}
                     disabled={!clickable}
@@ -157,7 +235,7 @@ export function Structure() {
                     data-category={category}
                     data-parquet={m.isParquet ? "true" : undefined}
                     style={{
-                      display: "flex", width: "100%", justifyContent: "space-between", gap: "0.75rem", alignItems: "center",
+                      display: "flex", flex: 1, minWidth: 0, justifyContent: "space-between", gap: "0.75rem", alignItems: "center",
                       padding: "0.25rem 0.4rem", border: "none", borderRadius: "var(--radius-sm, 4px)",
                       background: selected === m.path ? "var(--surface-panel, #f1f5f9)" : manifest ? "var(--accent-subtle, #f2f4fe)" : "transparent",
                       color: clickable ? "var(--text-link, #2563eb)" : "var(--text-body, #353c43)",
@@ -178,6 +256,7 @@ export function Structure() {
                       {formatBytes(m.bytes)}
                     </span>
                   </button>
+                  <MemberDownload path={m.path} bytes={m.bytes} />
                 </li>
               );
             })}
