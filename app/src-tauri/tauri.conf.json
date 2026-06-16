@@ -36,6 +36,13 @@
   "bundle": {
     "active": true,
     "targets": ["nsis", "msi", "app", "dmg", "appimage", "deb", "rpm"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "category": "Productivity",
     "shortDescription": "Viewer for mzPeak mass spectrometry files",
     "longDescription": "mzPeakViewer is a client-side viewer for mzPeak mass spectrometry files, including imaging (MSI) datasets.",

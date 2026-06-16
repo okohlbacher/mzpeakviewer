@@ -49,14 +49,19 @@ npm run build -w @mzpeak/contracts
 echo "==> [5/7] rm -rf app/dist"
 rm -rf app/dist
 
-# 6. app ONLY, desktop base "/" (NOT the root `npm run build` — avoids re-running contracts)
-echo "==> [6/7] VITE_BASE=/ build @mzpeak/app"
-VITE_BASE=/ npm --workspace @mzpeak/app run build
+# 6. app ONLY, desktop base "/" (NOT the root `npm run build` — avoids re-running contracts).
+# vite.config defaults base to "/" when VITE_BASE is unset, so we UNSET rather than pass a
+# literal "/": on Windows git-bash, MSYS path-conversion rewrites a bare `VITE_BASE=/` to the
+# Git install dir (e.g. C:/Program Files/Git), which produced a non-root asset base and tripped
+# the guard below. Unsetting also clears any inherited deploy base (e.g. /mzpeakviewer/).
+echo "==> [6/7] build @mzpeak/app (base defaults to / when VITE_BASE is unset)"
+unset VITE_BASE
+npm --workspace @mzpeak/app run build
 
 # 7. guard: the bundled app MUST use the root asset base, or assets 404 under tauri://
 echo "==> [7/7] guard: assert app/dist/index.html uses /assets/ base"
 grep -q 'src="/assets/' app/dist/index.html || {
-  echo 'ERROR: app/dist not built with VITE_BASE=/ (found non-root asset base)'
+  echo 'ERROR: app/dist not built with a root "/" asset base (assets would 404 under tauri://)'
   exit 1
 }
 

@@ -126,24 +126,39 @@ jobs:
         run: npm run typecheck
 
       # ---- Signing gate (macOS) -------------------------------------------------------
-      # Graceful unsigned fallback. We compute booleans so that a PARTIAL secret set never
-      # hard-fails: notarization env is exported ONLY when the full Apple triplet is present.
-      - name: Compute macOS signing flags
+      # Graceful unsigned fallback. CRITICAL: tauri-bundler reads `std::env::var("APPLE_CERTIFICATE")`,
+      # which returns Ok("") for a PRESENT-BUT-EMPTY var — so passing an empty APPLE_CERTIFICATE in the
+      # build step's env triggers `security import` of an empty cert and FAILS the unsigned build.
+      # Fix: export the signing vars to $GITHUB_ENV ONLY when present, so they are truly ABSENT
+      # (not empty) when unset. The build step must NOT redeclare them in its own `env:`.
+      - name: Compute macOS signing env
         if: matrix.platform == 'macos-latest'
         id: macsign
         shell: bash
         env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          CERT_PW: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          KC_PW: ${{ secrets.KEYCHAIN_PASSWORD }}
+          A_ID: ${{ secrets.APPLE_ID }}
+          A_PW: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          A_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          if [ -n "$APPLE_CERTIFICATE" ]; then
+          if [ -n "$CERT" ]; then
+            # Multiline-safe heredoc form (base64 .p12 wraps at 76 cols).
+            { echo "APPLE_CERTIFICATE<<__C__"; echo "$CERT"; echo "__C__"; } >> "$GITHUB_ENV"
+            echo "APPLE_CERTIFICATE_PASSWORD=$CERT_PW" >> "$GITHUB_ENV"
+            echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+            [ -n "$KC_PW" ] && echo "KEYCHAIN_PASSWORD=$KC_PW" >> "$GITHUB_ENV"
             echo "sign=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::macOS signing ENABLED (Developer ID cert present)"
           else
             echo "sign=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::macOS signing DISABLED — producing an UNSIGNED bundle (set APPLE_* secrets to sign+notarize)"
           fi
-          if [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+          if [ -n "$A_ID" ] && [ -n "$A_PW" ] && [ -n "$A_TEAM" ]; then
+            # Tauri reads APPLE_PASSWORD (the app-specific password) for notarytool.
+            { echo "APPLE_ID=$A_ID"; echo "APPLE_PASSWORD=$A_PW"; echo "APPLE_TEAM_ID=$A_TEAM"; } >> "$GITHUB_ENV"
             echo "notarize=true" >> "$GITHUB_OUTPUT"
           else
             echo "notarize=false" >> "$GITHUB_OUTPUT"
@@ -153,36 +168,17 @@ jobs:
       # tauri-action runs `tauri build ${{ matrix.args }}`, which fires the beforeBuildCommand
       # (build-frontend.sh). On a v* tag it ALSO creates a DRAFT GitHub Release.
       #
-      # Signing env is wired unconditionally but is INERT when the secrets are empty:
-      #   - APPLE_CERTIFICATE empty  => macOS bundle is produced unsigned (no failure).
-      #   - APPLE_PASSWORD/ID/TEAM exported ONLY when the triplet is complete (gated above),
-      #     so notarytool never sees a partial set.
-      #   - Windows: AZURE_* wired as env only; signCommand is intentionally omitted in
-      #     tauri.conf.json for v1, so Windows ships UNSIGNED even when AZURE_* are set.
-      #   - TAURI_SIGNING_PRIVATE_KEY: updater is out of scope v1 (no-op when unset).
+      # macOS signing/notarization env is injected via $GITHUB_ENV by the gate step above —
+      # and ONLY when the secrets are present, so an unsigned build has NO APPLE_* vars set
+      # (an empty APPLE_CERTIFICATE would otherwise make tauri-bundler attempt `security import`
+      # and fail). Do NOT redeclare APPLE_* here. Windows stays unsigned in v1 (no signCommand
+      # in tauri.conf.json), so AZURE_* are intentionally omitted until a Windows cert lands.
       - name: Build the desktop app (tauri-action)
         id: tauri
         uses: tauri-apps/tauri-action@51a9f1156b33df106d827c3a78f8f894946c5faa # v0.5.25
         env:
           # Draft release creation (v* tags only).
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS signing (inert when empty).
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-          # macOS notarization — exported ONLY when the full triplet is present.
-          # NOTE: Tauri reads APPLE_PASSWORD (not APPLE_APP_SPECIFIC_PASSWORD).
-          APPLE_ID: ${{ steps.macsign.outputs.notarize == 'true' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ steps.macsign.outputs.notarize == 'true' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ steps.macsign.outputs.notarize == 'true' && secrets.APPLE_TEAM_ID || '' }}
-          # Windows Azure Trusted Signing — wired as env only; inert in v1 (no signCommand).
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          # Tauri updater signing — out of scope v1; no-op when unset.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           # Frontend build is owned by beforeBuildCommand; don't let tauri-action build it.
           projectPath: app/src-tauri
