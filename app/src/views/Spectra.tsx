@@ -12,6 +12,16 @@ const CHANNEL_PALETTE = [
 ];
 const channelColor = (i: number) => CHANNEL_PALETTE[i % CHANNEL_PALETTE.length]!;
 
+// The native scan number a mass-spectrometrist reads off the spectrum id (e.g.
+// "scan=1800") — typically 1-based and NOT equal to the 0-based absolute index
+// (commonly scan = index + 1). Parse it so the picker can navigate by the number
+// the user actually sees, instead of the internal index (which felt "off by one").
+function scanNumberOf(id: string | undefined | null): number | null {
+  if (!id) return null;
+  const m = /(?:^|\s)scan=(\d+)/i.exec(id) ?? /(\d+)\s*$/.exec(id);
+  return m ? Number(m[1]) : null;
+}
+
 export function Spectra() {
   const phase = useStore((s) => s.phase);
   const stats = useStore((s) => s.stats);
@@ -63,6 +73,17 @@ export function Spectra() {
   const filteredIndices = !filtered
     ? allIndices
     : allIndices.filter((i) => browse!.msLevel[i] === msLevelFilter);
+
+  // Native scan-number navigation. When the file's spectrum ids carry scan numbers,
+  // the index input navigates by SCAN NUMBER — the value shown in the header and the
+  // one users think in — not the 0-based absolute index. (Scan is usually 1-based:
+  // for this file scan = index + 1, which is exactly why typing the index read as
+  // "off by one".) Resolution stays within the active (filtered) set.
+  const scanOf = (i: number): number | null => scanNumberOf(browse?.id[i]);
+  const firstScan = filteredIndices.length ? scanOf(filteredIndices[0]!) : null;
+  const lastScan = filteredIndices.length ? scanOf(filteredIndices[filteredIndices.length - 1]!) : null;
+  const hasScans = firstScan != null && lastScan != null;
+  const currentScan = scanOf(currentIndex);
 
   const levelOf = (i: number): number | null => (browse ? browse.msLevel[i] ?? null : null);
   const curLevel = levelOf(currentIndex);
@@ -151,16 +172,21 @@ export function Spectra() {
   const nextIdx =
     filterPos >= 0 && filterPos < filteredIndices.length - 1 ? filteredIndices[filterPos + 1]! : null;
 
-  // Large-file index input. When filtered, the input is a 1-based within-level index
-  // mapped to the absolute index; with "All" it is the absolute index.
+  // Large-file index input. Priority: navigate by NATIVE SCAN NUMBER when ids carry
+  // one (resolve the typed scan → absolute index within the active set). Otherwise
+  // fall back: filtered → 1-based within-level index; "All" → 0-based absolute index.
   function commitInput() {
     const v = Number(inputVal.trim());
     if (Number.isFinite(v)) {
-      if (filtered) {
-        const abs = filteredIndices[Math.floor(v) - 1];
+      const n = Math.floor(v);
+      if (hasScans) {
+        const abs = filteredIndices.find((i) => scanOf(i) === n);
         if (abs != null) void selectSpectrum(abs);
-      } else if (v >= 0 && v < numSpectra) {
-        void selectSpectrum(Math.floor(v));
+      } else if (filtered) {
+        const abs = filteredIndices[n - 1];
+        if (abs != null) void selectSpectrum(abs);
+      } else if (n >= 0 && n < numSpectra) {
+        void selectSpectrum(n);
       }
     }
     setInputVal("");
@@ -210,18 +236,20 @@ export function Spectra() {
                 whiteSpace: "nowrap",
               }}
             >
-              {filtered
-                ? `MS${msLevelFilter} index (1–${filteredIndices.length}):`
-                : `Spectrum index (0–${numSpectra - 1}):`}
+              {hasScans
+                ? `Scan number (${firstScan}–${lastScan}):`
+                : filtered
+                  ? `MS${msLevelFilter} index (1–${filteredIndices.length}):`
+                  : `Spectrum index (0–${numSpectra - 1}):`}
             </label>
             <input
               id="spectrum-index-input"
               data-testid="spectrum-index-input"
               type="number"
-              min={0}
-              max={numSpectra - 1}
+              min={hasScans ? firstScan! : 0}
+              max={hasScans ? lastScan! : numSpectra - 1}
               value={inputVal}
-              placeholder={String(currentIndex)}
+              placeholder={hasScans ? (currentScan != null ? String(currentScan) : "") : String(currentIndex)}
               onChange={(e) => setInputVal(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitInput();
