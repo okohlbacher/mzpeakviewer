@@ -25,8 +25,10 @@ import matplotlib.pyplot as plt
 BENCH = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser(
     "~/Claude/mzPeakViewer/design-reviews/mzpeakviewer-2026-06-12/bench/size-bench")
 PERFILE = os.path.join(BENCH, "open-bench-perfile.csv")
-# CDN TTFB probes live one level up (size-independent, shared across bench runs).
-PROBE_DIR = os.path.dirname(BENCH.rstrip("/"))
+# CDN TTFB probes: prefer ones co-located WITH this run (a fresh per-set vantage probe),
+# else fall back to the shared 375-file probes one level up.
+PROBE_DIR = BENCH if os.path.exists(os.path.join(BENCH, "cdn-probe-mac.csv")) \
+    else os.path.dirname(BENCH.rstrip("/"))
 
 
 def warm_ttfb_median(path):
@@ -117,10 +119,11 @@ def main():
     fig.savefig(os.path.join(BENCH, "size-dependence.svg"))
 
     span = f"{rem_x.min():.0f}–{rem_x.max():.0f} MB" if len(rem_x) else "n/a"
+    probe_src = "co-located per-set VM probe" if PROBE_DIR == BENCH else "shared 375-file probe"
     lines = ["# Access time vs file size — three categories (size-dependence set, warm)", "",
-             f"Even-sampled set ({span}). Local filesystem n={len(loc_x)} (whole-file read), "
-             f"Remote S3 n={len(rem_x)} (range reads). "
-             f"Local S3 estimated = Remote S3 × {ratio:.2f} (infra/client TTFB ratio)."]
+             f"Even-sampled set ({span}). Local filesystem n={len(loc_x)} (local disk, lazy range reads), "
+             f"Remote S3 n={len(rem_x)} (HTTP range reads). "
+             f"Local S3 estimated = Remote S3 × {ratio:.2f} (infra/client TTFB ratio, {probe_src})."]
     if n_local_fail:
         lines.append("")
         lines.append(f"> {n_local_fail} file(s) had no local data point: the whole-file local "
@@ -129,8 +132,9 @@ def main():
     lines += ["", "| Category | trend slope | median |", "|---|---|---|"]
     for name, b, med in summ:
         lines.append(f"| {name} | {b:+.2f} ms/MB | {med:.0f} ms |")
-    lines += ["", "Plot: `size-dependence.png`. Whole-file local grows with size; "
-              "range-read S3 stays ~flat (slope ≈ 0)."]
+    lines += ["", "Plot: `size-dependence.png`. Slopes are the linear fit (ms/MB); remote S3 "
+              "carries a network-latency floor (higher intercept), while local/infra reads sit "
+              "near disk speed. Large-file S3 points are network-noise-sensitive."]
     with open(os.path.join(BENCH, "SIZE-DEPENDENCE.md"), "w") as fh:
         fh.write("\n".join(lines))
     print(f"[size] ratio={ratio:.3f}  local_n={len(loc_x)} remote_n={len(rem_x)} "
