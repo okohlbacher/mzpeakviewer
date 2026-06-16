@@ -1,0 +1,19 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eaf0ff"/>
+    </linearGradient>
+  </defs>
+  <!-- rounded tile (Apple squircle-ish) -->
+  <rect x="40" y="40" width="944" height="944" rx="208" ry="208" fill="url(#bg)" stroke="#d7e0f7" stroke-width="6"/>
+  <!-- mzPeak mark: three blue peaks with dark outline, drawn back-to-front -->
+  <g transform="translate(-34 8)" stroke="#14182e" stroke-width="14" stroke-linejoin="round" fill="#3b54da">
+    <!-- thin far-left peak -->
+    <path d="M243 760 L330 360 L417 760 Z"/>
+    <!-- medium peak -->
+    <path d="M360 760 L500 300 L640 760 Z"/>
+    <!-- main peak with notched (double) summit -->
+    <path d="M470 760 L612 250 L660 360 L708 250 L850 760 Z"/>
+  </g>
+</svg>
