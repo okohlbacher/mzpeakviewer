@@ -17,13 +17,16 @@ import {
   parseSearch,
   resolve,
   buildShareUrl,
+  buildUsi,
+  USI_LOCAL_COLLECTION,
   type FileMode,
   type ViewState,
   type SpectrumSelector,
+  type UsiIndexFlag,
   DEFAULT_VIEW_STATE,
 } from "@mzpeak/contracts";
 import { useStore } from "./store";
-import { idsCarryScans, resolveScanToIndex } from "./scan";
+import { idsCarryScans, resolveScanToIndex, scanNumberOf } from "./scan";
 
 // ---------------------------------------------------------------------------
 /** True in the Tauri desktop app (window.location.origin is "tauri://localhost").
@@ -188,4 +191,43 @@ export function currentShareUrl(): string {
 
   const mode = modeFromCapabilities();
   return buildShareUrl(v, mode, origin, pathname);
+}
+
+/** ProteomeXchange / MassIVE dataset accession in a source URL path (e.g. PXD011799,
+ *  MSV000012345) — the USI `collection`. Null when the URL carries no recognizable one. */
+function collectionFromUrl(url: string): string | null {
+  const m = /\b(PXD\d{6,}|MSV\d{9,}|RPXD\d{6,})\b/i.exec(url);
+  return m ? m[1]!.toUpperCase() : null;
+}
+
+/** USI `msRun` = the file's basename without the `.mzpeak` extension (decoded). */
+function msRunFromUrl(url: string): string {
+  let base = url;
+  try { base = decodeURIComponent(url); } catch { /* keep raw */ }
+  base = base.split(/[?#]/)[0]!; // drop query/hash
+  base = base.split("/").pop() ?? base; // basename
+  return base.replace(/\.mzpeak$/i, "");
+}
+
+/**
+ * Build a Universal Spectrum Identifier for the current file + selected spectrum (MG-08),
+ * or null when no remote file / no selection exists. `collection` is the dataset accession
+ * when the source URL carries one (PXD/MSV — a citeable, resolvable USI), else the PSI
+ * placeholder `USI000000` (valid for local/unsubmitted data). The selector prefers the
+ * native `scan` number (resolved from browse ids) and falls back to the absolute `index`.
+ */
+export function currentUsi(): string | null {
+  const s = useStore.getState();
+  if (!s.sourceUrl) return null; // a USI needs a file/run to address
+  const idx = s.selector?.index ?? 0;
+  const browse = s.browse;
+  const scan = browse && idsCarryScans(browse.id) ? scanNumberOf(browse.id[idx]) : null;
+  const flag: UsiIndexFlag = scan != null ? "scan" : "index";
+  const value = scan != null ? String(scan) : String(idx);
+  return buildUsi({
+    collection: collectionFromUrl(s.sourceUrl) ?? USI_LOCAL_COLLECTION,
+    msRun: msRunFromUrl(s.sourceUrl),
+    flag,
+    value,
+  });
 }

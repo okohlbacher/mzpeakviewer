@@ -10,7 +10,7 @@
 import { useState, useCallback } from "react";
 import { Button, Checkbox } from "@mzpeak/ui-kit";
 import { useStore } from "./store";
-import { currentShareUrl, isTauriApp } from "./urlSync";
+import { currentShareUrl, currentUsi, isTauriApp } from "./urlSync";
 
 export function ShareButton() {
   const phase = useStore((s) => s.phase);
@@ -19,6 +19,8 @@ export function ShareButton() {
   const setUrlSyncEnabled = useStore((s) => s.setUrlSyncEnabled);
   const [copied, setCopied] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [usiCopied, setUsiCopied] = useState(false);
+  const [usi, setUsi] = useState<string | null>(null);
 
   // The address bar is meaningless in the Tauri desktop app, so hide the live-sync
   // toggle entirely there (MG-02).
@@ -49,6 +51,22 @@ export function ShareButton() {
 
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
+  }, []);
+
+  // Copy a USI (Universal Spectrum Identifier) for the current spectrum — a citeable,
+  // standard PSI identifier (MG-08). For PXD/MSV-hosted files it's resolvable by USI
+  // tools; for other files it uses the USI000000 placeholder collection.
+  const onCopyUsi = useCallback(async () => {
+    const id = currentUsi();
+    if (!id) return;
+    setUsi(id);
+    try {
+      await navigator.clipboard?.writeText(id);
+    } catch {
+      // Clipboard denied — the USI is still shown via the readout below.
+    }
+    setUsiCopied(true);
+    window.setTimeout(() => setUsiCopied(false), 1800);
   }, []);
 
   return (
@@ -92,6 +110,24 @@ export function ShareButton() {
       >
         {copied ? "Copied" : "Share view"}
       </Button>
+      <Button
+        data-testid="copy-usi-btn"
+        variant="secondary"
+        size="sm"
+        disabled={!canShare}
+        title="Copy a Universal Spectrum Identifier (USI) for the current spectrum"
+        onClick={() => void onCopyUsi()}
+      >
+        {usiCopied ? "Copied" : "Copy USI"}
+      </Button>
+      {usi != null && (
+        <span
+          data-testid="usi-value"
+          style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}
+        >
+          {usi}
+        </span>
+      )}
       {/* Hidden-but-present readout of the last produced URL for e2e assertions. */}
       {shareUrl != null && (
         <span

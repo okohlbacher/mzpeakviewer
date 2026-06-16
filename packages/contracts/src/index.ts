@@ -6,11 +6,13 @@
 //   - the capability model (imaging detection, chromatogram + optical capability)
 //   - the unified store + view-state model
 //   - the URL grammar (parse / resolve / serialize) + legacy `/IV/` translation
+//   - the USI (Universal Spectrum Identifier) parse/build grammar
 //
-// No reader, no engine, no UI — types + a pure URL module + tests only.
+// No reader, no engine, no UI — types + pure URL/USI modules + tests only.
 
 export * from "./wire";
 export * from "./protocol";
 export * from "./capability";
 export * from "./store";
 export * from "./url";
+export * from "./usi";

@@ -76,26 +76,21 @@ mixed at a 90 % dominance threshold). Required a new **engine aggregate** —
 threaded through `scanBreakdown`. Older/IV data lacking the field falls back to count-only
 rows.
 
-### MG-08 · Align deep-link URLs / API with USI (Universal Spectrum Identifier)
-**Prerequisite DONE (2026-06-16):** native-scan→index resolver (`app/src/scan.ts`:
-`scanNumberOf` / `resolveScanToIndex` / `idsCarryScans`) now backs both the spectrum picker
-and a correct `?scan=N` deep link (previously `urlSync` treated scan as the absolute index —
-off-by-one for files where scan≠index; now resolved via `browse.id` with a range-guarded
-fallback). This is the `:scan:`/`:nativeId:` resolution USI needs. Remaining USI work below.
+### MG-08 · Align deep-link URLs / API with USI — **EMIT DONE (2026-06-16); input deferred**
+Done: (1) **native-scan→index resolver** (`app/src/scan.ts`) backing both the picker and a
+correct `?scan=N` deep link; (2) the pure **`usi.ts` parse/build grammar** in `@mzpeak/contracts`
+(+ 5 unit tests) — `mzspec:<collection>:<msRun>:<scan|index|nativeId>:<value>`; (3) a **"Copy USI"**
+affordance (`currentUsi()` in urlSync + button by Share) emitting a citeable USI: collection
+derived from the source URL's PXD/MSV accession when present (else the PSI `USI000000`
+placeholder for local/unsubmitted data), msRun from the filename, and the scan number (via the
+resolver) or absolute index. Verified: `mzspec:PXD011799:…fr8:scan:121` for the TMT demo.
 
-Adopt the PSI **USI** grammar (`mzspec:<collection>:<msRun>:<index|scan|nativeId>[:<interp>]`,
-e.g. `mzspec:PXD000001:run1:scan:131`) as a first-class addressing scheme for spectra,
-alongside the current `?file=…&spectrum=…` grammar. Goals: (1) accept a USI as a deep-link
-input (resolve `collection`/`msRun` → a dataset URL where possible, and the
-`scan`/`index`/nativeId selector → a spectrum); (2) optionally *emit* a USI in the Share-view
-output / a "copy USI" affordance so spectra are citeable in the standard PSI form; (3) keep it
-layered cleanly over the existing pure URL grammar in `@mzpeak/contracts` (a `usi.ts` parse/
-build module + a resolver, mirroring `url/grammar.ts`). Open questions: how to map mzPeak
-archive members + `mzpeak_index.json` provenance onto USI `collection`/`msRun`; ProteomeXchange/
-PRIDE resolution for the collection accession (online dependency, must degrade gracefully when
-offline / for local files); how USI's nativeId/scan selectors line up with the app store's
-absolute-index selector (see the selector-narrowing note in `urlSync.ts`). Spec:
-PSI USI (`https://www.psidev.info/usi`, HUPO-PSI/usi). **Effort:** M.
+**Deferred — USI as *input* (locate the file from a USI).** Resolving `collection`/`msRun` → a
+dataset URL needs an online ProteomeXchange/PRIDE lookup, which breaks the client-side-only
+invariant and doesn't work for local files; `mzpeak_index.json` carries no accession to source
+it offline. Selector resolution (`:scan:`/`:index:`/`:nativeId:` → spectrum) is ready via the
+resolver once a file is open, but file *discovery* from a USI is the blocked part — revisit if/when
+an online resolver is acceptable. **Effort (remainder):** M.
 
 ### MG-09 · About button with version / build info — **DONE (2026-06-16)**
 Top-bar About button (`data-testid="about-btn"`) → dismissible popover showing version
