@@ -69,6 +69,21 @@ mixed at a 90 % dominance threshold). Required a new **engine aggregate** —
 threaded through `scanBreakdown`. Older/IV data lacking the field falls back to count-only
 rows.
 
+### MG-08 · Align deep-link URLs / API with USI (Universal Spectrum Identifier)
+Adopt the PSI **USI** grammar (`mzspec:<collection>:<msRun>:<index|scan|nativeId>[:<interp>]`,
+e.g. `mzspec:PXD000001:run1:scan:131`) as a first-class addressing scheme for spectra,
+alongside the current `?file=…&spectrum=…` grammar. Goals: (1) accept a USI as a deep-link
+input (resolve `collection`/`msRun` → a dataset URL where possible, and the
+`scan`/`index`/nativeId selector → a spectrum); (2) optionally *emit* a USI in the Share-view
+output / a "copy USI" affordance so spectra are citeable in the standard PSI form; (3) keep it
+layered cleanly over the existing pure URL grammar in `@mzpeak/contracts` (a `usi.ts` parse/
+build module + a resolver, mirroring `url/grammar.ts`). Open questions: how to map mzPeak
+archive members + `mzpeak_index.json` provenance onto USI `collection`/`msRun`; ProteomeXchange/
+PRIDE resolution for the collection accession (online dependency, must degrade gracefully when
+offline / for local files); how USI's nativeId/scan selectors line up with the app store's
+absolute-index selector (see the selector-narrowing note in `urlSync.ts`). Spec:
+PSI USI (`https://www.psidev.info/usi`, HUPO-PSI/usi). **Effort:** M.
+
 ---
 
 ## Part B — Inherited from mzPeakIV (imaging features)
