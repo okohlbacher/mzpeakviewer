@@ -301,6 +301,10 @@ export type StudyMeta = {
   /** Per-sample list (plainified `sample_list`): each sample's id/name + CV parameters,
    *  for the Study panel's characteristics matrix (MG-05). */
   samples?: unknown[];
+  /** Archive member path of the embedded SDRF file (e.g. "sample_metadata/sdrf.tsv"),
+   *  from the index `metadata.sample_metadata.member`. The full SDRF characteristics
+   *  table is fetched ON DEMAND from this member (MG-05 remainder). Null when absent. */
+  sdrfMember?: string | null;
 };
 
 /** Error classes the reader can raise (carried across the boundary). */

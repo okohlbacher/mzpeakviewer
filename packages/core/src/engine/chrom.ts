@@ -51,9 +51,16 @@ const CHROM_TYPE_ACC = "MS_1000626_chromatogram_type";
 const POLARITY_ACC = "MS_1000465_scan_polarity";
 const NPOINTS_ACC = "MS_1003060_number_of_data_points";
 
-/** Recursively find the first finite number under a key containing `frag` (an accession
- *  fragment like "1000827"). Pulls the precursor/product m/z out of the plainified
- *  precursor / selected-ion subtrees without hard-coding their reader-internal shape. */
+/** Finite number or null. */
+function finiteOrNull(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** Recursively find the first finite number under a key naming the accession `frag`
+ *  (e.g. "1000827"). FALLBACK only — used when the reader's typed field is absent (m/z
+ *  encoded as a promoted column rather than a typed Precursor/SelectedIon field). The
+ *  match is ANCHORED to an accession boundary (`MS_<frag>_` / `_<frag>_`) so a future
+ *  accession that merely embeds the digits can't win a bare-substring false positive. */
 function findNumberByKeyFragment(node: unknown, frag: string, depth = 0): number | null {
   if (node == null || depth > 8) return null;
   if (Array.isArray(node)) {
@@ -65,7 +72,8 @@ function findNumberByKeyFragment(node: unknown, frag: string, depth = 0): number
   }
   if (typeof node === "object") {
     for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
-      if (k.includes(frag) && typeof v === "number" && Number.isFinite(v)) return v;
+      const named = k.startsWith(`MS_${frag}_`) || k.includes(`_${frag}_`) || k === `MS_${frag}`;
+      if (named && typeof v === "number" && Number.isFinite(v)) return v;
       const r = findNumberByKeyFragment(v, frag, depth + 1);
       if (r != null) return r;
     }
@@ -87,7 +95,9 @@ export function engineChromatogramList(reader: Reader): ChromatogramInfo[] {
   for (let i = 0; i < n; i++) {
     const rec = cm!.get(i) as unknown as {
       id?: unknown; index?: unknown; params?: unknown;
-      precursors?: unknown; selectedIons?: unknown; meta?: unknown;
+      precursors?: { isolationWindow?: { target?: unknown } }[];
+      selectedIons?: { mz?: unknown }[];
+      meta?: unknown;
     };
     const meta = plainify({
       id: rec.id,
@@ -108,8 +118,14 @@ export function engineChromatogramList(reader: Reader): ChromatogramInfo[] {
       polarity: polRaw === -1 ? "-" : polRaw === 1 ? "+" : null,
       nPoints:
         typeof nPtsRaw === "number" ? nPtsRaw : typeof nPtsRaw === "bigint" ? Number(nPtsRaw) : null,
-      precursorMz: findNumberByKeyFragment(plainify(rec.precursors), "1000827"),
-      productMz: findNumberByKeyFragment(plainify(rec.selectedIons), "1000744"),
+      // Prefer the reader's typed fields (isolation-window target / selected-ion m/z);
+      // fall back to the promoted-column accession search only when those are absent.
+      precursorMz:
+        finiteOrNull(rec.precursors?.[0]?.isolationWindow?.target) ??
+        findNumberByKeyFragment(plainify(rec.precursors), "1000827"),
+      productMz:
+        finiteOrNull(rec.selectedIons?.[0]?.mz) ??
+        findNumberByKeyFragment(plainify(rec.selectedIons), "1000744"),
       meta,
     });
   }

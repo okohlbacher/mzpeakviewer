@@ -74,6 +74,10 @@ export interface AppState {
    *  the per-sample list, for the Summary ▸ Study panel. Null until studyMeta resolves. */
   study: unknown;
   studySamples: unknown[] | null;
+  /** MG-05 remainder: archive member path of the embedded SDRF file (e.g.
+   *  "sample_metadata/sdrf.tsv"), so the Study panel can fetch the full
+   *  characteristics table on demand. Null when absent. */
+  sdrfMember: string | null;
 
   // Imaging deep-link round-trip (MG-01): the m/z+tolerance last entered in the
   // Ion-image view, and the RGB channel list from the multi-channel view. Mirrored
@@ -196,6 +200,7 @@ const INITIAL_OPEN_STATE = {
   channels: [],
   study: null,
   studySamples: null,
+  sdrfMember: null,
   ionRequest: null,
   rgbChannels: [],
   roiRect: null,
@@ -274,7 +279,7 @@ async function finishOpen(
 
   // Isobaric (TMT/iTRAQ) channels for the run, off the critical path.
   void engine.studyMeta().then((s) => {
-    if (seq === currentOpenSeq) set({ channels: s.channels, study: s.study ?? null, studySamples: s.samples ?? null });
+    if (seq === currentOpenSeq) set({ channels: s.channels, study: s.study ?? null, studySamples: s.samples ?? null, sdrfMember: s.sdrfMember ?? null });
   }).catch(() => {});
 
   // Pre-select spectrum 0 when the file has spectra.
@@ -317,6 +322,7 @@ export const useStore = create<AppState>((set, get) => ({
   channels: [],
   study: null,
   studySamples: null,
+  sdrfMember: null,
 
   // imaging deep-link round-trip (MG-01)
   ionRequest: null,
@@ -426,6 +432,7 @@ export const useStore = create<AppState>((set, get) => ({
       channels: [],
       study: null,
       studySamples: null,
+      sdrfMember: null,
       ionRequest: null,
       rgbChannels: [],
       roiRect: null,

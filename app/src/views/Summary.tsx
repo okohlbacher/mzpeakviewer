@@ -1,11 +1,18 @@
 // Summary view — metric tiles + TIC thumbnail, then file stats, capability
 // readout, and imaging block.
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ImagingGridWire } from "@mzpeak/contracts";
 import { useStore } from "../store";
 import { StatRow, Badge, Panel } from "@mzpeak/ui-kit";
 import type { ChannelAssignment } from "@mzpeak/contracts";
 import { rasterizeTic, formatBytes } from "./render";
+import { engine } from "../engine";
+import { parseSdrf } from "../sdrf";
+
+// Cap on the embedded SDRF member we'll fetch (the file is hundreds of KB).
+const SDRF_MAX_BYTES = 8 * 1024 * 1024;
+// Cap on rendered rows to keep the DOM bounded for large studies.
+const SDRF_MAX_ROWS = 500;
 
 function fmtRange(r: [number, number] | null, digits = 2): string {
   if (!r) return "—";
@@ -42,6 +49,7 @@ export function Summary() {
   const channels = useStore((s) => s.channels);
   const study = useStore((s) => s.study);
   const studySamples = useStore((s) => s.studySamples);
+  const sdrfMember = useStore((s) => s.sdrfMember);
 
   // Summary only mounts when phase==="ready" (App renders <Idle/> otherwise), so the not-ready
   // guard below is the only reachable empty state — the old phase==="idle" branch was dead UI.
@@ -232,7 +240,7 @@ export function Summary() {
       )}
 
       {/* Study (SDRF/ISA) — dataset, isobaric channels, sample characteristics (MG-05) */}
-      <StudyPanel channels={channels} study={study} samples={studySamples} />
+      <StudyPanel channels={channels} study={study} samples={studySamples} sdrfMember={sdrfMember} />
 
       {/* Manifest */}
       {manifest && manifest.length > 0 && (
@@ -293,7 +301,7 @@ export function Summary() {
  *  per-sample characteristics matrix (samples × their CV parameters) from the index
  *  `study` block + `sample_list`. The full embedded SDRF/ISA table is a separate member
  *  (deferred). All inputs are plainified `unknown` — read defensively. */
-function StudyPanel({ channels, study, samples }: { channels: ChannelAssignment[]; study: unknown; samples: unknown[] | null }) {
+function StudyPanel({ channels, study, samples, sdrfMember }: { channels: ChannelAssignment[]; study: unknown; samples: unknown[] | null; sdrfMember: string | null }) {
   const s = (study && typeof study === "object" ? study : null) as { dataset_accession?: unknown; title?: unknown } | null;
   const accession = typeof s?.dataset_accession === "string" ? s.dataset_accession : null;
   const title = typeof s?.title === "string" ? s.title : null;
@@ -317,7 +325,7 @@ function StudyPanel({ channels, study, samples }: { channels: ChannelAssignment[
     return { name: String(e.name ?? e.id ?? ""), cells };
   });
 
-  if (!accession && !title && channels.length === 0 && sampleData.length === 0) return null;
+  if (!accession && !title && channels.length === 0 && sampleData.length === 0 && !sdrfMember) return null;
 
   return (
     <Panel title="Study" defaultOpen testid="summary-study-panel">
@@ -360,7 +368,108 @@ function StudyPanel({ channels, study, samples }: { channels: ChannelAssignment[
           </table>
         </div>
       )}
+      {sdrfMember && <SdrfTable member={sdrfMember} />}
     </Panel>
+  );
+}
+
+/** The full embedded SDRF characteristics table (MG-05 remainder), fetched ON DEMAND
+ *  — the member is hundreds of KB / rows, so it is loaded only when the user expands
+ *  the `<details>`. Bytes are decoded + parsed in a try/catch and rendered as a
+ *  scrollable, bounded-height table (capped at SDRF_MAX_ROWS rendered rows). */
+function SdrfTable({ member }: { member: string }) {
+  const [state, setState] = useState<
+    | { kind: "idle" }
+    | { kind: "loading" }
+    | { kind: "loaded"; columns: string[]; rows: string[][] }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
+
+  async function load() {
+    // Lazy: fetch only on first expand. Re-expands reuse the loaded/error state.
+    if (state.kind !== "idle") return;
+    setState({ kind: "loading" });
+    try {
+      const res = await engine.archiveMemberBytes(member, SDRF_MAX_BYTES);
+      const text = new TextDecoder().decode(res.bytes);
+      const { columns, rows } = parseSdrf(text);
+      setState({ kind: "loaded", columns, rows });
+    } catch (err) {
+      setState({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return (
+    <details
+      data-testid="sdrf-table"
+      style={{ marginTop: "0.5rem" }}
+      onToggle={(e) => {
+        if ((e.currentTarget as HTMLDetailsElement).open) void load();
+      }}
+    >
+      <summary style={{ cursor: "pointer", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+        SDRF — full characteristics table
+      </summary>
+      <div style={{ marginTop: "0.4rem" }}>
+        {state.kind === "loading" && (
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>Loading…</span>
+        )}
+        {state.kind === "error" && (
+          <span data-testid="sdrf-error" style={{ fontSize: "var(--text-sm)", color: "var(--red-600, #dc2626)" }}>
+            Couldn’t load SDRF table: {state.message}
+          </span>
+        )}
+        {state.kind === "loaded" && state.columns.length === 0 && (
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>SDRF table is empty.</span>
+        )}
+        {state.kind === "loaded" && state.columns.length > 0 && (
+          <>
+            {state.rows.length > SDRF_MAX_ROWS && (
+              <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", marginBottom: "0.3rem" }}>
+                showing {SDRF_MAX_ROWS.toLocaleString()} of {state.rows.length.toLocaleString()} rows
+              </div>
+            )}
+            <div style={{ overflow: "auto", maxHeight: 360, border: "1px solid var(--border-default)", borderRadius: 6 }}>
+              <table style={{ borderCollapse: "collapse", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)" }}>
+                <thead>
+                  <tr>
+                    {state.columns.map((h, i) => (
+                      <th
+                        key={i}
+                        style={{
+                          textAlign: "left",
+                          padding: "0.2rem 0.6rem",
+                          borderBottom: "1px solid var(--border-default)",
+                          color: "var(--text-muted)",
+                          fontWeight: "var(--weight-medium)",
+                          whiteSpace: "nowrap",
+                          position: "sticky",
+                          top: 0,
+                          background: "var(--surface-card, #fff)",
+                        }}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {state.rows.slice(0, SDRF_MAX_ROWS).map((row, ri) => (
+                    <tr key={ri}>
+                      {state.columns.map((_, ci) => (
+                        <td key={ci} style={{ padding: "0.2rem 0.6rem", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+                          {row[ci] ?? ""}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+    </details>
   );
 }
 

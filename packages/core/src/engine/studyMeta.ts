@@ -102,8 +102,11 @@ export async function engineStudyMeta(reader: Reader): Promise<StudyMeta> {
   }
 
   // MG-05: surface the structured `study` block + the per-sample list (plainified) for
-  // the Summary ▸ Study panel. (The full SDRF characteristics matrix lives in a separate
-  // embedded member referenced by sample_metadata — deferred.)
+  // the Summary ▸ Study panel, plus the archive member path of the embedded SDRF file
+  // (referenced by `metadata.sample_metadata.member`) so the full characteristics table
+  // can be fetched on demand in the Study panel.
+  const sampleMetadata = obj(meta.sample_metadata);
+  const sdrfMember = str(sampleMetadata?.member);
   return {
     present: channels.length > 0,
     channels,
@@ -111,5 +114,6 @@ export async function engineStudyMeta(reader: Reader): Promise<StudyMeta> {
     isa: null,
     study: meta.study != null ? (plainify(study) as unknown) : null,
     samples: sampleList.length ? (plainify(sampleList) as unknown[]) : undefined,
+    sdrfMember,
   };
 }

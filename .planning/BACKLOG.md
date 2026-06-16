@@ -54,18 +54,23 @@ Part B "implemented" table describes mzPeakIV, not the merge. Migration is split
   `setIonRequest` + navigate to ion view (auto-render deferred). All UI-only wire-up onto the
   existing engine ops. Verified: peak table + mean-spectrum round-trip headless. **Now also
   unblocks MG-01 `roi=`** (the ROI-draw producer exists).
-- **MG-04c · port IV compute/export modules (new code):** BL-04 Gaussian smoothing
-  (`smooth.ts`), BL-07 histogram contrast (`histogram.ts`), BL-05 ion-image TIFF export
-  (`tiff.ts`) — none ported into the merged repo. Main-thread on cached `store.ionImage`. **Effort:** M.
+- **MG-04c · port IV compute/export modules — DONE (2026-06-16):** ported `gaussianSmooth`
+  (`app/src/compute/smooth.ts`), `histogramEqualize` (`app/src/compute/histogram.ts`), and the
+  TIFF encoders (`app/src/export/tiff.ts`) verbatim from mzPeakIV. Wired into Imaging.tsx:
+  **Smooth σ** + **Contrast (none/equalize)** controls apply main-thread to a derived
+  `displayIonImage` before rasterizing; **Export TIFF** button (single-channel ion / RGB
+  composite). Verified controls render headless. **Imaging parity with mzPeakIV is now complete**
+  (BL-01…09 all wired).
 
-### MG-05 · SDRF study-metadata long tail — **first slice DONE (2026-06-16)**
-Added a **Summary ▸ Study** panel: dataset accession + title (from the index `study` block),
-the run's isobaric channels, and a **per-sample characteristics matrix** (samples ×
-their CV parameters, from `sample_list`). Engine `engineStudyMeta` now returns the plainified
-`study` block + `samples`; `StudyMeta` gained `study?`/`samples?`; store holds them; verified
-on PXD011799 (accession + samples table render). **Still deferred:** the FULL embedded SDRF/ISA
-characteristics table (referenced by `sample_metadata.member` — a separate archive member that
-must be fetched + parsed) and study protocols / ontology-source registry. **Effort (remainder):** M.
+### MG-05 · SDRF study-metadata long tail — **DONE (2026-06-16)**
+A **Summary ▸ Study** panel: dataset accession + title (index `study` block), isobaric
+channels, and a **per-sample characteristics matrix** (samples × CV params from `sample_list`).
+**Plus the FULL embedded SDRF table:** `StudyMeta.sdrfMember` carries the `sample_metadata.member`
+path; the panel lazily fetches it on expand (`engine.archiveMemberBytes`), parses the TSV
+(`app/src/sdrf.ts`), and renders the full characteristics table (sticky header, 500-row cap,
+error-guarded). Verified on PXD011799 (accession + samples matrix + 480-row SDRF table load).
+**Remaining (minor, deferred):** study-protocols / ontology-source registry expanders — low
+demand; the raw SDRF table already exposes the long tail.
 
 ### MG-06 · Read-only minimal parquet-wasm build (bundle cut)
 Once a real mzPeak confirms no internal Parquet compression codecs are needed,

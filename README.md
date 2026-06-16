@@ -19,18 +19,26 @@ datasets.
 - **Open anything mzPeak** — drag-and-drop a `.mzpeak` file, browse for one, or paste a
   remote URL. Remote files are read with HTTP range requests, so only the bytes actually
   needed are fetched — even multi-gigabyte files open in seconds.
-- **Overview** — a file summary: spectra count, m/z range, MS levels, instrument, and a
-  capability read-out (imaging? chromatograms? optical images? encodings?).
-- **Spectra** — interactive m/z–intensity plots with zoom, an MS-level filter, and
-  reporter-ion (TMT/iTRAQ) channel highlighting.
-- **Imaging (MSI)** — per-pixel total-ion-current heatmaps, single-ion images for any
-  m/z window, RGB channel composites, embedded optical microscopy, and optical/ion
-  overlays. Click any pixel to inspect its spectrum.
-- **Chromatograms** — total-ion and extracted-ion chromatograms.
+- **Overview** — a file summary: spectra count, m/z range, MS levels (with each level's
+  profile/centroid mode), instrument, a capability read-out, and a **Study** panel for SDRF
+  datasets (dataset accession, isobaric channels, a sample characteristics matrix, and the
+  full embedded SDRF table).
+- **Spectra** — interactive m/z–intensity plots with zoom, an MS-level filter, navigation by
+  **native scan number**, a profile/centroid type label, reporter-ion (TMT/iTRAQ) highlighting,
+  a **peak table** for centroid spectra, a full **per-spectrum metadata** panel, and
+  **click-a-peak → ion image**.
+- **Imaging (MSI)** — per-pixel TIC heatmaps, single-ion images, RGB composites, embedded
+  optical microscopy, and optical/ion overlays; plus TIC normalization, Gaussian smoothing,
+  histogram contrast, a whole-image **mean spectrum**, **ROI → mean spectrum** (drag a
+  rectangle), and **TIFF export**. Click any pixel to inspect its spectrum.
+- **Chromatograms** — the file's **stored chromatograms** listed with full metadata (type,
+  polarity, SRM/MRM precursor→product, CV detail), plus a computed total-ion chromatogram.
 - **Structure** — deep Parquet inspection: archive members, per-column footers,
   encodings, row-group layout, page-index status, and on-demand value distributions.
-- **Deep links & sharing** — every view is a shareable URL. The **Share view** button
-  copies a link that reopens the exact file, spectrum, ion image, or pixel.
+- **Deep links, sharing & USI** — every view is a shareable URL (file, spectrum, scan, pixel,
+  ROI, ion image, RGB channels), with an optional live address-bar sync. **Copy USI** emits a
+  PSI Universal Spectrum Identifier for the current spectrum. An **About** button reports the
+  running version/build.
 
 A full walkthrough with screenshots is in the **[user manual](docs/index.html)**.
 

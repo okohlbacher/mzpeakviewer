@@ -76,17 +76,15 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
       // the browse ids when they actually carry scans; otherwise fall back to the
       // old index-as-scan behaviour so files where scan==index don't regress.
       const browse = useStore.getState().browse;
-      const resolved =
-        browse && idsCarryScans(browse.id)
-          ? resolveScanToIndex(browse, sel.scan)
-          : null;
+      const carriesScans = !!browse && idsCarryScans(browse.id);
+      const resolved = carriesScans ? resolveScanToIndex(browse!, sel.scan) : null;
       if (resolved != null) {
         await st.selectSpectrum(resolved).catch(() => {});
-      } else {
-        // Fallback: ids don't carry scans, browse absent, or scan not found.
-        // Treat the scan as an absolute index (correct when scan==index). Guard
-        // against an obvious out-of-range value so we don't select a wrong/last
-        // spectrum when we can already tell it can't be a valid index.
+      } else if (!carriesScans) {
+        // Fallback ONLY when ids don't carry scans (or browse absent): treat the scan
+        // as an absolute index (correct when scan==index). Range-guarded. When ids DO
+        // carry scans but the scan wasn't found, we no-op rather than select a
+        // misaligned index (review P2) — a non-existent scan shouldn't land elsewhere.
         const n = browse?.id.length ?? null;
         if (n == null || sel.scan < n) {
           await st.selectSpectrum(sel.scan).catch(() => {});
@@ -109,8 +107,14 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
   if (v.ion) st.setIonRequest(v.ion);
   if (v.channels.length) st.setRgbChannels(v.channels);
   // 3c. Imaging ROI (MG-01): a ?roi= link sets the rect; the Imaging view renders its
-  // region-mean spectrum (resolves the rect → enclosed pixels → engine.roiSpectrum).
-  if (v.roi) st.setRoiRect(v.roi);
+  // region-mean spectrum (resolves the rect → enclosed pixels → engine.roiSpectrum). The
+  // ROI render only runs while an imaging view is mounted, but the grammar infers a bare
+  // ?roi= link to "spectra" — so for an imaging file, land on an imaging view (review P2).
+  if (v.roi) {
+    st.setRoiRect(v.roi);
+    const IMAGING_VIEWS = ["overview", "ion", "multi", "optical", "overlay"];
+    if (modeFromCapabilities() === "imaging" && !IMAGING_VIEWS.includes(v.view)) st.setView("overview");
+  }
 
   // 4. Cross-mode / dropped-param notices → the store's non-blocking banner.
   if (notices.length) {

@@ -26,6 +26,13 @@ import {
   formatCompact,
   type Colormap,
 } from "./render";
+import { gaussianSmooth } from "../compute/smooth";
+import { histogramEqualize, type HistogramMode } from "../compute/histogram";
+import {
+  encodeSingleChannelTiff,
+  encodeRgba8Tiff,
+  downloadTiff,
+} from "../export/tiff";
 
 export type ImagingMode = "overview" | "ion" | "multi" | "optical" | "overlay";
 
@@ -150,6 +157,13 @@ function ImagingInner({
   // BL-01 — TIC normalization of the ion layer (divide each pixel by its TIC).
   // Only meaningful when a per-pixel TIC column exists (`tic`).
   const [ticNorm, setTicNorm] = useState(false);
+  // BL-04 — Gaussian smoothing σ (pixels) applied to the ion image before raster.
+  // 0 = off. Main-thread, presence-mask-aware (see ../compute/smooth).
+  const [smoothSigma, setSmoothSigma] = useState(0);
+  // BL-07 — histogram equalization of the ion image before raster (../compute/histogram).
+  const [contrast, setContrast] = useState<HistogramMode>("none");
+  // Used to name the exported TIFF (BL-05).
+  const fileName = useStore((s) => s.fileName);
 
   // ── Aux spectrum (BL-03 mean / BL-06 ROI) ─────────────────────────────────
   // A derived spectrum (whole-image mean or ROI mean) shown in a panel below the
@@ -402,16 +416,61 @@ function ImagingInner({
   // corners → local cells and run the ROI mean, reflecting the shared link.
   useEffect(() => {
     if (!storeRoiRect) return;
+    if (auxBusy) return; // a mean/ROI is already computing — retry when it settles (auxBusy dep)
     const key = storeRoiRect.join(",");
     if (key === lastRoiRunRef.current) return; // our own draw, or already run
-    lastRoiRunRef.current = key;
+    lastRoiRunRef.current = key; // advance only now (not while busy) so the run can't be dropped
     const [ax, ay, bx, by] = storeRoiRect;
     void runRoiSpectrum(
       { x: ax - originX, y: ay - originY },
       { x: bx - originX, y: by - originY },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeRoiRect]);
+  }, [storeRoiRect, auxBusy]);
+
+  // ── BL-04 smooth + BL-07 contrast — applied on the MAIN THREAD to the ion
+  // image BEFORE rasterizing. Both are pure, presence-mask-aware transforms over
+  // a Float32Array (see ../compute/smooth, ../compute/histogram). The displayed
+  // array feeds both the ion-mode paint and the overlay ion layer, plus the
+  // single-channel TIFF export. Recomputed only when an input actually changes. ─
+  const displayIonImage = useMemo<Float32Array | null>(() => {
+    if (!ionImage) return null;
+    let a = ionImage;
+    if (smoothSigma > 0) a = gaussianSmooth(a, width, height, presenceMask, smoothSigma);
+    if (contrast === "equalize") a = histogramEqualize(a, presenceMask, contrast);
+    return a;
+  }, [ionImage, smoothSigma, contrast, width, height, presenceMask]);
+
+  // ── BL-05 — Export the rendered image as a TIFF ───────────────────────────
+  // ion → single-channel 32-bit float of the DISPLAYED ion array (post smooth +
+  // contrast) at grid resolution. multi → the composited RGB read back from the
+  // canvas (encodeRgba8Tiff drops alpha → encodeRgbTiff). Filename derives from
+  // the open file + the active m/z.
+  function exportTiff() {
+    const base = (fileName ?? "image").replace(/\.[^.]+$/, "");
+    if (mode === "ion" && displayIonImage) {
+      const bytes = encodeSingleChannelTiff(displayIonImage, width, height);
+      const mzTag = mz !== "" ? `_mz${mz}` : "";
+      downloadTiff(bytes, `${base}${mzTag}.tiff`);
+      return;
+    }
+    if (mode === "multi" && multi) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      const rgba = new Uint8ClampedArray(
+        ctx.getImageData(0, 0, canvas.width, canvas.height).data,
+      );
+      const bytes = encodeRgba8Tiff(rgba, canvas.width, canvas.height);
+      downloadTiff(bytes, `${base}_rgb.tiff`);
+    }
+  }
+
+  // BL-05 — the Export TIFF button only applies to single-channel ion and RGB
+  // multi modes, and only once an image has actually rendered.
+  const canExportTiff =
+    (mode === "ion" && !!displayIonImage) || (mode === "multi" && !!multi);
 
   // ── Canvas paint — switches on the active mode ────────────────────────────
   const decodedOptical = selectedOpticalPath ? (decoded[selectedOpticalPath] ?? null) : null;
@@ -428,10 +487,10 @@ function ImagingInner({
       canvas.height = height;
       blit(ctx, rasterizeTic(tic, grid, colormap, logScale), width, height);
     } else if (mode === "ion") {
-      if (!ionImage) return;
+      if (!displayIonImage) return;
       canvas.width = width;
       canvas.height = height;
-      blit(ctx, rasterizeImage(ionImage, grid, { colormap, percentile: 0.99, logScale, tic: ticNorm ? tic : null, ticNorm }), width, height);
+      blit(ctx, rasterizeImage(displayIonImage, grid, { colormap, percentile: 0.99, logScale, tic: ticNorm ? tic : null, ticNorm }), width, height);
     } else if (mode === "multi") {
       if (!multi) return;
       canvas.width = width;
@@ -456,7 +515,7 @@ function ImagingInner({
       }
       const rasterizeLayer = (key: LayerKey): Uint8ClampedArray | null => {
         if (key === "tic") return tic ? rasterizeTic(tic, grid, colormap, logScale) : null;
-        if (key === "ion") return ionImage ? rasterizeImage(ionImage, grid, { colormap, percentile: 0.99, logScale, tic: ticNorm ? tic : null, ticNorm }) : null;
+        if (key === "ion") return displayIonImage ? rasterizeImage(displayIonImage, grid, { colormap, percentile: 0.99, logScale, tic: ticNorm ? tic : null, ticNorm }) : null;
         if (key === "rgb") return multi ? rasterizeMultiChannel(multi, grid, null, false) : null;
         if (key === "optical") return decodedOptical ? opticalToGrid(decodedOptical, width, height) : null;
         return null;
@@ -484,6 +543,7 @@ function ImagingInner({
     mode,
     tic,
     ionImage,
+    displayIonImage,
     multi,
     decodedOptical,
     layerOrder,
@@ -773,6 +833,56 @@ function ImagingInner({
               TIC norm
             </label>
           </Field>
+        )}
+
+        {/* Smooth σ (BL-04) + Contrast (BL-07) — ion + overlay; applied to the
+            ion image on the main thread before rasterizing. */}
+        {(mode === "ion" || mode === "overlay") && (
+          <>
+            <Field label="Smooth σ">
+              <input
+                type="number"
+                min={0}
+                max={5}
+                step={0.5}
+                value={smoothSigma}
+                aria-label="smoothing sigma"
+                title="Gaussian smoothing radius in pixels (0 = off)"
+                data-testid="imaging-smooth"
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setSmoothSigma(Number.isFinite(v) ? Math.max(0, Math.min(5, v)) : 0);
+                }}
+                style={inputStyle(70)}
+              />
+            </Field>
+            <Field label="Contrast">
+              <select
+                value={contrast}
+                aria-label="contrast"
+                title="Intensity remapping applied to the ion image"
+                data-testid="imaging-contrast"
+                onChange={(e) => setContrast(e.target.value as HistogramMode)}
+                style={inputStyle(110)}
+              >
+                <option value="none">None</option>
+                <option value="equalize">Equalize</option>
+              </select>
+            </Field>
+          </>
+        )}
+
+        {/* Export TIFF (BL-05) — ion (single-channel float) + multi (RGB). */}
+        {(mode === "ion" || mode === "multi") && (
+          <button
+            type="button"
+            onClick={exportTiff}
+            disabled={!canExportTiff}
+            data-testid="export-tiff-btn"
+            style={{ ...btnStyle, background: "var(--surface-card, #fff)", color: "var(--blue-600, #3b54da)" }}
+          >
+            Export TIFF
+          </button>
         )}
 
         {/* Mean / reference spectrum (BL-03) — grid (pickable) modes only. */}
