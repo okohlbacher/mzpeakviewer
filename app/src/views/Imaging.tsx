@@ -588,7 +588,9 @@ function ImagingInner({
         h = availH;
         w = h * ar;
       }
-      setDisplaySize({ w: Math.round(w), h: Math.round(h) });
+      // floor (not round) so the fitted image never exceeds the box by a sub-pixel and
+      // spuriously triggers a scrollbar (which would feed back into this fit → jitter).
+      setDisplaySize({ w: Math.floor(w), h: Math.floor(h) });
     };
     fit();
     const ro = new ResizeObserver(fit);
@@ -926,6 +928,10 @@ function ImagingInner({
             alignItems: "center",
             justifyContent: "center",
             overflow: "auto",
+            // Reserve the scrollbar gutter permanently (both edges → image stays centered) so
+            // a scrollbar appearing on hover/zoom can't change clientWidth and re-trigger the
+            // contain-fit ResizeObserver — which is what made the image "jump".
+            scrollbarGutter: "stable both-edges",
             background: "var(--ink, #0e1216)",
             borderRadius: 8,
             padding: "0.75rem",
