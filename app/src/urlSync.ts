@@ -25,6 +25,14 @@ import {
 import { useStore } from "./store";
 
 // ---------------------------------------------------------------------------
+/** True in the Tauri desktop app (window.location.origin is "tauri://localhost").
+ *  The address bar is meaningless there, so live URL sync + the toggle are hidden,
+ *  and currentShareUrl() resolves links to the canonical web viewer instead. */
+export function isTauriApp(): boolean {
+  const rawOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  return rawOrigin.startsWith("tauri://");
+}
+
 /** The mode the URL grammar resolves against, derived from capabilities. */
 function modeFromCapabilities(): FileMode {
   const caps = useStore.getState().capabilities;
@@ -66,6 +74,11 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
   if (v.chromMode === "tic" && v.view === "chromatograms") {
     await st.loadChrom({ mode: "tic" }).catch(() => {});
   }
+
+  // 3b. Imaging deep-link controls (MG-01): prefill the Ion-image m/z+tol and the
+  // RGB channel list so a ?ion=/?ch= link lands on populated controls.
+  if (v.ion) st.setIonRequest(v.ion);
+  if (v.channels.length) st.setRgbChannels(v.channels);
 
   // 4. Cross-mode / dropped-param notices → the store's non-blocking banner.
   if (notices.length) {
@@ -120,7 +133,7 @@ export function currentShareUrl(): string {
   // In the Tauri desktop app, window.location.origin is "tauri://localhost" which
   // produces non-shareable links. Always resolve to the canonical web viewer instead.
   const rawOrigin = typeof window !== "undefined" ? window.location.origin : "";
-  const isTauri = rawOrigin.startsWith("tauri://");
+  const isTauri = isTauriApp();
   const origin = isTauri ? "https://www.mzpeak.org" : rawOrigin;
   const pathname = isTauri ? "/view/" : (typeof window !== "undefined" ? window.location.pathname : "/");
 
@@ -140,6 +153,10 @@ export function currentShareUrl(): string {
     // chrom: only the TIC mode is meaningful in the current store; emit it so
     // a chromatograms deep link round-trips. (xic/stored aren't tracked yet.)
     chromMode: s.view === "chromatograms" ? "tic" : DEFAULT_VIEW_STATE.chromMode,
+    // imaging (MG-01): emit the last Ion-image request + RGB channels so ?ion=/?ch=
+    // round-trip. DEFAULT_VIEW_STATE has ion:null / channels:[] — only set when present.
+    ion: s.ionRequest ?? DEFAULT_VIEW_STATE.ion,
+    channels: s.rgbChannels.length ? s.rgbChannels : DEFAULT_VIEW_STATE.channels,
   };
 
   const mode = modeFromCapabilities();

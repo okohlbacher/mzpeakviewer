@@ -149,8 +149,14 @@ function ImagingInner({
   // ── Ion-image state ───────────────────────────────────────────────────────
   // The rendered ion image + RGB composite live in the store (not local state) so
   // they persist across tab switches and the Overlay view can composite them.
-  const [mz, setMz] = useState("");
-  const [tol, setTol] = useState("0.5");
+  // The m/z+tol inputs are mirrored into store.ionRequest (MG-01) so a ?ion= deep
+  // link round-trips; on mount we prefill from store.ionRequest when present.
+  const ionRequest = useStore((s) => s.ionRequest);
+  const setIonRequestStore = useStore((s) => s.setIonRequest);
+  const setRgbChannelsStore = useStore((s) => s.setRgbChannels);
+  const storeRgbChannels = useStore((s) => s.rgbChannels);
+  const [mz, setMz] = useState(() => (ionRequest ? String(ionRequest.mz) : ""));
+  const [tol, setTol] = useState(() => (ionRequest ? String(ionRequest.tolDa) : "0.5"));
   const ionImage = useStore((s) => s.ionImage);
   const ionStats = useStore((s) => s.ionStats);
   const setIonImageStore = useStore((s) => s.setIonImage);
@@ -158,11 +164,19 @@ function ImagingInner({
   const ionCacheReady = useStore((s) => s.ionCacheReady);
 
   // ── Multi-channel (RGB) state ─────────────────────────────────────────────
-  const [channels, setChannels] = useState<{ mz: string; tol: string }[]>([
-    { mz: "", tol: "0.5" },
-    { mz: "", tol: "0.5" },
-    { mz: "", tol: "0.5" },
-  ]);
+  // Mirrored into store.rgbChannels (MG-01) so a ?ch= deep link round-trips; on
+  // mount we prefill the three R/G/B rows from store.rgbChannels when present.
+  const [channels, setChannels] = useState<{ mz: string; tol: string }[]>(() => {
+    const base = [
+      { mz: "", tol: "0.5" },
+      { mz: "", tol: "0.5" },
+      { mz: "", tol: "0.5" },
+    ];
+    storeRgbChannels.slice(0, 3).forEach((c, i) => {
+      base[i] = { mz: String(c.mz), tol: String(c.tolDa) };
+    });
+    return base;
+  });
   const multi = useStore((s) => s.multiChannel);
   const setMultiChannelStore = useStore((s) => s.setMultiChannel);
 
@@ -240,6 +254,8 @@ function ImagingInner({
 
   async function renderIon() {
     if (!ionInputsValid || busy) return;
+    // Mirror the request into the store so a ?ion= deep link round-trips (MG-01).
+    setIonRequestStore({ mz: mzNum, tolDa: tolNum });
     setBusy(true);
     setError(null);
     setRenderProgress({ done: 0, total: 0 });
@@ -273,6 +289,11 @@ function ImagingInner({
       setError("Enter an m/z for at least one channel.");
       return;
     }
+    // Mirror the valid channels (with their R/G/B color) into the store so a ?ch=
+    // deep link round-trips (MG-01).
+    setRgbChannelsStore(
+      reqs.flatMap((r, i) => (r ? [{ mz: r.mz, tolDa: r.tolDa, color: CHANNEL_COLORS[i]! }] : [])),
+    );
     setBusy(true);
     setError(null);
     try {

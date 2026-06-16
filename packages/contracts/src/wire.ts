@@ -35,6 +35,11 @@ export type FileStats = {
   msLevels: number[];
   spectraPerLevel?: Record<number, number>;
   representationCounts: { profile: number; centroid: number; unknown?: number };
+  /** Per-MS-level representation breakdown — drives the Summary "MS levels" per-level
+   *  mode badge. Optional → backward compatible: older engine output omits it and the
+   *  Summary view falls back to count-only rows. Keys are MS levels (numbers), aligned
+   *  with `spectraPerLevel`/`msLevels`. */
+  representationPerLevel?: Record<number, { profile: number; centroid: number; unknown: number }>;
   instrument?: string | null;
 };
 

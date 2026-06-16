@@ -70,6 +70,17 @@ export interface AppState {
   // SDRF/ISA isobaric channel assignments for the open run (empty for label-free).
   channels: ChannelAssignment[];
 
+  // Imaging deep-link round-trip (MG-01): the m/z+tolerance last entered in the
+  // Ion-image view, and the RGB channel list from the multi-channel view. Mirrored
+  // from the Imaging view's local state so currentShareUrl() can emit ?ion=/?ch=.
+  // (Distinct from `channels` above, which is SDRF isobaric labels.)
+  ionRequest: { mz: number; tolDa: number } | null;
+  rgbChannels: { mz: number; tolDa: number; color: string }[];
+
+  // Live address-bar URL sync (MG-02): opt-in user preference, default OFF.
+  // Persisted to localStorage; NOT reset on file close.
+  urlSyncEnabled: boolean;
+
   // navigation
   view: View;
 
@@ -115,6 +126,12 @@ export interface AppState {
   setIonImage: (image: Float32Array | null, stats: IonImageStats | null) => void;
   /** Store the latest RGB multi-channel images (rendered in the RGB view). */
   setMultiChannel: (images: (Float32Array | null)[] | null) => void;
+  /** MG-01: mirror the Ion-image view's m/z+tolerance so ?ion= can round-trip. */
+  setIonRequest: (req: { mz: number; tolDa: number } | null) => void;
+  /** MG-01: mirror the RGB channels list so ?ch= can round-trip. */
+  setRgbChannels: (channels: { mz: number; tolDa: number; color: string }[]) => void;
+  /** MG-02: toggle live address-bar URL sync (persisted to localStorage). */
+  setUrlSyncEnabled: (on: boolean) => void;
   /** Load a spectrum by index. `route` (default true) switches to the Spectra view
    *  on success; pass false to load the spectrum without leaving the current view
    *  (used by the imaging spectrum dock for in-place pixel-pick). */
@@ -157,6 +174,8 @@ const INITIAL_OPEN_STATE = {
   multiChannel: null,
   ionCacheReady: false,
   channels: [],
+  ionRequest: null,
+  rgbChannels: [],
   fileSize: null,
   view: "summary",
   selector: null,
@@ -274,6 +293,14 @@ export const useStore = create<AppState>((set, get) => ({
   // sdrf channels
   channels: [],
 
+  // imaging deep-link round-trip (MG-01)
+  ionRequest: null,
+  rgbChannels: [],
+
+  // live URL sync preference (MG-02) — read from localStorage, default OFF.
+  urlSyncEnabled:
+    typeof window !== "undefined" && localStorage.getItem("mzpeak.urlSync") === "1",
+
   // navigation
   view: "summary",
 
@@ -371,6 +398,8 @@ export const useStore = create<AppState>((set, get) => ({
       multiChannel: null,
       ionCacheReady: false,
       channels: [],
+      ionRequest: null,
+      rgbChannels: [],
       fileName: null,
       fileSize: null,
       sourceUrl: null,
@@ -402,6 +431,19 @@ export const useStore = create<AppState>((set, get) => ({
 
   setMultiChannel: (images: (Float32Array | null)[] | null) => {
     set({ multiChannel: images });
+  },
+
+  setIonRequest: (req: { mz: number; tolDa: number } | null) => {
+    set({ ionRequest: req });
+  },
+
+  setRgbChannels: (channels: { mz: number; tolDa: number; color: string }[]) => {
+    set({ rgbChannels: channels });
+  },
+
+  setUrlSyncEnabled: (on: boolean) => {
+    if (typeof window !== "undefined") localStorage.setItem("mzpeak.urlSync", on ? "1" : "0");
+    set({ urlSyncEnabled: on });
   },
 
   // -------------------------------------------------------------------------

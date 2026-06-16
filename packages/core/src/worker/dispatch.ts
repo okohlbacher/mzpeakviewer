@@ -45,8 +45,14 @@ export type EngineContext = {
    *  reader is single-threaded / non-reentrant. */
   mutex: Mutex;
   /** `performance.now()` of the last user-driven signal read; the prefetch pauses
-   *  within `PREFETCH_COOLDOWN_MS` of it so user reads stay responsive. */
+   *  within the adaptive cooldown of it so user reads stay responsive. */
   lastUserActivity: number;
+  /** Rolling window of recent USER read latencies (ms), bounded ring (newest pushed,
+   *  oldest dropped past READ_LATENCY_SAMPLES). Sampled in the selectSpectrum handler —
+   *  the representative cached-spectrum read. Drives `adaptiveCooldown` so the prefetch
+   *  back-off window matches how long a real user read actually takes on THIS file/host
+   *  (a fast local SSD wants a short cooldown; a slow remote one a longer one). */
+  readLatenciesMs: number[];
   /** Whether background prefetch on open is enabled (setCacheConfig.preloadEnabled). */
   preloadEnabled: boolean;
   /** True when the open file was a remote URL (HTTP range reads). Background prefetch is
@@ -67,13 +73,63 @@ export function createContext(): EngineContext {
     spectrumCache: new SpectrumLruCache(budget),
     mutex: new Mutex(),
     lastUserActivity: 0,
+    readLatenciesMs: [],
     preloadEnabled: true,
     remote: false,
   };
 }
 
-/** Cooldown after user activity before the background prefetch resumes (Explorer's 350ms). */
-const PREFETCH_COOLDOWN_MS = 350;
+// ---------------------------------------------------------------------------
+// Adaptive prefetch cooldown (MG-03a)
+//
+// The cooldown is the back-off window after user activity before the background
+// prefetch resumes a read. A fixed value is a guess: too short and the prefetch
+// barges in between a user's reads (jank); too long and the warm-up never finishes
+// while the user browses. Instead we DERIVE it from observed user read latency — the
+// prefetch should stay out of the way for about as long as one real user read takes
+// on THIS file + host, no more.
+// ---------------------------------------------------------------------------
+
+/** Fallback / default cooldown when we don't yet have enough latency samples to be
+ *  representative (Explorer's long-standing 350ms). */
+const DEFAULT_PREFETCH_COOLDOWN_MS = 350;
+/** Min samples before we trust the percentile over the fixed default. */
+const MIN_LATENCY_SAMPLES = 5;
+/** Bounded ring size — recent reads only, so the cooldown tracks the CURRENT regime. */
+const READ_LATENCY_SAMPLES = 50;
+/** Clamp bounds. FLOOR keeps a single pathologically-fast read from making the prefetch
+ *  hyper-aggressive (barging in on the next user read); CEILING keeps a single slow read
+ *  from suppressing the warm-up so long it effectively never resumes. */
+const MIN_ADAPTIVE_COOLDOWN_MS = 150;
+const MAX_ADAPTIVE_COOLDOWN_MS = 1000;
+
+/** `performance.now()` with a Date.now fallback (mirrors imaging.ts/spectrum.ts — kept
+ *  local to avoid cross-module coupling for one tiny helper). */
+const nowMs = (): number => (typeof performance !== "undefined" ? performance.now() : Date.now());
+
+/** Record one observed user-read latency into the bounded ring. */
+function recordReadLatency(ctx: EngineContext, ms: number): void {
+  if (!Number.isFinite(ms) || ms < 0) return;
+  ctx.readLatenciesMs.push(ms);
+  if (ctx.readLatenciesMs.length > READ_LATENCY_SAMPLES) ctx.readLatenciesMs.shift();
+}
+
+/**
+ * Adaptive prefetch cooldown derived from recent user-read latency.
+ *
+ * With < MIN_LATENCY_SAMPLES samples we can't be representative → fall back to the fixed
+ * default. Otherwise we use the p75 of observed latencies (clamped to [150, 1000]ms): the
+ * 75th percentile (rather than the median) biases slightly conservative so the back-off
+ * comfortably covers a typical user read without over-reacting to the slowest tail.
+ */
+function adaptiveCooldown(ctx: EngineContext): number {
+  const xs = ctx.readLatenciesMs;
+  if (xs.length < MIN_LATENCY_SAMPLES) return DEFAULT_PREFETCH_COOLDOWN_MS;
+  const sorted = [...xs].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.75)); // p75
+  const p75 = sorted[idx]!; // idx is in-bounds: length ≥ MIN_LATENCY_SAMPLES (> 0)
+  return Math.max(MIN_ADAPTIVE_COOLDOWN_MS, Math.min(MAX_ADAPTIVE_COOLDOWN_MS, p75));
+}
 
 /**
  * Fire-and-forget background prefetch of the ion-image cache, started after an imaging
@@ -111,9 +167,9 @@ export function startIonPrefetch(ctx: EngineContext, respond?: Respond): void {
       shouldStop: () => ctx.gen !== gen || ctx.ionCache.isWarm,
       isUserActive: () =>
         typeof performance !== "undefined"
-          ? performance.now() - ctx.lastUserActivity < PREFETCH_COOLDOWN_MS
+          ? performance.now() - ctx.lastUserActivity < adaptiveCooldown(ctx)
           : false,
-      cooldownMs: PREFETCH_COOLDOWN_MS,
+      cooldownMs: () => adaptiveCooldown(ctx),
       budgetRemaining: () => ctx.budget.remaining(),
     })
       .then(({ cache }) => {
@@ -149,9 +205,9 @@ export function startSpectrumPrefetch(ctx: EngineContext): void {
     shouldStop: () => ctx.gen !== gen,
     isUserActive: () =>
       typeof performance !== "undefined"
-        ? performance.now() - ctx.lastUserActivity < PREFETCH_COOLDOWN_MS
+        ? performance.now() - ctx.lastUserActivity < adaptiveCooldown(ctx)
         : false,
-    cooldownMs: PREFETCH_COOLDOWN_MS,
+    cooldownMs: () => adaptiveCooldown(ctx),
     budgetRemaining: () => ctx.budget.remaining(),
   }).catch(() => {
     // Best-effort; on failure first navigation is just cold.
@@ -248,7 +304,13 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         const reader = requireActive(ctx).reader;
         // Read-through the spectrum LRU: a repeat selection returns the cached arrays
         // (adaptSpectrum copies them for the transfer, so the cache stays intact).
+        // Time this representative user read to feed the adaptive prefetch cooldown
+        // (MG-03a). Cache hits and cold reads both count — that's the real latency the
+        // prefetch back-off must accommodate. Reads are mutex-serialized, so the timing
+        // is non-reentrant and needs no locking.
+        const t0 = nowMs();
         const spectrum = await readEngineSpectrumCached(reader, req.index, ctx.spectrumCache);
+        recordReadLatency(ctx, nowMs() - t0);
         respond({ type: "spectrumResult", spectrum, selectId: req.selectId }, buffersOf(spectrum.mz, spectrum.intensity));
         return;
       }

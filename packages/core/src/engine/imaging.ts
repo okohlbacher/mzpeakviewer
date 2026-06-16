@@ -420,8 +420,9 @@ export type PrefetchControl = {
   shouldStop: () => boolean;
   /** Pause (don't start a new read) while the user is active. */
   isUserActive: () => boolean;
-  /** Cooldown slice while paused, ms. */
-  cooldownMs: number;
+  /** Cooldown slice while paused, ms. A GETTER (not a fixed number) so the value tracks
+   *  live read-latency — re-evaluated on every pause iteration (see dispatch.ts:adaptiveCooldown). */
+  cooldownMs: () => number;
   /** Bytes still free in the shared cache budget. */
   budgetRemaining: () => number;
 };
@@ -464,7 +465,7 @@ export async function prefetchIonCache(
     while (control.isUserActive()) {
       if (control.shouldStop()) return false;
       if (nowMs() - waitStart > MAX_PREFETCH_STARVE_MS) break; // forced progress
-      await sleep(control.cooldownMs);
+      await sleep(control.cooldownMs()); // live adaptive value, re-read each slice
     }
     return !control.shouldStop();
   };

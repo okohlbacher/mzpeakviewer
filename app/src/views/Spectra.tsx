@@ -278,13 +278,47 @@ export function Spectra() {
           Next ›
         </Button>
 
+        {spectrum && spectrum.representation && (
+          <span
+            data-testid="spectrum-representation"
+            title={
+              spectrum.representation === "centroid"
+                ? "Centroid (stick) spectrum"
+                : "Profile (continuous) spectrum"
+            }
+            style={{
+              marginLeft: "auto",
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "0.1rem 0.5rem",
+              border: `1px solid ${
+                spectrum.representation === "centroid"
+                  ? "var(--blue-600, #3b54da)"
+                  : "var(--green-600, #2e9e5b)"
+              }`,
+              borderRadius: "var(--radius-pill, 999px)",
+              background: "var(--surface-card, #fff)",
+              color:
+                spectrum.representation === "centroid"
+                  ? "var(--blue-600, #3b54da)"
+                  : "var(--green-600, #2e9e5b)",
+              fontSize: "var(--text-xs, 0.72rem)",
+              fontWeight: "var(--weight-semibold, 600)",
+              textTransform: "uppercase",
+              letterSpacing: "0.04em",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {spectrum.representation}
+          </span>
+        )}
         {spectrum && (
           <span
             data-testid="spectrum-meta"
             style={{
               fontSize: "var(--text-sm)",
               color: "var(--text-muted)",
-              marginLeft: "auto",
+              marginLeft: spectrum.representation ? "0" : "auto",
             }}
           >
             {[
@@ -294,7 +328,6 @@ export function Spectra() {
                 ? `#${withinLevelRank}${levelTotal != null ? `/${levelTotal}` : ""} in level`
                 : null,
               spectrum.id ? `id: ${spectrum.id}` : null,
-              spectrum.representation ?? null,
               `${spectrum.mz.length} pts`,
             ]
               .filter(Boolean)

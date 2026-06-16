@@ -87,6 +87,7 @@ export async function engineScanBreakdown(
       centroid: aggregates.representationCounts.centroid,
       unknown: aggregates.representationCounts.unknown,
     },
+    representationPerLevel: aggregates.representationPerLevel,
     instrument: fast.instrument,
   };
 

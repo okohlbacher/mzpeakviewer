@@ -13,8 +13,8 @@ const ctx = createContext();
 const respond = makeRespond((msg, transfer) => scope.postMessage(msg, transfer));
 
 // Message types that are USER-driven signal reads. Receiving one marks user activity so
-// the background ion-cache prefetch backs off (PREFETCH_COOLDOWN_MS) and the user stays
-// responsive.
+// the background ion-cache prefetch backs off (for the adaptive cooldown window) and the
+// user stays responsive.
 const USER_READ_TYPES = new Set<WorkerRequest["type"]>([
   "selectSpectrum",
   "renderIonImage",

@@ -268,7 +268,7 @@ export async function prefetchSpectrumCache(
     while (control.isUserActive()) {
       if (control.shouldStop()) return false;
       if (nowMs() - waitStart > MAX_PREFETCH_STARVE_MS) break; // forced progress (see imaging.ts)
-      await sleep(control.cooldownMs);
+      await sleep(control.cooldownMs()); // live adaptive value, re-read each slice
     }
     return !control.shouldStop();
   };

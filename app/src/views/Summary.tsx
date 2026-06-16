@@ -11,6 +11,24 @@ function fmtRange(r: [number, number] | null, digits = 2): string {
   return `${r[0].toFixed(digits)} – ${r[1].toFixed(digits)}`;
 }
 
+// A single mode dominates a level when it covers ≥90% of that level's spectra whose
+// representation is known (profile|centroid). Below that — both present — it reads
+// "mixed". Only-unknown levels return null (no badge).
+const DOMINANCE = 0.9;
+
+type LevelMode = "profile" | "centroid" | "mixed" | null;
+
+function levelRepresentationMode(
+  counts: { profile: number; centroid: number; unknown: number } | undefined,
+): LevelMode {
+  if (!counts) return null;
+  const known = counts.profile + counts.centroid;
+  if (known === 0) return null; // only unknown → no badge
+  if (counts.profile / known >= DOMINANCE) return "profile";
+  if (counts.centroid / known >= DOMINANCE) return "centroid";
+  return "mixed";
+}
+
 export function Summary() {
   const stats = useStore((s) => s.stats);
   const caps = useStore((s) => s.capabilities);
@@ -71,6 +89,39 @@ export function Summary() {
           testid="summary-instrument"
         />
       </Panel>
+
+      {/* MS levels — per-level spectrum count + representation mode */}
+      {stats.msLevels.length > 0 && (
+        <Panel title="MS levels" defaultOpen testid="summary-ms-levels-panel">
+          <div data-testid="summary-ms-levels" style={{ display: "flex", flexDirection: "column", gap: "0.1rem" }}>
+            {stats.msLevels.map((level) => {
+              const count = stats.spectraPerLevel?.[level] ?? 0;
+              const mode = levelRepresentationMode(stats.representationPerLevel?.[level]);
+              return (
+                <StatRow
+                  key={level}
+                  label={`MS${level}`}
+                  testid={`summary-ms-level-${level}`}
+                  value={
+                    <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <span style={{ fontFamily: "var(--font-mono, monospace)" }}>
+                        {count.toLocaleString()} spectra
+                      </span>
+                      {mode && (
+                        <Badge
+                          tone={mode === "mixed" ? "neutral" : mode === "centroid" ? "info" : "success"}
+                        >
+                          {mode}
+                        </Badge>
+                      )}
+                    </span>
+                  }
+                />
+              );
+            })}
+          </div>
+        </Panel>
+      )}
 
       {/* Capabilities */}
       <Panel title="Capabilities" defaultOpen testid="summary-caps-panel">

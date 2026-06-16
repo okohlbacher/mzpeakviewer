@@ -15,19 +15,31 @@ orientation tool**, not a full analysis suite. Statistical/analytical features
 ## Part A — Merge-specific backlog (new)
 
 ### MG-01 · Deep-link extras beyond parity (`ch=` / `roi=` / `px=`)
-Multi-channel (`ch=`, repeatable), ROI (`roi=x0,y0,x1,y1`), and pixel-by-coord
-(`px=x,y`) deep links — designed in MERGE-ROADMAP.md §3 but optional for v1
-(roadmap "Phase 7"). Fold into Phase 5 or defer. **Effort:** S–M.
+**Partially DONE (2026-06-16): `ion=` + `ch=` round-trip.** Wired the Ion-image m/z+tol
+and RGB channel list through `store.ionRequest` / `store.rgbChannels` ↔ `urlSync`
+(`currentShareUrl`/`applyViewState`) ↔ `Imaging.tsx`. The grammar already serialized/
+resolved these; this closed a real bug (a rendered ion image was previously NOT
+shareable — `ion=` was consumed on load but never emitted). **Still deferred:** `roi=`
+and `px=` — they have **no producer UI** in the merged Imaging view (no ROI-draw, no
+persistent pixel-pick); those land with the ROI/pixel features under **MG-04**, then the
+already-complete grammar parse makes the deep link a one-line wire-up. **Effort:** S (remainder).
 
-### MG-02 · Live address-bar URL sync (toggle)
-Auto-write the share URL to the address bar as the user navigates (default off;
-opt-in toggle). Carried from Explorer (EX-URL-01). Belongs after Phase 5.
-**Effort:** S.
+### MG-02 · Live address-bar URL sync (toggle) — **DONE (2026-06-16)**
+Opt-in "Sync URL" checkbox (default off, persisted in `localStorage` `mzpeak.urlSync`)
+next to Share. A single debounced (~400 ms) zustand subscription in `App.tsx` mirrors
+`currentShareUrl()` into `history.replaceState` on store changes; compare-before-write
+avoids churn; hidden + no-op in Tauri (no meaningful address bar) and for local files.
+Carried from Explorer (EX-URL-01).
 
-### MG-03 · Adaptive preload + re-centering
-Derive `PRELOAD_COOLDOWN_MS` from observed read-latency percentiles; re-center
-preload on the live selection when resuming after a jump. Carried from Explorer
-(EX-ENG-03/04). Best done once the engine is in the worker (Phase 3+). **Effort:** S.
+### MG-03 · Adaptive preload + re-centering — **part (a) DONE (2026-06-16)**
+(a) **Done:** the fixed `PREFETCH_COOLDOWN_MS = 350` is now derived from a rolling p75 of
+observed user-read latencies (bounded 50-sample ring in `EngineContext`), clamped to
+[150, 1000] ms, with the 350 ms default until ≥5 samples. `PrefetchControl.cooldownMs`
+became a live getter. (b) **re-centering DEFERRED** — re-centering preload around a moving
+cursor requires *random-access* reads, which directly fight the measured bulk-sequential-
+stream fast path (see cold-read / ion-image bulk-read findings). Low value too: the
+jumped-to spectrum is read on-demand and cached regardless. Revisit only with a measured
+need. Carried from Explorer (EX-ENG-03/04).
 
 ### MG-04 · Imaging feature-parity validation
 The IV imaging features (Part B, BL-01…BL-09) are implemented in mzPeakIV and must
@@ -46,15 +58,16 @@ investigate the read-only minimal parquet-wasm build (~456 KB brotli vs ~6.5 MB)
 a large bundle-size win. Carried from mzPeakIV "Stack Patterns". **Effort:** M; risk:
 needs codec audit against real files.
 
-### MG-07 · Surface spectrum representation (profile / centroid) more prominently
-Spectra view already prints the representation in the header line
-(`… · centroid · 2213 pts`); promote it to a clearer "spectrum type: profile/centroid"
-label so it reads as a first-class property, not a trailing token. In the Summary /
-dashboard overview, add the representation **mode per MS level** (e.g. MS1 profile, MS2
-centroid) — today the overview shows spectra-per-level counts but not each level's mode.
-Source: `Spectra.tsx` (header meta), `Summary.tsx` (capabilities/MS-levels panel);
-per-level mode comes from the `MS:1000525` representation column already read for the
-browse index. **Effort:** S.
+### MG-07 · Surface spectrum representation (profile / centroid) more prominently — **DONE (2026-06-16)**
+(a) The Spectra header now renders representation as a distinct profile/centroid **pill**
+(`data-testid="spectrum-representation"`), removed from the trailing `·`-token line.
+(b) Added a per-MS-level "MS levels" panel to Summary (`data-testid="summary-ms-levels"`):
+one row per level with spectra count + a representation-mode badge (profile / centroid /
+mixed at a 90 % dominance threshold). Required a new **engine aggregate** —
+`FileStats.representationPerLevel` (optional, backward-compatible) computed in
+`scanByColumns` (the global `representationCounts` loop now also buckets per MS level) and
+threaded through `scanBreakdown`. Older/IV data lacking the field falls back to count-only
+rows.
 
 ---
 

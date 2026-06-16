@@ -17,11 +17,21 @@ type ArrowStructVec = {
   getChild?: (name: string) => ArrowCol;
 } | null;
 
+/** Per-MS-level representation tallies — accumulated alongside the global counts so
+ *  the Summary can show each level's dominant representation mode. */
+export type RepresentationPerLevel = Record<
+  number,
+  { profile: number; centroid: number; unknown: number }
+>;
+
 /** Fields the async scan fills in; merged onto the fast summary when it finishes. */
 export type ScanAggregates = Pick<
   FileSummary,
   "msLevelCounts" | "representationCounts" | "mzRange" | "rtRange" | "isImaging"
->;
+> & {
+  /** Per-MS-level representation breakdown (lazily-initialized buckets per level). */
+  representationPerLevel: RepresentationPerLevel;
+};
 
 export type ScanResult = { rows: SpectrumIndexRow[]; aggregates: ScanAggregates };
 
@@ -105,6 +115,7 @@ export async function scanSpectra(
       aggregates: {
         msLevelCounts: {},
         representationCounts: { profile: 0, centroid: 0, unknown: 0 },
+        representationPerLevel: {},
         mzRange: null,
         rtRange: null,
         isImaging: false,
@@ -131,6 +142,7 @@ async function scanByColumns(
 
   const rows: SpectrumIndexRow[] = new Array(n);
   const msLevelCounts: Record<number, number> = {};
+  const representationPerLevel: RepresentationPerLevel = {};
   let profile = 0;
   let centroid = 0;
   let unknownRep = 0;
@@ -150,6 +162,17 @@ async function scanByColumns(
     if (representation === "profile") profile++;
     else if (representation === "centroid") centroid++;
     else unknownRep++;
+
+    // Per-level representation tally (lazy bucket per MS level). Only spectra whose
+    // MS level is known contribute; unknown-level spectra still feed the global counts.
+    if (msLevel !== null) {
+      const bucket =
+        representationPerLevel[msLevel] ??
+        (representationPerLevel[msLevel] = { profile: 0, centroid: 0, unknown: 0 });
+      if (representation === "profile") bucket.profile++;
+      else if (representation === "centroid") bucket.centroid++;
+      else bucket.unknown++;
+    }
 
     const time = numOrNull(timeCol?.get(i));
     if (time !== null) {
@@ -184,6 +207,7 @@ async function scanByColumns(
     aggregates: {
       msLevelCounts,
       representationCounts: { profile, centroid, unknown: unknownRep },
+      representationPerLevel,
       mzRange: mzMin !== null && mzMax !== null ? [mzMin, mzMax] : null,
       rtRange: rtMin !== null && rtMax !== null ? [rtMin, rtMax] : null,
       isImaging: false,

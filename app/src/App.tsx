@@ -31,6 +31,7 @@ import { Imaging } from "./views/Imaging";
 import { GridView } from "./views/GridView";
 import { Idle } from "./views/Idle";
 import { ShareButton } from "./ShareButton";
+import { currentShareUrl, isTauriApp } from "./urlSync";
 
 // ---------------------------------------------------------------------------
 // Sidebar
@@ -771,6 +772,36 @@ export function App() {
   const phase = useStore((s) => s.phase);
   const error = useStore((s) => s.error);
   const ready = phase === "ready";
+
+  // ── Live address-bar URL sync (MG-02) ──────────────────────────────────────
+  // Opt-in: when urlSyncEnabled, mirror the current shareable view into the
+  // address bar (history.replaceState) on every store change. Subscribe once to
+  // the plain-zustand store; debounce ~400ms so rapid changes coalesce, and
+  // compare-before-write to avoid churn. Skipped in Tauri (no meaningful address
+  // bar) and for local files (sourceUrl == null → no shareable link).
+  // replaceState does NOT fire popstate, so there's no hydration feedback loop.
+  useEffect(() => {
+    let lastWritten: string | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = useStore.subscribe((state) => {
+      if (!state.urlSyncEnabled || isTauriApp() || state.sourceUrl == null) return;
+      const url = currentShareUrl();
+      if (url === lastWritten) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        try {
+          window.history.replaceState(null, "", url);
+          lastWritten = url;
+        } catch {
+          // replaceState can throw cross-origin / file:// — non-fatal.
+        }
+      }, 400);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
+  }, []);
 
   return (
     <div
