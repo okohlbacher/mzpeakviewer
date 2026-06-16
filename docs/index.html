@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>mzPeakViewer — User Manual</title>
+<style>
+  :root{
+    --accent:#3b54da; --accent-d:#2a3fb0; --ink:#14182e; --text:#283041;
+    --muted:#6b7280; --line:#e5e9f3; --bg:#ffffff; --panel:#f7f9fe; --code:#f2f4fb;
+    --maxw:880px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--text);background:var(--bg)}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{background:var(--code);padding:.1em .4em;border-radius:4px;font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#33406b;word-break:break-word}
+  h1,h2,h3{color:var(--ink);line-height:1.25;font-weight:700}
+  h2{margin:2.6rem 0 .6rem;font-size:1.5rem;padding-top:.4rem;border-top:1px solid var(--line)}
+  h3{margin:1.6rem 0 .3rem;font-size:1.12rem}
+  p{margin:.6rem 0}
+  /* header */
+  header{background:linear-gradient(180deg,#f4f7ff,#fff);border-bottom:1px solid var(--line)}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 22px}
+  .hero{padding:46px 22px 34px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;max-width:var(--maxw);margin:0 auto}
+  .mark{flex:0 0 auto}
+  .hero h1{margin:0;font-size:2rem}
+  .hero p{margin:.35rem 0 0;color:var(--muted);font-size:1.05rem}
+  .cta{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .btn{display:inline-block;padding:.55em 1.05em;border-radius:8px;font-weight:600;font-size:.95rem;border:1px solid var(--line);background:#fff;color:var(--ink)}
+  .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .btn.primary:hover{background:var(--accent-d);text-decoration:none}
+  .btn:hover{text-decoration:none;border-color:var(--accent)}
+  /* layout */
+  main{max-width:var(--maxw);margin:0 auto;padding:8px 22px 80px}
+  nav.toc{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:26px 0}
+  nav.toc strong{display:block;font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:6px}
+  nav.toc ol{margin:0;padding-left:1.2rem;columns:2;column-gap:28px}
+  nav.toc li{margin:.15rem 0}
+  figure{margin:1rem 0 1.4rem;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel)}
+  figure img{display:block;width:100%;height:auto}
+  figcaption{padding:9px 14px;font-size:.86rem;color:var(--muted);border-top:1px solid var(--line);background:#fff}
+  .lead{font-size:1.05rem;color:var(--text)}
+  ul{margin:.5rem 0;padding-left:1.3rem}
+  li{margin:.25rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem}
+  th,td{text-align:left;padding:.5em .7em;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--ink);font-weight:600;background:var(--panel)}
+  .note{background:#f2f4fb;border-left:3px solid var(--accent);border-radius:0 8px 8px 0;padding:.7rem 1rem;margin:1rem 0;font-size:.95rem}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:680px){.grid2{grid-template-columns:1fr}nav.toc ol{columns:1}}
+  footer{border-top:1px solid var(--line);background:var(--panel)}
+  footer .wrap{padding:26px 22px;color:var(--muted);font-size:.9rem;display:flex;gap:22px;flex-wrap:wrap;justify-content:space-between}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font:13px/1.55 ui-monospace,Menlo,Consolas,monospace}
+  kbd{background:#fff;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 .35em;font-size:.85em}
+</style>
+</head>
+<body>
+<header>
+  <div class="hero">
+    <svg class="mark" width="64" height="64" viewBox="0 0 1024 1024" aria-hidden="true">
+      <g transform="translate(-34 40)" stroke="#14182e" stroke-width="20" stroke-linejoin="round" fill="#3b54da">
+        <path d="M243 760 L330 360 L417 760 Z"/>
+        <path d="M360 760 L500 300 L640 760 Z"/>
+        <path d="M470 760 L612 250 L660 360 L708 250 L850 760 Z"/>
+      </g>
+    </svg>
+    <div>
+      <h1>mzPeakViewer <span style="font-weight:400;color:var(--muted);font-size:1.1rem">User Manual</span></h1>
+      <p>Explore mzPeak mass-spectrometry files in your browser — spectra, imaging, channels, and structure. No install, no upload.</p>
+      <div class="cta">
+        <a class="btn primary" href="https://www.mzpeak.org/view/">▶ Open the viewer</a>
+        <a class="btn" href="https://github.com/okohlbacher/mzpeakviewer/releases/latest">⤓ Desktop apps</a>
+        <a class="btn" href="https://www.mzpeak.org/examples">🔬 Example datasets</a>
+        <a class="btn" href="https://github.com/okohlbacher/mzpeakviewer">GitHub</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <p class="lead">mzPeakViewer reads <a href="https://github.com/HUPO-PSI/mzPeak">mzPeak</a> files
+  entirely in the browser. It works for any mass-spectrometry data — LC-MS, DDA, imaging (MSI),
+  labelled quantitation — and turns on the right tools for each file automatically.</p>
+
+  <nav class="toc">
+    <strong>Contents</strong>
+    <ol>
+      <li><a href="#open">Opening a file</a></li>
+      <li><a href="#overview">Overview mode</a></li>
+      <li><a href="#spectra">Spectra &amp; deep links</a></li>
+      <li><a href="#channels">TMT / reporter channels</a></li>
+      <li><a href="#imaging">Imaging (MSI)</a></li>
+      <li><a href="#chromatograms">Chromatograms</a></li>
+      <li><a href="#structure">Parquet inspection</a></li>
+      <li><a href="#sharing">Sharing &amp; URL grammar</a></li>
+      <li><a href="#desktop">Desktop apps</a></li>
+      <li><a href="#web">Web version</a></li>
+    </ol>
+  </nav>
+
+  <!-- 1 -->
+  <h2 id="open">1 · Opening a file</h2>
+  <p>The start page offers four ways in. Nothing is ever uploaded — local files are read in
+  place, and remote files are streamed with HTTP range requests (only the bytes the current
+  view needs are fetched, so even multi-gigabyte files open in seconds).</p>
+  <ul>
+    <li><strong>Drag &amp; drop</strong> a <code>.mzpeak</code> file onto the drop zone, or click it to browse.</li>
+    <li><strong>Paste a URL</strong> to any <code>https://…/file.mzpeak</code> and press <em>Load</em>.</li>
+    <li><strong>Demo datasets</strong> — three curated examples (general LC-MS, MSI imaging, a TMT
+      experiment). <em>Open from cloud</em> streams the file; <em>Download &amp; open</em> saves it first.</li>
+    <li>Browse the full collection at <a href="https://www.mzpeak.org/examples">mzpeak.org/examples</a>.</li>
+  </ul>
+  <figure>
+    <img src="images/start-page.png" alt="mzPeakViewer start page with URL bar, drop zone, and demo datasets" />
+    <figcaption>The start page: URL bar, drag-and-drop zone, and the three built-in demo datasets.</figcaption>
+  </figure>
+
+  <!-- 2 -->
+  <h2 id="overview">2 · Overview mode</h2>
+  <p>Every file opens on the <strong>Summary</strong> tab — a one-glance overview. The metric tiles
+  show the spectra count, m/z range, layout (profile / centroid / point), and whether the file is
+  imaging. Below them, collapsible panels report:</p>
+  <ul>
+    <li><strong>File</strong> — name, size, spectra and entity counts, m/z and retention-time ranges, instrument.</li>
+    <li><strong>Capabilities</strong> — imaging (MSI) yes/no, chromatogram count, optical images, detection confidence, array encodings, and any unsupported features.</li>
+    <li><strong>Archive members</strong> — the Parquet tables and other files packed inside the <code>.mzpeak</code> archive.</li>
+  </ul>
+  <figure>
+    <img src="images/overview.png" alt="Summary / overview view showing metric tiles, file panel and capabilities" />
+    <figcaption>Overview of a Bruker QTOF LC-MS file: 3,574 spectra, 85–1005 Th, point layout, not imaging.</figcaption>
+  </figure>
+
+  <!-- 3 -->
+  <h2 id="spectra">3 · Spectra &amp; deep links</h2>
+  <p>The <strong>Spectra</strong> tab plots m/z vs intensity for the selected spectrum. Pick a
+  spectrum by index, step with <kbd>‹ Prev</kbd> / <kbd>Next ›</kbd>, or filter by MS level. Scroll
+  to zoom the plot; double-click to reset. The header line shows the absolute index, MS level,
+  position within the level, native scan id, representation (profile/centroid), and point count.</p>
+  <p><strong>Deep linking:</strong> a spectrum is addressable. Append <code>&amp;spectrum=120</code> to a
+  file URL to open directly on that spectrum — the link below reproduces exactly this screenshot.
+  The viewer infers the right tab from the parameters, so <code>view=spectra</code> is optional.</p>
+  <pre>https://www.mzpeak.org/view/?file=https://data.mzpeak.org/v09/…/file.mzpeak&amp;spectrum=120</pre>
+  <figure>
+    <img src="images/spectra.png" alt="Spectra view deep-linked to spectrum 120" />
+    <figcaption>Deep link to spectrum #120 (MS1, 2,213 points). Labelled peaks, scroll-to-zoom, MS-level filter.</figcaption>
+  </figure>
+
+  <!-- 4 -->
+  <h2 id="channels">4 · TMT / reporter channels</h2>
+  <p>For isobaric-labelled experiments (TMT, iTRAQ), the Spectra view understands reporter ions.
+  In an MS2/MSn spectrum the low-m/z <strong>reporter-ion cluster</strong> carries one peak per
+  channel — for TMT 10-plex, the channels sit between m/z&nbsp;126 and 131. The screenshot shows
+  that region of a TMT 10-plex MS2 spectrum from the PXD011799 demo, zoomed in via
+  <code>&amp;mz=126,135</code>.</p>
+  <p>When a run additionally carries <strong>reporter-channel metadata</strong> (per-channel labels and
+  sample assignments), the viewer overlays colour-coded <strong>channel pills</strong> beneath the
+  plot. Click a pill to zoom to its reporter and highlight that channel's peak; the same colour is
+  used for the pill and the peak marker. Double-click resets the zoom.</p>
+  <figure>
+    <img src="images/tmt-reporters.png" alt="TMT 10-plex MS2 spectrum zoomed to the reporter-ion region" />
+    <figcaption>The reporter-ion region (m/z 126–135) of a TMT 10-plex MS2 spectrum — one peak per channel.</figcaption>
+  </figure>
+
+  <!-- 5 -->
+  <h2 id="imaging">5 · Imaging (MSI)</h2>
+  <p>For imaging files, an <strong>Imaging (MSI)</strong> section appears in the sidebar with several
+  spatial views. All of them share contained-fit sizing, wheel-zoom and pan, a colormap picker, a
+  log-scale toggle, and a hover read-out of pixel coordinates and intensity.</p>
+  <div class="grid2">
+    <figure>
+      <img src="images/imaging-overview.png" alt="Per-pixel total-ion-current heatmap of a mouse urinary bladder MSI dataset" />
+      <figcaption><strong>Overview (TIC)</strong> — per-pixel total-ion-current heatmap. Mouse urinary bladder, AP-SMALDI (PXD001283).</figcaption>
+    </figure>
+    <figure>
+      <img src="images/imaging-ion.png" alt="Single-ion image at m/z 741.53 showing a distinct molecular distribution" />
+      <figcaption><strong>Ion image</strong> — the spatial map for one m/z window (here 741.53&nbsp;±&nbsp;0.25&nbsp;Da). A different molecule, a different distribution.</figcaption>
+    </figure>
+  </div>
+  <ul>
+    <li><strong>Overview (TIC)</strong> — total-ion intensity per pixel; the quickest tissue map.</li>
+    <li><strong>Ion image</strong> — enter an m/z and tolerance, hit <em>Render</em>, and see where that ion is. <strong>Click any pixel</strong> to load its full spectrum.</li>
+    <li><strong>RGB channels</strong> — composite up to three ion images into one false-colour image (one m/z per red/green/blue channel).</li>
+    <li><strong>Optical</strong> — embedded microscopy image (when present), with zoom and pan.</li>
+    <li><strong>Overlay</strong> — stack ion / TIC / RGB / optical layers with per-layer opacity and ordering.</li>
+    <li><strong>Grid</strong> — pixel-grid diagnostics (dimensions, origin, fill).</li>
+  </ul>
+  <p>Ion images and pixel selection are deep-linkable too: <code>&amp;ion=741.53,0.25</code> opens a
+  single-ion view, and <code>&amp;px=10,20</code> selects a pixel's spectrum.</p>
+
+  <!-- 6 -->
+  <h2 id="chromatograms">6 · Chromatograms</h2>
+  <p>When a file carries chromatograms, the <strong>Chromatograms</strong> tab plots them over
+  retention time. Build the total-ion chromatogram (TIC), or extract an XIC for an m/z window;
+  click a point to jump to the nearest spectrum. Deep links: <code>&amp;chrom=tic</code>,
+  <code>&amp;xic=445.1,0.1</code>, and an optional <code>&amp;rt=300,600</code> time window.</p>
+
+  <!-- 7 -->
+  <h2 id="structure">7 · Deep Parquet inspection</h2>
+  <p>An mzPeak file is a ZIP of <a href="https://parquet.apache.org/">Apache Parquet</a> tables, and
+  the <strong>Structure</strong> tab (under <em>Advanced</em>) lets you look right inside. The left
+  pane lists every archive member; click a Parquet table to read its footer without downloading the
+  data. You get:</p>
+  <ul>
+    <li>A summary line — rows, columns, row-group count, compressed vs raw size and ratio, writer signature, and whether a <strong>page index</strong> is present.</li>
+    <li>The <strong>row-group layout</strong> — sizes (min / median / max) and a warning if the table is a single oversized row group (which makes random access slow).</li>
+    <li>A <strong>per-column table</strong> — physical &amp; logical type, codec, value count, on-disk size, and share of the file.</li>
+    <li>Expand any column for <strong>deep stats</strong> (encodings, dictionary, data pages, min/max, nulls, distinct) and an on-demand <strong>value distribution</strong> (a histogram + summary statistics over up to 50,000 sampled rows).</li>
+  </ul>
+  <figure>
+    <img src="images/structure.png" alt="Structure view: archive members, parquet footer, row groups, and an expanded column's deep stats" />
+    <figcaption>Inspecting <code>spectra_metadata.parquet</code>: footer summary (page index: yes), row-group line, and the expanded <code>spectrum.index</code> column with its encodings and statistics.</figcaption>
+  </figure>
+
+  <!-- 8 -->
+  <h2 id="sharing">8 · Sharing &amp; the URL grammar</h2>
+  <p>Click <strong>Share view</strong> (top-right) to copy a link that reopens exactly what you're
+  looking at — the file, the selected spectrum or pixel, the ion image, the active tab. Links are
+  kept as short as possible: anything the viewer can infer is omitted. (Sharing is available for
+  files opened from a URL; a local file has no shareable address.)</p>
+  <p>You can also build links by hand. The common parameters:</p>
+  <table>
+    <tr><th>Parameter</th><th>Meaning</th><th>Example</th></tr>
+    <tr><td><code>file</code></td><td>URL of the <code>.mzpeak</code> to open</td><td><code>file=https://…/x.mzpeak</code></td></tr>
+    <tr><td><code>view</code></td><td>Tab to show (usually inferred)</td><td><code>view=structure</code></td></tr>
+    <tr><td><code>spectrum</code></td><td>Spectrum index (0-based)</td><td><code>spectrum=120</code></td></tr>
+    <tr><td><code>scan</code></td><td>Native scan number</td><td><code>scan=1500</code></td></tr>
+    <tr><td><code>ms</code></td><td>MS-level filter</td><td><code>ms=2</code></td></tr>
+    <tr><td><code>mz</code></td><td>Spectrum zoom window</td><td><code>mz=126,135</code></td></tr>
+    <tr><td><code>ion</code></td><td>Ion image m/z[,tolerance]</td><td><code>ion=741.53,0.25</code></td></tr>
+    <tr><td><code>ch</code></td><td>RGB channel (repeatable, ≤3)</td><td><code>ch=445,0.1,red</code></td></tr>
+    <tr><td><code>px</code></td><td>Pixel coordinate (imaging)</td><td><code>px=10,20</code></td></tr>
+    <tr><td><code>chrom</code> / <code>xic</code></td><td>Chromatogram (TIC) / extracted-ion</td><td><code>chrom=tic</code> · <code>xic=445.1,0.1</code></td></tr>
+    <tr><td><code>rt</code></td><td>Retention-time window (s)</td><td><code>rt=300,600</code></td></tr>
+  </table>
+
+  <!-- 9 -->
+  <h2 id="desktop">9 · Desktop apps</h2>
+  <p>Prefer a native application? The same viewer ships as a small desktop app for
+  <strong>Windows, macOS and Linux</strong>, built with <a href="https://tauri.app/">Tauri</a>. The
+  desktop build adds native file access — handy for very large local files — and works fully
+  offline once installed.</p>
+  <p><strong><a href="https://github.com/okohlbacher/mzpeakviewer/releases/latest">Download the latest release →</a></strong></p>
+  <table>
+    <tr><th>Platform</th><th>Download</th><th>Notes</th></tr>
+    <tr><td>macOS</td><td><code>mzPeakViewer_*.dmg</code> (universal)</td><td>Runs on Apple-silicon and Intel.</td></tr>
+    <tr><td>Windows</td><td><code>mzPeakViewer_*.msi</code> or <code>*-setup.exe</code></td><td>Uses the built-in WebView2.</td></tr>
+    <tr><td>Linux</td><td><code>*.AppImage</code>, <code>*.deb</code>, <code>*.rpm</code></td><td>AppImage runs anywhere; deb/rpm install system-wide.</td></tr>
+  </table>
+  <div class="note">If a build is unsigned, your OS may warn on first launch: on macOS right-click the
+  app and choose <em>Open</em> (or run <code>xattr -dr com.apple.quarantine mzPeakViewer.app</code>);
+  on Windows choose <em>More info → Run anyway</em>. Signed builds open without prompts.</div>
+
+  <!-- 10 -->
+  <h2 id="web">10 · The web version</h2>
+  <p>No download needed — the viewer runs in any modern browser at
+  <strong><a href="https://www.mzpeak.org/view/">www.mzpeak.org/view</a></strong>. It is a fully static
+  app (a continuously updated mirror is also published to GitHub Pages), so there is no server, no
+  account, and your data never leaves your machine. The desktop apps and the web app are the same
+  software.</p>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>mzPeakViewer — an open viewer for the <a href="https://github.com/HUPO-PSI/mzPeak">mzPeak</a> format.</span>
+    <span>
+      <a href="https://www.mzpeak.org/view/">Viewer</a> ·
+      <a href="https://www.mzpeak.org/examples">Examples</a> ·
+      <a href="https://github.com/okohlbacher/mzpeakviewer/releases/latest">Releases</a> ·
+      <a href="https://github.com/okohlbacher/mzpeakviewer">Source</a>
+    </span>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,69 +1,74 @@
-# mzpeakviewer
+# mzPeakViewer
 
-> The unified [mzPeak](https://github.com/HUPO-PSI/mzPeak) viewer that merges
-> **mzPeakIV** (imaging/MSI) and **mzPeakExplorer** (general explorer) into one app.
-> The imaging visualization layer activates only for imaging files; the general
-> explorer works for every file. **Phases 0–5 are complete and the app runs
-> end-to-end in the browser** (preview-deployed on `gh-pages`); Phase 6 (single
-> deploy + decommission) remains.
+A fast, browser-based viewer for **[mzPeak](https://github.com/HUPO-PSI/mzPeak)**
+mass-spectrometry files — no install, no backend, nothing uploaded anywhere. Open a
+file from your computer or stream one straight from a URL, and explore its spectra,
+chromatograms, imaging (MSI) ion images, reporter-ion channels, metadata, and the
+underlying Parquet structure. The imaging layer activates automatically for imaging
+datasets.
 
-One browser app, no backend, static-deployable. It replaces the two separate apps
-(`mzpeak.org/IV/` and `mzpeak.org/view/`) and ends the duplicated reader /
-design-system / deploy maintenance.
+**[▶ Open the viewer](https://www.mzpeak.org/view/)**  ·
+**[📖 User manual](docs/index.html)**  ·
+**[⤓ Desktop apps](https://github.com/okohlbacher/mzpeakviewer/releases/latest)**  ·
+**[🔬 Example datasets](https://www.mzpeak.org/examples)**
 
-## Where things are
+![mzPeakViewer — imaging overview](docs/images/imaging-overview.png)
 
-- **Roadmap & phases:** [`.planning/ROADMAP.md`](.planning/ROADMAP.md) (7 phases, contracts-first)
-- **Design + adversarial-review history:** [`.planning/research/MERGE-ROADMAP.md`](.planning/research/MERGE-ROADMAP.md)
-- **Requirements:** [`.planning/REQUIREMENTS.md`](.planning/REQUIREMENTS.md)
-- **Project overview:** [`.planning/PROJECT.md`](.planning/PROJECT.md)
+## What it does
 
-## Repository layout
+- **Open anything mzPeak** — drag-and-drop a `.mzpeak` file, browse for one, or paste a
+  remote URL. Remote files are read with HTTP range requests, so only the bytes actually
+  needed are fetched — even multi-gigabyte files open in seconds.
+- **Overview** — a file summary: spectra count, m/z range, MS levels, instrument, and a
+  capability read-out (imaging? chromatograms? optical images? encodings?).
+- **Spectra** — interactive m/z–intensity plots with zoom, an MS-level filter, and
+  reporter-ion (TMT/iTRAQ) channel highlighting.
+- **Imaging (MSI)** — per-pixel total-ion-current heatmaps, single-ion images for any
+  m/z window, RGB channel composites, embedded optical microscopy, and optical/ion
+  overlays. Click any pixel to inspect its spectrum.
+- **Chromatograms** — total-ion and extracted-ion chromatograms.
+- **Structure** — deep Parquet inspection: archive members, per-column footers,
+  encodings, row-group layout, page-index status, and on-demand value distributions.
+- **Deep links & sharing** — every view is a shareable URL. The **Share view** button
+  copies a link that reopens the exact file, spectrum, ion image, or pixel.
 
-We are building **one new app**. The two old apps are external, read-only repos we harvest
-code from (see [`SOURCES.md`](SOURCES.md)) — never hosted or built here.
+A full walkthrough with screenshots is in the **[user manual](docs/index.html)**.
 
-```
-packages/
-  contracts/   ✅ Phase 1 — wire protocol + store/view + capability model + URL grammar (KEYSTONE)
-  ui-kit/      ✅ Phase 2 — unified tokens + harvested pure components
-  core/        ✅ Phase 3 — ONE Web Worker data engine (reader + scheduler + cache)
-app/           ✅ Phase 4/5 — THE one app (shell + capability sidebar + lazy MSI chunk + URL resolver)
-vendor/
-  mzpeakts/    git submodule — the one shared reader (aux-arrays + Numpress Linear)
-```
+## Where to use it
 
-## Status
+| | |
+|---|---|
+| **Web — no install** | The viewer runs entirely in your browser at **<https://www.mzpeak.org/view/>**. A continuously updated mirror is also published to GitHub Pages on every push to `main`. |
+| **Desktop apps** | Native **Windows / macOS / Linux** builds — same app, with native file access for very large local files. Download from **[Releases](https://github.com/okohlbacher/mzpeakviewer/releases/latest)**: `.dmg` (macOS, universal), `.msi` / `.exe` (Windows), `.AppImage` / `.deb` / `.rpm` (Linux). |
+| **Examples** | Browse curated example datasets at **<https://www.mzpeak.org/examples>**, or use the three built-in demos on the start page (general LC-MS, MSI imaging, and a TMT experiment). |
 
-**Building — Phases 0–5 complete; the app runs end-to-end in a browser.** As of HEAD
-`5175c0c` (2026-06-14): **180 unit tests + 15 Playwright e2e, all green**;
-`npm run typecheck` and `npm run build` clean across all four workspaces.
+## Quick start (web)
 
-| | what | state |
-|---|---|---|
-| `vendor/mzpeakts` | the one reader — `okohlbacher/mzpeakts@4067f84` (aux-arrays + Numpress Linear in one commit) | submodule pinned ✅ |
-| `packages/contracts` | wire protocol + per-message policy, wire types, capability model, unified store/view, URL grammar | Phase 1 ✅ (49 tests) |
-| `packages/ui-kit` | unified tokens + purely presentational components (uPlot spectra, tree, reporters) | Phase 2 ✅ (19 tests) |
-| `packages/core` | ONE Web Worker engine — reader I/O, adapters, scheduler, `EngineClient` ↔ worker; value-parity vs old readers | Phase 3 ✅ (112 tests) |
-| `app/` | the unified shell — capability-gated sidebar, lazy MSI views, URL resolver / deep links, `/IV/` legacy shim | Phase 4/5 ✅ (15 e2e) |
+1. Open **<https://www.mzpeak.org/view/>**.
+2. Drag a `.mzpeak` file onto the page, paste a file URL into the box, or click one of the
+   demo datasets (**Open from cloud** streams it; **Download & open** saves it first).
+3. Navigate with the left sidebar. The imaging tabs appear automatically for MSI files.
+4. Click **Share view** to copy a deep link to whatever you're looking at.
 
-**Remaining — Phase 6:** safety/perf/memory harness + rollback canary, collapse to one
-deploy, redirect old paths, decommission the source apps.
+## About the format
 
-The app was built **phase by phase**, harvesting specific code from the (untouched) old
-repos into `packages/*` and `app/`; parity is checked against golden fixtures captured from
-the old apps + their live deploys, not by hosting them here. Strategy:
-[`research/HARMONIZATION-PLAN.md`](.planning/research/HARMONIZATION-PLAN.md). The v2 roadmap
-got a second adversarial review (codex + vibe); both `reject`ed on under-specification,
-resolved in the contracts + recorded roadmap deltas — see
-[the synthesis](.planning/research/ADVERSARIAL-REVIEW-v2-SYNTHESIS.md).
+mzPeak is an open mass-spectrometry container: an uncompressed ZIP of
+[Apache Parquet](https://parquet.apache.org/) tables plus a JSON index
+(`mzpeak_index.json`). Specification: <https://github.com/HUPO-PSI/mzPeak>.
+mzPeakViewer reads it directly in the browser — no conversion, no server.
+
+## Building from source
+
+Requires Node 20+ and (for the desktop apps) a Rust toolchain. The repository is an npm
+workspace and the file reader is a git submodule, so clone recursively.
 
 ```bash
-npm run bootstrap     # submodule init → build reader → install (fresh checkout)
-npm test              # all workspaces — contracts + ui-kit + core (180 unit tests)
-npm run typecheck     # all four workspaces
-npm --workspace @mzpeak/app run dev      # run the app locally (Vite)
-npm --workspace @mzpeak/app run e2e      # Playwright e2e (smokes a built dist)
+git clone --recursive https://github.com/okohlbacher/mzpeakviewer
+cd mzpeakviewer
+npm run bootstrap                          # init submodule, build the reader, install
+npm --workspace @mzpeak/app run dev        # run the web app locally (Vite)
+npm --workspace @mzpeak/app run build      # production build → app/dist (static)
 ```
 
-Reference sources (read-only): `~/Claude/mzPeakIV`, `~/Claude/mzPeakExplorer`.
+Desktop apps are built with [Tauri](https://tauri.app/); see **[DESKTOP.md](DESKTOP.md)**
+for local builds and the release / signing process.
