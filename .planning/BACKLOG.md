@@ -47,9 +47,13 @@ Audit + e2e written: `.planning/MG-04-imaging-parity-audit.md` + `app/e2e/imagin
 the merged shell** (BL-02 RGB overlay, BL-S3 URL load). The other 8 are NOT-WIRED — the
 Part B "implemented" table describes mzPeakIV, not the merge. Migration is split into:
 
-- **MG-04b · wire-up (engine already built + tested):** BL-01 TIC-norm toggle, BL-03 mean
-  spectrum, BL-06 ROI→mean (rectangle-draw UI), BL-08 peak table, BL-09 peak-click→ion.
-  These have working engine ops with **no UI callers** — highest value-per-effort. **Effort:** M.
+- **MG-04b · wire-up — DONE (2026-06-16):** BL-01 TIC-norm toggle (threads `ticColumn`+`ticNorm`
+  into the ion rasterizer), BL-03 "Mean spectrum" button (`engine.meanSpectrum()` → aux panel),
+  BL-06 ROI rectangle-drag → `engine.roiSpectrum()` → aux panel, BL-08 centroid peak table
+  (top-200-by-intensity, collapsible), BL-09 peak-click → `SpectrumPlot` `onPeakClick` →
+  `setIonRequest` + navigate to ion view (auto-render deferred). All UI-only wire-up onto the
+  existing engine ops. Verified: peak table + mean-spectrum round-trip headless. **Now also
+  unblocks MG-01 `roi=`** (the ROI-draw producer exists).
 - **MG-04c · port IV compute/export modules (new code):** BL-04 Gaussian smoothing
   (`smooth.ts`), BL-07 histogram contrast (`histogram.ts`), BL-05 ion-image TIFF export
   (`tiff.ts`) — none ported into the merged repo. Main-thread on cached `store.ionImage`. **Effort:** M.

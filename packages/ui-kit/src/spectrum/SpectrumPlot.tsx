@@ -64,6 +64,7 @@ export function SpectrumPlot({
   reporters,
   zoom,
   onZoomChange,
+  onPeakClick,
 }: {
   spectrum: SpectrumArrays | null;
   xicWindow: { mz: number; tolDa: number } | null;
@@ -72,6 +73,9 @@ export function SpectrumPlot({
   zoom?: [number, number] | null;
   /** Reports the live m/z view to the store (null at full range). */
   onZoomChange?: (range: [number, number] | null) => void;
+  /** Optional: a click in the plot resolves the nearest peak m/z and reports it
+   *  (used to prefill the ion image). Non-breaking — omitted by other callers. */
+  onPeakClick?: (mz: number) => void;
 }) {
   const specRef = useRef<SpectrumArrays | null>(spectrum);
   specRef.current = spectrum;
@@ -83,6 +87,8 @@ export function SpectrumPlot({
   zoomRef.current = zoom;
   const onZoomRef = useRef(onZoomChange);
   onZoomRef.current = onZoomChange;
+  const onPeakClickRef = useRef(onPeakClick);
+  onPeakClickRef.current = onPeakClick;
   const plotRef = useRef<uPlot | null>(null);
   const rafRef = useRef<number | null>(null);
   const tipRef = useRef<HTMLDivElement | null>(null);
@@ -125,6 +131,28 @@ export function SpectrumPlot({
       tip.className = "spec-tooltip";
       plot.over.appendChild(tip);
       tipRef.current = tip;
+      // Peak click → report the nearest peak's m/z (ref keeps the callback fresh,
+      // matching the onZoomRef pattern). Snaps to the nearest x-point via
+      // nearestPeakIndex — for centroid that's the stick, for profile the nearest
+      // sample. A box-zoom drag also ends in a click, so we ignore clicks that
+      // moved more than a few px from where the press started.
+      let downX = 0;
+      let downY = 0;
+      plot.over.addEventListener("mousedown", (e) => {
+        downX = e.clientX;
+        downY = e.clientY;
+      });
+      plot.over.addEventListener("click", (e) => {
+        const cb = onPeakClickRef.current;
+        const s = specRef.current;
+        if (!cb || !s) return;
+        if (Math.abs(e.clientX - downX) > 4 || Math.abs(e.clientY - downY) > 4) return;
+        const left = plot.cursor.left;
+        if (left == null || left < 0) return;
+        const i = nearestPeakIndex(s, plot.posToVal(left, "x"));
+        if (i == null) return;
+        cb(s.mz[i]!);
+      });
       return plot;
     },
     HEIGHT,

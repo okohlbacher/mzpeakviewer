@@ -29,6 +29,16 @@ export function Spectra() {
   const msLevelFilter = useStore((s) => s.msLevelFilter);
   const setMsLevelFilter = useStore((s) => s.setMsLevelFilter);
   const channels = useStore((s) => s.channels);
+  const setIonRequest = useStore((s) => s.setIonRequest);
+  const setView = useStore((s) => s.setView);
+
+  // BL-09: clicking a peak (in the plot or the centroid peak table) prefills the
+  // ion view with that m/z (±0.05 Da) and navigates there. The user then clicks
+  // "Render" on the ion view — auto-render is a deferred follow-up.
+  const goToIonImage = (mz: number) => {
+    setIonRequest({ mz, tolDa: 0.05 });
+    setView("ion");
+  };
 
   const [inputVal, setInputVal] = useState("");
   // Clicking a channel pill zooms the plot to the reporter region + highlights that
@@ -379,6 +389,7 @@ export function Spectra() {
           reporters={reporterMarkers}
           zoom={channelZoom}
           onZoomChange={(range) => { if (range == null) setSelectedChannel(null); }}
+          onPeakClick={goToIonImage}
         />
         {spectrumLoading && !spectrum && (
           <div
@@ -445,7 +456,95 @@ export function Spectra() {
           </div>
         </details>
       )}
+
+      {/* BL-08: centroid peak table. Only for centroid (stick) spectra — profile
+          spectra are continuous traces and have no discrete peak list. Rows are
+          sorted by descending intensity and capped (the cap is noted in the UI).
+          Clicking a row drives BL-09 (jump to ion image) via the shared handler. */}
+      {spectrum && spectrum.representation === "centroid" && (
+        <PeakTable spectrum={spectrum} onPeakClick={goToIonImage} />
+      )}
     </div>
+  );
+}
+
+/** Collapsible centroid peak table (BL-08): m/z + intensity rows, sorted by
+ *  descending intensity, capped at the top PEAK_TABLE_CAP. Collapsed by default to
+ *  match the metadata panel. A row click jumps to the ion image (BL-09). */
+const PEAK_TABLE_CAP = 200;
+function PeakTable({
+  spectrum,
+  onPeakClick,
+}: {
+  spectrum: NonNullable<ReturnType<typeof useStore.getState>["spectrum"]>;
+  onPeakClick: (mz: number) => void;
+}) {
+  const n = spectrum.mz.length;
+  // Rank peak indices by descending intensity, then keep the top cap.
+  const order = Array.from({ length: n }, (_, i) => i);
+  order.sort((a, b) => spectrum.intensity[b]! - spectrum.intensity[a]!);
+  const top = order.slice(0, PEAK_TABLE_CAP);
+  const numRight = {
+    fontFamily: "var(--font-mono, monospace)",
+    textAlign: "right" as const,
+    padding: "0.15rem 0.6rem",
+    whiteSpace: "nowrap" as const,
+  };
+  const headCell = {
+    textAlign: "right" as const,
+    padding: "0.2rem 0.6rem",
+    color: "var(--text-muted)",
+    fontWeight: "var(--weight-semibold, 600)",
+    borderBottom: "1px solid var(--border-default, #e2e8f0)",
+    position: "sticky" as const,
+    top: 0,
+    background: "var(--surface-card, #fff)",
+  };
+  return (
+    <details data-testid="peak-table" style={{ marginTop: "0.1rem" }}>
+      <summary
+        style={{
+          cursor: "pointer",
+          fontSize: "var(--text-sm)",
+          color: "var(--text-muted)",
+          userSelect: "none",
+        }}
+      >
+        Peak table — top {Math.min(PEAK_TABLE_CAP, n)} of {n} (by intensity) · click a row to view ion image
+      </summary>
+      <div style={{ marginTop: "0.5rem", maxWidth: 420, maxHeight: 360, overflow: "auto" }}>
+        <table
+          style={{
+            borderCollapse: "collapse",
+            width: "100%",
+            fontSize: "var(--text-sm)",
+          }}
+        >
+          <thead>
+            <tr>
+              <th style={headCell}>m/z</th>
+              <th style={headCell}>intensity</th>
+            </tr>
+          </thead>
+          <tbody>
+            {top.map((i) => (
+              <tr
+                key={i}
+                data-testid={`peak-row-${i}`}
+                onClick={() => onPeakClick(spectrum.mz[i]!)}
+                title={`Click to view ion image at m/z ${spectrum.mz[i]!.toFixed(4)}`}
+                style={{ cursor: "pointer" }}
+              >
+                <td style={numRight}>{spectrum.mz[i]!.toFixed(4)}</td>
+                <td style={{ ...numRight, color: "var(--text-muted)" }}>
+                  {spectrum.intensity[i]!.toExponential(2)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
   );
 }
 

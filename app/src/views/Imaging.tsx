@@ -13,7 +13,7 @@
 // ./render; this file owns the canvas, controls, and engine round-trips.
 
 import { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
-import type { ImagingGridWire, OpticalImageMeta } from "@mzpeak/contracts";
+import type { ImagingGridWire, OpticalImageMeta, SpectrumArrays } from "@mzpeak/contracts";
 import { rebuildCoordMap } from "@mzpeak/core";
 import { SpectrumPlot } from "@mzpeak/ui-kit";
 import { useStore } from "../store";
@@ -147,6 +147,17 @@ function ImagingInner({
   // ── Shared display controls ───────────────────────────────────────────────
   const [colormap, setColormap] = useState<Colormap>("viridis");
   const [logScale, setLogScale] = useState(false);
+  // BL-01 — TIC normalization of the ion layer (divide each pixel by its TIC).
+  // Only meaningful when a per-pixel TIC column exists (`tic`).
+  const [ticNorm, setTicNorm] = useState(false);
+
+  // ── Aux spectrum (BL-03 mean / BL-06 ROI) ─────────────────────────────────
+  // A derived spectrum (whole-image mean or ROI mean) shown in a panel below the
+  // canvas. Local state — never routed to the store. `count` = pixels averaged.
+  const [auxSpectrum, setAuxSpectrum] = useState<
+    { kind: "mean" | "roi"; spectrum: SpectrumArrays; count: number } | null
+  >(null);
+  const [auxBusy, setAuxBusy] = useState(false);
 
   // ── Ion-image state ───────────────────────────────────────────────────────
   // The rendered ion image + RGB composite live in the store (not local state) so
@@ -211,9 +222,19 @@ function ImagingInner({
   const [renderProgress, setRenderProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [readout, setReadout] = useState<{ x: number; y: number; key: number } | null>(null);
+  // BL-06 — rectangle-drag ROI selection (local 0-based cells). `start` is the
+  // mousedown cell; `current` tracks the pointer. A move of >0 cells in x or y
+  // promotes the gesture from a single-pixel click to an ROI mean.
+  const [roiDrag, setRoiDrag] = useState<{
+    start: { x: number; y: number };
+    current: { x: number; y: number };
+  } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  // Set on mouseup when the gesture was an ROI drag, so the trailing native
+  // `click` is suppressed and does NOT also fire a single-pixel pick.
+  const roiHandledRef = useRef(false);
 
   // ── Reset optical state when the FILE changes (new opticalImages set) ──────
   // Bump the gen so any in-flight decode from the previous file is dropped, clear the per-path
@@ -316,6 +337,55 @@ function ImagingInner({
     }
   }
 
+  // BL-03 — whole-image mean / reference spectrum. The engine aggregates across
+  // all (or sampled) pixels; we stash the result in `auxSpectrum` for the panel.
+  async function runMeanSpectrum() {
+    if (auxBusy) return;
+    setAuxBusy(true);
+    setError(null);
+    try {
+      const s = await engine.meanSpectrum();
+      setAuxSpectrum({ kind: "mean", spectrum: s, count: 0 });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAuxBusy(false);
+    }
+  }
+
+  // BL-06 — collect the spectrum indices enclosed by an ROI rectangle (local
+  // 0-based cells, inclusive), skipping absent cells, then mean them via the engine.
+  async function runRoiSpectrum(a: { x: number; y: number }, b: { x: number; y: number }) {
+    if (auxBusy) return;
+    const x0 = Math.max(0, Math.min(a.x, b.x));
+    const x1 = Math.min(width - 1, Math.max(a.x, b.x));
+    const y0 = Math.max(0, Math.min(a.y, b.y));
+    const y1 = Math.min(height - 1, Math.max(a.y, b.y));
+    const indices: number[] = [];
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const key = y * width + x;
+        if (presenceMask[key] === 0) continue;
+        const idx = coordMap.get(key);
+        if (idx != null) indices.push(idx);
+      }
+    }
+    if (indices.length === 0) {
+      setError("ROI contains no data pixels.");
+      return;
+    }
+    setAuxBusy(true);
+    setError(null);
+    try {
+      const s = await engine.roiSpectrum(indices);
+      setAuxSpectrum({ kind: "roi", spectrum: s, count: indices.length });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAuxBusy(false);
+    }
+  }
+
   // ── Canvas paint — switches on the active mode ────────────────────────────
   const decodedOptical = selectedOpticalPath ? (decoded[selectedOpticalPath] ?? null) : null;
 
@@ -334,7 +404,7 @@ function ImagingInner({
       if (!ionImage) return;
       canvas.width = width;
       canvas.height = height;
-      blit(ctx, rasterizeImage(ionImage, grid, { colormap, percentile: 0.99, logScale }), width, height);
+      blit(ctx, rasterizeImage(ionImage, grid, { colormap, percentile: 0.99, logScale, tic: ticNorm ? tic : null, ticNorm }), width, height);
     } else if (mode === "multi") {
       if (!multi) return;
       canvas.width = width;
@@ -359,7 +429,7 @@ function ImagingInner({
       }
       const rasterizeLayer = (key: LayerKey): Uint8ClampedArray | null => {
         if (key === "tic") return tic ? rasterizeTic(tic, grid, colormap, logScale) : null;
-        if (key === "ion") return ionImage ? rasterizeImage(ionImage, grid, { colormap, percentile: 0.99, logScale }) : null;
+        if (key === "ion") return ionImage ? rasterizeImage(ionImage, grid, { colormap, percentile: 0.99, logScale, tic: ticNorm ? tic : null, ticNorm }) : null;
         if (key === "rgb") return multi ? rasterizeMultiChannel(multi, grid, null, false) : null;
         if (key === "optical") return decodedOptical ? opticalToGrid(decodedOptical, width, height) : null;
         return null;
@@ -396,6 +466,7 @@ function ImagingInner({
     height,
     colormap,
     logScale,
+    ticNorm,
   ]);
 
   // ── Contain-fit display sizing + zoom/pan ─────────────────────────────────
@@ -442,14 +513,43 @@ function ImagingInner({
     ? { width: displaySize.w * zoom, height: displaySize.h * zoom }
     : { aspectRatio: `${intrinsic.w} / ${intrinsic.h}`, maxWidth: "100%", maxHeight: "100%" };
 
-  // ── Pointer handlers (pixel pick + hover readout) — grid modes only ───────
+  // ── Pointer handlers (pixel pick + hover readout + ROI drag) — grid modes ──
   const pickable = mode !== "optical";
   function onMove(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!pickable) return;
-    setReadout(toGridCoord(e, e.currentTarget, width, height));
+    const hit = toGridCoord(e, e.currentTarget, width, height);
+    setReadout(hit);
+    // BL-06 — while dragging, extend the ROI rectangle to the current cell.
+    if (roiDrag && hit) {
+      setRoiDrag((d) => (d ? { ...d, current: { x: hit.x, y: hit.y } } : d));
+    }
   }
   function onLeave() {
     setReadout(null);
+    // Abandon an in-flight ROI drag if the pointer leaves the canvas (the mouseup
+    // would land outside and never fire here) — avoids a stuck rectangle.
+    if (roiDrag) setRoiDrag(null);
+  }
+
+  function onMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!pickable || e.button !== 0) return;
+    const hit = toGridCoord(e, e.currentTarget, width, height);
+    if (!hit) return;
+    setRoiDrag({ start: { x: hit.x, y: hit.y }, current: { x: hit.x, y: hit.y } });
+  }
+
+  function onMouseUp(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!pickable) return;
+    const drag = roiDrag;
+    setRoiDrag(null);
+    if (!drag) return;
+    const hit = toGridCoord(e, e.currentTarget, width, height);
+    const end = hit ?? drag.current;
+    const moved = end.x !== drag.start.x || end.y !== drag.start.y;
+    // A drag that moved ≥1 cell in x or y is an ROI; otherwise let onClick fire
+    // the existing single-pixel pick (we do NOT pick here to avoid double-firing).
+    roiHandledRef.current = moved;
+    if (moved) void runRoiSpectrum(drag.start, end);
   }
   // Pick the cell at local (x0,y0) — shared by mouse click and keyboard Enter.
   function pickCell(x0: number, y0: number) {
@@ -474,6 +574,11 @@ function ImagingInner({
 
   function onClick(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!pickable) return;
+    // Suppress the click that trails an ROI drag (it would re-fire a pixel pick).
+    if (roiHandledRef.current) {
+      roiHandledRef.current = false;
+      return;
+    }
     const hit = toGridCoord(e, e.currentTarget, width, height);
     if (!hit) return;
     pickCell(hit.x, hit.y);
@@ -623,6 +728,39 @@ function ImagingInner({
           </>
         )}
 
+        {/* TIC norm (BL-01) — ion + overlay only; needs a per-pixel TIC column. */}
+        {(mode === "ion" || mode === "overlay") && (
+          <Field label="Normalize">
+            <label
+              title={tic ? "Divide each pixel's intensity by its total ion current" : "No per-pixel TIC in this file"}
+              style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "0.85rem", height: 30 }}
+            >
+              <input
+                type="checkbox"
+                checked={ticNorm}
+                disabled={!tic}
+                aria-label="TIC normalize"
+                data-testid="imaging-ticnorm"
+                onChange={(e) => setTicNorm(e.target.checked)}
+              />
+              TIC norm
+            </label>
+          </Field>
+        )}
+
+        {/* Mean / reference spectrum (BL-03) — grid (pickable) modes only. */}
+        {pickable && (
+          <button
+            type="button"
+            onClick={() => void runMeanSpectrum()}
+            disabled={auxBusy}
+            data-testid="imaging-mean-spectrum-button"
+            style={{ ...btnStyle, background: "var(--surface-card, #fff)", color: "var(--blue-600, #3b54da)" }}
+          >
+            {auxBusy ? "Computing…" : "Mean spectrum"}
+          </button>
+        )}
+
         {/* Zoom controls */}
         <div style={{ display: "flex", gap: "0.25rem", marginLeft: "auto" }}>
           <button type="button" aria-label="zoom out" onClick={() => setZoom((z) => Math.max(1, z / 1.3))} style={zoomBtn}>−</button>
@@ -657,25 +795,55 @@ function ImagingInner({
           }}
         >
           {hasContent ? (
-            <canvas
-              ref={canvasRef}
-              onMouseMove={onMove}
-              onMouseLeave={onLeave}
-              onClick={onClick}
-              onKeyDown={onCanvasKeyDown}
-              onFocus={() => pickable && kbCell == null && setKbCell({ x: Math.floor(width / 2), y: Math.floor(height / 2) })}
-              onBlur={() => setKbCell(null)}
-              tabIndex={pickable ? 0 : -1}
-              data-testid="imaging-canvas"
-              aria-label={`${mode} image, ${width} by ${height} pixels.${pickable ? " Use arrow keys to move the cursor and Enter to inspect a pixel's spectrum, or click a pixel." : ""}`}
-              style={{
-                ...canvasSizeStyle,
-                imageRendering: "pixelated",
-                cursor: pickable ? "crosshair" : "default",
-                userSelect: "none",
-                display: "block",
-              }}
-            />
+            <div style={{ position: "relative", display: "inline-block", lineHeight: 0 }}>
+              <canvas
+                ref={canvasRef}
+                onMouseMove={onMove}
+                onMouseLeave={onLeave}
+                onMouseDown={onMouseDown}
+                onMouseUp={onMouseUp}
+                onClick={onClick}
+                onKeyDown={onCanvasKeyDown}
+                onFocus={() => pickable && kbCell == null && setKbCell({ x: Math.floor(width / 2), y: Math.floor(height / 2) })}
+                onBlur={() => setKbCell(null)}
+                tabIndex={pickable ? 0 : -1}
+                data-testid="imaging-canvas"
+                aria-label={`${mode} image, ${width} by ${height} pixels.${pickable ? " Use arrow keys to move the cursor and Enter to inspect a pixel's spectrum, or click a pixel, or drag a rectangle to average a region." : ""}`}
+                style={{
+                  ...canvasSizeStyle,
+                  imageRendering: "pixelated",
+                  cursor: pickable ? "crosshair" : "default",
+                  userSelect: "none",
+                  display: "block",
+                }}
+              />
+              {/* BL-06 — translucent ROI rectangle while dragging. Positioned by
+                  percentage of the grid (cells are local 0-based, inclusive). */}
+              {pickable && roiDrag && (() => {
+                const x0 = Math.min(roiDrag.start.x, roiDrag.current.x);
+                const x1 = Math.max(roiDrag.start.x, roiDrag.current.x);
+                const y0 = Math.min(roiDrag.start.y, roiDrag.current.y);
+                const y1 = Math.max(roiDrag.start.y, roiDrag.current.y);
+                return (
+                  <div
+                    data-testid="imaging-roi-rect"
+                    aria-hidden
+                    style={{
+                      position: "absolute",
+                      pointerEvents: "none",
+                      left: `${(x0 / width) * 100}%`,
+                      top: `${(y0 / height) * 100}%`,
+                      width: `${((x1 - x0 + 1) / width) * 100}%`,
+                      height: `${((y1 - y0 + 1) / height) * 100}%`,
+                      border: "1px solid var(--accent, #3b54da)",
+                      background: "var(--accent, #3b54da)",
+                      opacity: 0.25,
+                      boxSizing: "border-box",
+                    }}
+                  />
+                );
+              })()}
+            </div>
           ) : (
             <EmptyState mode={mode} hasOptical={hasOptical} opticalErr={selectedOpticalPath ? opticalErr[selectedOpticalPath] : undefined} />
           )}
@@ -793,6 +961,64 @@ function ImagingInner({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Aux spectrum panel (BL-03 mean / BL-06 ROI) ───────────────────────
+          A derived spectrum (whole-image mean or ROI mean) shown below the canvas.
+          Local state only; cleared with the close (×) button. */}
+      {auxSpectrum && (
+        <div
+          data-testid="imaging-mean-spectrum"
+          style={{
+            flexShrink: 0,
+            border: "1px solid var(--border-default, #e2e8f0)",
+            borderRadius: 8,
+            background: "var(--surface-card, #fff)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              padding: "0.4rem 0.6rem",
+              borderBottom: "1px solid var(--border-default, #e2e8f0)",
+              fontSize: "0.78rem",
+              color: "var(--text-secondary, #475569)",
+            }}
+          >
+            <strong style={{ color: "var(--text-heading, #1e293b)" }}>
+              {auxSpectrum.kind === "mean" ? "Mean spectrum" : `ROI mean — ${auxSpectrum.count} pixels`}
+            </strong>
+            <span style={{ fontFamily: "var(--font-mono, monospace)", color: "var(--text-muted, #94a3b8)" }}>
+              {auxSpectrum.spectrum.mz.length} pts
+              {auxSpectrum.spectrum.representation === "centroid" ? " · centroid" : " · profile"}
+            </span>
+            <button
+              type="button"
+              onClick={() => setAuxSpectrum(null)}
+              aria-label="close mean spectrum"
+              data-testid="imaging-mean-spectrum-close"
+              style={{
+                marginLeft: "auto",
+                border: "1px solid var(--border-default, #e2e8f0)",
+                borderRadius: 6,
+                background: "var(--surface-card, #fff)",
+                color: "var(--text-secondary, #475569)",
+                fontSize: "0.9rem",
+                lineHeight: 1,
+                padding: "0.1rem 0.5rem",
+                cursor: "pointer",
+              }}
+            >
+              ×
+            </button>
+          </div>
+          <div className="chart-host" style={{ height: 200, position: "relative" }} aria-live="polite">
+            <SpectrumPlot spectrum={auxSpectrum.spectrum} xicWindow={null} />
+          </div>
         </div>
       )}
     </section>
