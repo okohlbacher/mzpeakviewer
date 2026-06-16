@@ -20,3 +20,6 @@ design-reviews/
 
 # generated probe URL list
 bench/cdn-probe-list.tsv
+
+# Tauri (desktop) Rust build artifacts — never commit the compiled target dir.
+app/src-tauri/target/

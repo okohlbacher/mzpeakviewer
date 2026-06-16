@@ -1,0 +1,16 @@
+{
+  "name": "@mzpeak/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Tauri v2 desktop shell for mzPeakViewer. The Rust crate + bundle config live alongside in app/src-tauri/. Run these from this directory (app/src-tauri/) so the Tauri CLI resolves tauri.conf.json here.",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:universal": "tauri build --target universal-apple-darwin",
+    "icon": "tauri icon app-icon.png"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

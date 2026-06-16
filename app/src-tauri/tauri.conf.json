@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "mzPeakViewer",
+  "version": "0.0.0",
+  "identifier": "org.mzpeak.viewer",
+  "build": {
+    "beforeDevCommand": {
+      "script": "npm --workspace @mzpeak/app run dev",
+      "cwd": "../.."
+    },
+    "beforeBuildCommand": {
+      "script": "bash app/src-tauri/scripts/build-frontend.sh",
+      "cwd": "../.."
+    },
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "mzPeakViewer",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost https: blob: data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi", "app", "dmg", "appimage", "deb", "rpm"],
+    "category": "Productivity",
+    "shortDescription": "Viewer for mzPeak mass spectrometry files",
+    "longDescription": "mzPeakViewer is a client-side viewer for mzPeak mass spectrometry files, including imaging (MSI) datasets.",
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "webviewInstallMode": {
+        "type": "offlineInstaller"
+      }
+    },
+    "macOS": {
+      "signingIdentity": null,
+      "entitlements": "entitlements.plist"
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
+  }
+}

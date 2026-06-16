@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Least-privilege capability set for the static mzPeakViewer shell: core window/webview defaults, native open/save dialogs (if wired by the frontend), and opening external https:// links in the OS browser.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "dialog:default",
+    "fs:default"
+  ]
+}

@@ -1,0 +1,245 @@
+# Desktop bundles (Tauri v2) — Windows / macOS / Linux.
+#
+# ADDITIVE and OPT-IN: this workflow NEVER runs on a normal push. It triggers only on
+# `v*` release tags and manual workflow_dispatch, so it stays dormant until the operator
+# opts in. It does NOT touch deploy.yml (the gh-pages project-page build).
+#
+# What it does, per OS matrix entry:
+#   - checkout WITH the mzpeakts reader submodule (submodules: recursive)
+#   - Node 22 + Rust stable (+ both apple targets on macOS for the universal build)
+#   - Linux: install the Tauri v2 canonical apt deps on ubuntu-24.04 (webkit2gtk-4.1)
+#   - typecheck gate (mirrors deploy.yml) BEFORE the bundle
+#   - tauri-apps/tauri-action runs `tauri build`, which fires the beforeBuildCommand
+#     (app/src-tauri/scripts/build-frontend.sh — the SINGLE owner of the frontend build:
+#     reader build + workspace install + contracts build + VITE_BASE=/ app build + guard).
+#     This workflow deliberately does NOT duplicate any reader/contracts/app build steps.
+#   - signing secrets are wired via env with graceful UNSIGNED fallback (all-or-nothing
+#     gates so a PARTIAL Apple/Azure secret set never hard-fails a job)
+#   - on a `v*` tag: tauri-action creates a DRAFT GitHub Release with the bundles
+#   - on workflow_dispatch (no tag): bundles are uploaded as run artifacts so a dry-run
+#     build is still downloadable / verifiable
+#
+# Secrets the operator must provide (see DESKTOP.md). All optional — absent => unsigned.
+#   macOS sign:        APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#                      KEYCHAIN_PASSWORD
+#   macOS notarize:    APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD (exported as APPLE_PASSWORD),
+#                      APPLE_TEAM_ID   (TRIPLET — all three or none)
+#   Windows (inert v1): AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+
+name: Desktop bundles
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# Least privilege at the top level. The bundle job that needs to create the draft
+# release elevates to contents: write at JOB level only (blast-radius containment
+# against a malicious crate build.rs).
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    permissions:
+      contents: write # tauri-action creates the DRAFT GitHub Release on v* tags
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS — UNIVERSAL (both arches). Needs both rust targets.
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+            rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+          # Windows — NSIS + MSI (from bundle.targets in tauri.conf.json)
+          - platform: windows-latest
+            args: ""
+            rust-targets: ""
+          # Linux — AppImage + deb + rpm. ubuntu-24.04 ships webkit2gtk-4.1
+          # (ubuntu-22.04 runner image is being retired). Higher glibc floor accepted;
+          # baseline documented in DESKTOP.md.
+          - platform: ubuntu-24.04
+            args: ""
+            rust-targets: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout (with the mzpeakts reader submodule)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          submodules: recursive
+
+      - name: Setup Node 22
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: 22
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@4f366e621dc8fa63f557ca04b8f4361824a35a45 # stable (pinned SHA)
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2.7.5
+        with:
+          workspaces: "app/src-tauri -> target"
+
+      # Tauri v2 canonical Linux deps (ubuntu-24.04 / webkit2gtk-4.1). Includes the
+      # ayatana appindicator (NOT the deprecated libappindicator3-dev) and `rpm` for the
+      # rpm bundle target.
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            libssl-dev \
+            file \
+            wget \
+            rpm
+
+      # The desktop bundle is fully built later by build-frontend.sh (tauri.conf.json
+      # beforeBuildCommand). But the typecheck GATE below runs first and needs node_modules
+      # + the built @mzpeak/contracts dist that @mzpeak/core and the app import — so we
+      # materialize them here, mirroring deploy.yml's pre-typecheck chain exactly. (npm
+      # install is idempotent; build-frontend.sh re-running it during `tauri build` is a
+      # cached no-op.)
+      - name: Build the vendored reader
+        run: cd vendor/mzpeakts/lib && npm ci && npm run build
+      - name: Install workspace
+        run: npm install
+      - name: Build contracts
+        run: npm run build -w @mzpeak/contracts
+      - name: Typecheck (gate — don't bundle a broken build)
+        run: npm run typecheck
+
+      # ---- Signing gate (macOS) -------------------------------------------------------
+      # Graceful unsigned fallback. We compute booleans so that a PARTIAL secret set never
+      # hard-fails: notarization env is exported ONLY when the full Apple triplet is present.
+      - name: Compute macOS signing flags
+        if: matrix.platform == 'macos-latest'
+        id: macsign
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            echo "sign=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            echo "notarize=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "notarize=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ---- Build + bundle -------------------------------------------------------------
+      # tauri-action runs `tauri build ${{ matrix.args }}`, which fires the beforeBuildCommand
+      # (build-frontend.sh). On a v* tag it ALSO creates a DRAFT GitHub Release.
+      #
+      # Signing env is wired unconditionally but is INERT when the secrets are empty:
+      #   - APPLE_CERTIFICATE empty  => macOS bundle is produced unsigned (no failure).
+      #   - APPLE_PASSWORD/ID/TEAM exported ONLY when the triplet is complete (gated above),
+      #     so notarytool never sees a partial set.
+      #   - Windows: AZURE_* wired as env only; signCommand is intentionally omitted in
+      #     tauri.conf.json for v1, so Windows ships UNSIGNED even when AZURE_* are set.
+      #   - TAURI_SIGNING_PRIVATE_KEY: updater is out of scope v1 (no-op when unset).
+      - name: Build the desktop app (tauri-action)
+        id: tauri
+        uses: tauri-apps/tauri-action@42e9df6b59f3df515b07e80e7159e1edf43bef74 # v0.5.20
+        env:
+          # Draft release creation (v* tags only).
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS signing (inert when empty).
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          # macOS notarization — exported ONLY when the full triplet is present.
+          # NOTE: Tauri reads APPLE_PASSWORD (not APPLE_APP_SPECIFIC_PASSWORD).
+          APPLE_ID: ${{ steps.macsign.outputs.notarize == 'true' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ steps.macsign.outputs.notarize == 'true' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ steps.macsign.outputs.notarize == 'true' && secrets.APPLE_TEAM_ID || '' }}
+          # Windows Azure Trusted Signing — wired as env only; inert in v1 (no signCommand).
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          # Tauri updater signing — out of scope v1; no-op when unset.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          # Frontend build is owned by beforeBuildCommand; don't let tauri-action build it.
+          projectPath: app/src-tauri
+          args: ${{ matrix.args }}
+          # On a v* tag, create a DRAFT release (operator publishes manually). Empty on
+          # workflow_dispatch => no release; artifacts are uploaded below instead.
+          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/v') && format('mzPeakViewer {0}', github.ref_name) || '' }}
+          releaseDraft: true
+          prerelease: false
+
+      # ---- macOS post-bundle signature verification (gated on cert presence) -----------
+      # Fails CI on a botched sign/notarize. Skipped entirely on unsigned builds.
+      - name: Verify macOS signature + notarization
+        if: matrix.platform == 'macos-latest' && steps.macsign.outputs.sign == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apps=( app/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app )
+          if [ ${#apps[@]} -eq 0 ]; then
+            echo "ERROR: no .app bundle found to verify"; exit 1
+          fi
+          for app in "${apps[@]}"; do
+            echo "== codesign -dv =="
+            codesign -dv --verbose=4 "$app"
+            echo "== spctl assess =="
+            spctl -a -vvv -t install "$app"
+            if [ "${{ steps.macsign.outputs.notarize }}" = "true" ]; then
+              echo "== stapler validate =="
+              xcrun stapler validate "$app"
+            fi
+          done
+
+      # ---- Dispatch (non-tag) artifact upload -----------------------------------------
+      # On workflow_dispatch there is no release; surface the bundles as run artifacts so a
+      # dry-run build is downloadable and signing can be verified pre-tag.
+      # tauri-action emits artifactPaths as a JSON array. upload-artifact wants a
+      # newline-separated path glob list, so materialize one into a multiline env var.
+      - name: Collect artifact paths (dispatch / non-tag runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        id: artifacts
+        shell: bash
+        env:
+          ARTIFACT_PATHS_JSON: ${{ steps.tauri.outputs.artifactPaths }}
+        run: |
+          {
+            echo "paths<<__EOF__"
+            node -e "process.stdout.write(JSON.parse(process.env.ARTIFACT_PATHS_JSON).join('\n')+'\n')"
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload bundles as artifacts (dispatch / non-tag runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+        with:
+          name: mzpeakviewer-${{ matrix.platform }}
+          path: ${{ steps.artifacts.outputs.paths }}
+          if-no-files-found: warn
+          retention-days: 14
