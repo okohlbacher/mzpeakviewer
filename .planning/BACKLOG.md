@@ -14,15 +14,17 @@ orientation tool**, not a full analysis suite. Statistical/analytical features
 
 ## Part A — Merge-specific backlog (new)
 
-### MG-01 · Deep-link extras beyond parity (`ch=` / `roi=` / `px=`)
-**Partially DONE (2026-06-16): `ion=` + `ch=` round-trip.** Wired the Ion-image m/z+tol
-and RGB channel list through `store.ionRequest` / `store.rgbChannels` ↔ `urlSync`
-(`currentShareUrl`/`applyViewState`) ↔ `Imaging.tsx`. The grammar already serialized/
-resolved these; this closed a real bug (a rendered ion image was previously NOT
-shareable — `ion=` was consumed on load but never emitted). **Still deferred:** `roi=`
-and `px=` — they have **no producer UI** in the merged Imaging view (no ROI-draw, no
-persistent pixel-pick); those land with the ROI/pixel features under **MG-04**, then the
-already-complete grammar parse makes the deep link a one-line wire-up. **Effort:** S (remainder).
+### MG-01 · Deep-link extras beyond parity (`ch=` / `roi=` / `px=`) — **DONE (2026-06-16)**
+All four imaging deep-links now round-trip end to end, wired through the store ↔ `urlSync`
+(`currentShareUrl`/`applyViewState`) ↔ `Imaging.tsx`, on top of the already-complete grammar:
+- **`ion=`** (Ion-image m/z+tol) + **`ch=`** (RGB channel list) — `store.ionRequest` /
+  `store.rgbChannels`. Closed a real bug (a rendered ion image wasn't shareable before).
+- **`px=`** (pixel pick) — `store.selector` widened with `{by:"pixel",x,y,index}` provenance
+  + `selectPixel()` resolving via the grid coordMap; a pick emits `px=`, a `?px=` link
+  reflects into the dock.
+- **`roi=`** (region mean) — `store.roiRect` (absolute IMS corners); drawing an ROI (MG-04b
+  producer) emits `roi=x0,y0,x1,y1`, and a `?roi=` link re-runs the region-mean (loop-guarded).
+Verified: px= and roi= apply→store→re-emit round-trips confirmed headless.
 
 ### MG-02 · Live address-bar URL sync (toggle) — **DONE (2026-06-16)**
 Opt-in "Sync URL" checkbox (default off, persisted in `localStorage` `mzpeak.urlSync`)
@@ -58,10 +60,14 @@ Part B "implemented" table describes mzPeakIV, not the merge. Migration is split
   (`smooth.ts`), BL-07 histogram contrast (`histogram.ts`), BL-05 ion-image TIFF export
   (`tiff.ts`) — none ported into the merged repo. Main-thread on cached `store.ionImage`. **Effort:** M.
 
-### MG-05 · SDRF study-metadata long tail
-Long-tail characteristics matrix + study protocols + ontology-source registry,
-deferred to expanders in Explorer (EX-SDRF-01/02). Lives in Summary ▸ Study.
-**Effort:** M.
+### MG-05 · SDRF study-metadata long tail — **first slice DONE (2026-06-16)**
+Added a **Summary ▸ Study** panel: dataset accession + title (from the index `study` block),
+the run's isobaric channels, and a **per-sample characteristics matrix** (samples ×
+their CV parameters, from `sample_list`). Engine `engineStudyMeta` now returns the plainified
+`study` block + `samples`; `StudyMeta` gained `study?`/`samples?`; store holds them; verified
+on PXD011799 (accession + samples table render). **Still deferred:** the FULL embedded SDRF/ISA
+characteristics table (referenced by `sample_metadata.member` — a separate archive member that
+must be fetched + parsed) and study protocols / ontology-source registry. **Effort (remainder):** M.
 
 ### MG-06 · Read-only minimal parquet-wasm build (bundle cut)
 Once a real mzPeak confirms no internal Parquet compression codecs are needed,

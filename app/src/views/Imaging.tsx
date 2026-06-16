@@ -168,6 +168,12 @@ function ImagingInner({
   const setIonRequestStore = useStore((s) => s.setIonRequest);
   const setRgbChannelsStore = useStore((s) => s.setRgbChannels);
   const storeRgbChannels = useStore((s) => s.rgbChannels);
+  // MG-01: ROI rectangle round-trip (absolute IMS corners) for the ?roi= deep link.
+  const storeRoiRect = useStore((s) => s.roiRect);
+  const setRoiRectStore = useStore((s) => s.setRoiRect);
+  // The last ROI rect (absolute, "x0,y0,x1,y1") we ran — guards the deep-link effect
+  // from re-running the user's own draw and from looping when runRoiSpectrum sets the store.
+  const lastRoiRunRef = useRef<string | null>(null);
   const [mz, setMz] = useState(() => (ionRequest ? String(ionRequest.mz) : ""));
   const [tol, setTol] = useState(() => (ionRequest ? String(ionRequest.tolDa) : "0.5"));
   const ionImage = useStore((s) => s.ionImage);
@@ -374,6 +380,11 @@ function ImagingInner({
       setError("ROI contains no data pixels.");
       return;
     }
+    // Record the rect as ABSOLUTE IMS corners so the selection round-trips as ?roi=.
+    // Track it in lastRoiRunRef first so the deep-link effect doesn't re-run this draw.
+    const absRect: [number, number, number, number] = [x0 + originX, y0 + originY, x1 + originX, y1 + originY];
+    lastRoiRunRef.current = absRect.join(",");
+    setRoiRectStore(absRect);
     setAuxBusy(true);
     setError(null);
     try {
@@ -385,6 +396,22 @@ function ImagingInner({
       setAuxBusy(false);
     }
   }
+
+  // MG-01: render the region-mean for a ?roi= deep link. When store.roiRect is set by
+  // urlSync (not by our own draw — guarded via lastRoiRunRef) convert the absolute
+  // corners → local cells and run the ROI mean, reflecting the shared link.
+  useEffect(() => {
+    if (!storeRoiRect) return;
+    const key = storeRoiRect.join(",");
+    if (key === lastRoiRunRef.current) return; // our own draw, or already run
+    lastRoiRunRef.current = key;
+    const [ax, ay, bx, by] = storeRoiRect;
+    void runRoiSpectrum(
+      { x: ax - originX, y: ay - originY },
+      { x: bx - originX, y: by - originY },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeRoiRect]);
 
   // ── Canvas paint — switches on the active mode ────────────────────────────
   const decodedOptical = selectedOpticalPath ? (decoded[selectedOpticalPath] ?? null) : null;

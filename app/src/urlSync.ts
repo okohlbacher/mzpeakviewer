@@ -108,6 +108,9 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
   // RGB channel list so a ?ion=/?ch= link lands on populated controls.
   if (v.ion) st.setIonRequest(v.ion);
   if (v.channels.length) st.setRgbChannels(v.channels);
+  // 3c. Imaging ROI (MG-01): a ?roi= link sets the rect; the Imaging view renders its
+  // region-mean spectrum (resolves the rect → enclosed pixels → engine.roiSpectrum).
+  if (v.roi) st.setRoiRect(v.roi);
 
   // 4. Cross-mode / dropped-param notices → the store's non-blocking banner.
   if (notices.length) {
@@ -187,6 +190,9 @@ export function currentShareUrl(): string {
     // round-trip. DEFAULT_VIEW_STATE has ion:null / channels:[] — only set when present.
     ion: s.ionRequest ?? DEFAULT_VIEW_STATE.ion,
     channels: s.rgbChannels.length ? s.rgbChannels : DEFAULT_VIEW_STATE.channels,
+    // imaging ROI (MG-01): emit roi=x0,y0,x1,y1 (absolute IMS corners) so a region-mean
+    // selection round-trips.
+    roi: s.roiRect ?? DEFAULT_VIEW_STATE.roi,
   };
 
   const mode = modeFromCapabilities();

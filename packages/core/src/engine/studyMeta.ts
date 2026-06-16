@@ -4,6 +4,7 @@
 // + reagents reporter-ion table. Projection path only (the producer-encoded channels);
 // the SDRF/ISA-blob fallback is a later slice — label-free files just return no channels.
 import type { Reader } from "../reader/openUrl";
+import { plainify } from "../reader/fileMeta";
 import type { StudyMeta, ChannelAssignment } from "@mzpeak/contracts";
 
 // ── Reagent reporter-ion m/z table (shipped constants; the file supplies only the
@@ -100,5 +101,15 @@ export async function engineStudyMeta(reader: Reader): Promise<StudyMeta> {
     });
   }
 
-  return { present: channels.length > 0, channels, sdrf: null, isa: null };
+  // MG-05: surface the structured `study` block + the per-sample list (plainified) for
+  // the Summary ▸ Study panel. (The full SDRF characteristics matrix lives in a separate
+  // embedded member referenced by sample_metadata — deferred.)
+  return {
+    present: channels.length > 0,
+    channels,
+    sdrf: null,
+    isa: null,
+    study: meta.study != null ? (plainify(study) as unknown) : null,
+    samples: sampleList.length ? (plainify(sampleList) as unknown[]) : undefined,
+  };
 }

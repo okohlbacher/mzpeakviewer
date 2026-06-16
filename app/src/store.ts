@@ -70,6 +70,10 @@ export interface AppState {
 
   // SDRF/ISA isobaric channel assignments for the open run (empty for label-free).
   channels: ChannelAssignment[];
+  /** MG-05: the index `study` block (dataset accession, title, run_sample_binding) +
+   *  the per-sample list, for the Summary ▸ Study panel. Null until studyMeta resolves. */
+  study: unknown;
+  studySamples: unknown[] | null;
 
   // Imaging deep-link round-trip (MG-01): the m/z+tolerance last entered in the
   // Ion-image view, and the RGB channel list from the multi-channel view. Mirrored
@@ -77,6 +81,9 @@ export interface AppState {
   // (Distinct from `channels` above, which is SDRF isobaric labels.)
   ionRequest: { mz: number; tolDa: number } | null;
   rgbChannels: { mz: number; tolDa: number; color: string }[];
+  /** MG-01: the last imaging ROI rectangle (ABSOLUTE IMS corners x0,y0,x1,y1) so a
+   *  region-mean selection round-trips as `roi=x0,y0,x1,y1` in the share URL. */
+  roiRect: [number, number, number, number] | null;
 
   // Live address-bar URL sync (MG-02): opt-in user preference, default OFF.
   // Persisted to localStorage; NOT reset on file close.
@@ -134,6 +141,8 @@ export interface AppState {
   setMultiChannel: (images: (Float32Array | null)[] | null) => void;
   /** MG-01: mirror the Ion-image view's m/z+tolerance so ?ion= can round-trip. */
   setIonRequest: (req: { mz: number; tolDa: number } | null) => void;
+  /** MG-01: set/clear the imaging ROI rectangle (absolute IMS corners). */
+  setRoiRect: (rect: [number, number, number, number] | null) => void;
   /** MG-01: mirror the RGB channels list so ?ch= can round-trip. */
   setRgbChannels: (channels: { mz: number; tolDa: number; color: string }[]) => void;
   /** MG-02: toggle live address-bar URL sync (persisted to localStorage). */
@@ -185,8 +194,11 @@ const INITIAL_OPEN_STATE = {
   multiChannel: null,
   ionCacheReady: false,
   channels: [],
+  study: null,
+  studySamples: null,
   ionRequest: null,
   rgbChannels: [],
+  roiRect: null,
   fileSize: null,
   view: "summary",
   selector: null,
@@ -262,7 +274,7 @@ async function finishOpen(
 
   // Isobaric (TMT/iTRAQ) channels for the run, off the critical path.
   void engine.studyMeta().then((s) => {
-    if (seq === currentOpenSeq) set({ channels: s.channels });
+    if (seq === currentOpenSeq) set({ channels: s.channels, study: s.study ?? null, studySamples: s.samples ?? null });
   }).catch(() => {});
 
   // Pre-select spectrum 0 when the file has spectra.
@@ -303,10 +315,13 @@ export const useStore = create<AppState>((set, get) => ({
 
   // sdrf channels
   channels: [],
+  study: null,
+  studySamples: null,
 
   // imaging deep-link round-trip (MG-01)
   ionRequest: null,
   rgbChannels: [],
+  roiRect: null,
 
   // live URL sync preference (MG-02) — read from localStorage, default OFF.
   urlSyncEnabled:
@@ -409,8 +424,11 @@ export const useStore = create<AppState>((set, get) => ({
       multiChannel: null,
       ionCacheReady: false,
       channels: [],
+      study: null,
+      studySamples: null,
       ionRequest: null,
       rgbChannels: [],
+      roiRect: null,
       fileName: null,
       fileSize: null,
       sourceUrl: null,
@@ -450,6 +468,9 @@ export const useStore = create<AppState>((set, get) => ({
 
   setRgbChannels: (channels: { mz: number; tolDa: number; color: string }[]) => {
     set({ rgbChannels: channels });
+  },
+  setRoiRect: (rect: [number, number, number, number] | null) => {
+    set({ roiRect: rect });
   },
 
   setUrlSyncEnabled: (on: boolean) => {

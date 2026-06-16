@@ -295,6 +295,12 @@ export type StudyMeta = {
   present: boolean;
   /** Resolved isobaric channels for this run (empty for label-free files). */
   channels: ChannelAssignment[];
+  /** The index `study` block (plainified): dataset accession, title, run_sample_binding,
+   *  sample_metadata_ref. Drives the Summary ▸ Study panel (MG-05). Null when absent. */
+  study?: unknown;
+  /** Per-sample list (plainified `sample_list`): each sample's id/name + CV parameters,
+   *  for the Study panel's characteristics matrix (MG-05). */
+  samples?: unknown[];
 };
 
 /** Error classes the reader can raise (carried across the boundary). */

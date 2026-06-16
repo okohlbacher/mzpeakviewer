@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import type { ImagingGridWire } from "@mzpeak/contracts";
 import { useStore } from "../store";
 import { StatRow, Badge, Panel } from "@mzpeak/ui-kit";
+import type { ChannelAssignment } from "@mzpeak/contracts";
 import { rasterizeTic, formatBytes } from "./render";
 
 function fmtRange(r: [number, number] | null, digits = 2): string {
@@ -38,6 +39,9 @@ export function Summary() {
   const opticalImages = useStore((s) => s.opticalImages);
   const grid = useStore((s) => s.grid);
   const ticColumn = useStore((s) => s.ticColumn);
+  const channels = useStore((s) => s.channels);
+  const study = useStore((s) => s.study);
+  const studySamples = useStore((s) => s.studySamples);
 
   // Summary only mounts when phase==="ready" (App renders <Idle/> otherwise), so the not-ready
   // guard below is the only reachable empty state — the old phase==="idle" branch was dead UI.
@@ -227,6 +231,9 @@ export function Summary() {
         </Panel>
       )}
 
+      {/* Study (SDRF/ISA) — dataset, isobaric channels, sample characteristics (MG-05) */}
+      <StudyPanel channels={channels} study={study} samples={studySamples} />
+
       {/* Manifest */}
       {manifest && manifest.length > 0 && (
         <Panel title="Archive members" defaultOpen={false} testid="summary-manifest-panel">
@@ -279,6 +286,81 @@ export function Summary() {
         </Panel>
       )}
     </div>
+  );
+}
+
+/** Study panel (MG-05): the dataset accession + title, the run's isobaric channels, and a
+ *  per-sample characteristics matrix (samples × their CV parameters) from the index
+ *  `study` block + `sample_list`. The full embedded SDRF/ISA table is a separate member
+ *  (deferred). All inputs are plainified `unknown` — read defensively. */
+function StudyPanel({ channels, study, samples }: { channels: ChannelAssignment[]; study: unknown; samples: unknown[] | null }) {
+  const s = (study && typeof study === "object" ? study : null) as { dataset_accession?: unknown; title?: unknown } | null;
+  const accession = typeof s?.dataset_accession === "string" ? s.dataset_accession : null;
+  const title = typeof s?.title === "string" ? s.title : null;
+  const rows = Array.isArray(samples) ? samples : [];
+
+  // Build the characteristics matrix: each sample → {name, params:{label→value}};
+  // columns = the union of parameter labels across all samples (stable insertion order).
+  type Param = { name?: unknown; accession?: unknown; value?: unknown };
+  const cols: string[] = [];
+  const sampleData = rows.map((raw) => {
+    const e = (raw && typeof raw === "object" ? raw : {}) as { id?: unknown; name?: unknown; parameters?: unknown };
+    const params = Array.isArray(e.parameters) ? (e.parameters as Param[]) : [];
+    const cells: Record<string, string> = {};
+    for (const p of params) {
+      const label = String(p?.name ?? p?.accession ?? "");
+      if (!label) continue;
+      if (!cols.includes(label)) cols.push(label);
+      const v = p?.value;
+      cells[label] = v == null ? "" : String(v);
+    }
+    return { name: String(e.name ?? e.id ?? ""), cells };
+  });
+
+  if (!accession && !title && channels.length === 0 && sampleData.length === 0) return null;
+
+  return (
+    <Panel title="Study" defaultOpen testid="summary-study-panel">
+      {accession && <StatRow label="Dataset" value={accession} testid="summary-study-accession" />}
+      {title && <StatRow label="Title" value={title} />}
+      {channels.length > 0 && (
+        <StatRow
+          label="Isobaric channels"
+          value={
+            <span style={{ display: "flex", flexWrap: "wrap", gap: "0.25rem" }}>
+              {channels.map((c, i) => (
+                <Badge key={i} tone={c.boundToThisRun ? "info" : "neutral"} mono>
+                  {c.channelLabel ?? "?"}{c.reporterMz != null ? ` ${c.reporterMz.toFixed(3)}` : ""}
+                </Badge>
+              ))}
+            </span>
+          }
+        />
+      )}
+      {sampleData.length > 0 && cols.length > 0 && (
+        <div data-testid="summary-study-samples" style={{ overflowX: "auto", marginTop: "0.4rem" }}>
+          <table style={{ borderCollapse: "collapse", fontSize: "var(--text-sm)", fontFamily: "var(--font-mono)" }}>
+            <thead>
+              <tr>
+                {["sample", ...cols].map((h) => (
+                  <th key={h} style={{ textAlign: "left", padding: "0.2rem 0.6rem 0.2rem 0", borderBottom: "1px solid var(--border-default)", fontFamily: "var(--font-sans)", color: "var(--text-muted)", fontWeight: "var(--weight-medium)", fontSize: "var(--text-xs)", whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sampleData.map((row, i) => (
+                <tr key={i}>
+                  <td style={{ padding: "0.2rem 0.6rem 0.2rem 0", color: "var(--text-heading)", whiteSpace: "nowrap" }}>{row.name}</td>
+                  {cols.map((col) => (
+                    <td key={col} style={{ padding: "0.2rem 0.6rem", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{row.cells[col] ?? "—"}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
   );
 }
 
