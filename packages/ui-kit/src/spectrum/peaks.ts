@@ -21,6 +21,10 @@ export type SpectrumArrays = {
   mz: Float64Array;
   intensity: Float32Array;
   representation: Representation;
+  /** Optional full per-spectrum metadata tree (the Spectra "Spectrum metadata"
+   *  panel renders it). Mirrors the contracts `SpectrumArrays.meta`; ui-kit only
+   *  passes it through, so it stays an opaque `unknown` here. */
+  meta?: unknown;
 };
 
 /**
