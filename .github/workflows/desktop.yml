@@ -162,7 +162,7 @@ jobs:
       #   - TAURI_SIGNING_PRIVATE_KEY: updater is out of scope v1 (no-op when unset).
       - name: Build the desktop app (tauri-action)
         id: tauri
-        uses: tauri-apps/tauri-action@42e9df6b59f3df515b07e80e7159e1edf43bef74 # v0.5.20
+        uses: tauri-apps/tauri-action@51a9f1156b33df106d827c3a78f8f894946c5faa # v0.5.25
         env:
           # Draft release creation (v* tags only).
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
