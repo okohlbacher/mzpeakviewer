@@ -37,11 +37,9 @@ Carried from Explorer (EX-URL-01).
 (a) **Done:** the fixed `PREFETCH_COOLDOWN_MS = 350` is now derived from a rolling p75 of
 observed user-read latencies (bounded 50-sample ring in `EngineContext`), clamped to
 [150, 1000] ms, with the 350 ms default until ≥5 samples. `PrefetchControl.cooldownMs`
-became a live getter. (b) **re-centering DEFERRED** — re-centering preload around a moving
-cursor requires *random-access* reads, which directly fight the measured bulk-sequential-
-stream fast path (see cold-read / ion-image bulk-read findings). Low value too: the
-jumped-to spectrum is read on-demand and cached regardless. Revisit only with a measured
-need. Carried from Explorer (EX-ENG-03/04).
+became a live getter. (b) **re-centering — PARKED (deferred bucket, 2026-06-16).** See the
+**Deferred / parked** section at the end of Part A for the rationale + revisit condition.
+Carried from Explorer (EX-ENG-03/04).
 
 ### MG-04 · Imaging feature-parity validation — **AUDIT DONE (2026-06-16)**
 Audit + e2e written: `.planning/MG-04-imaging-parity-audit.md` + `app/e2e/imaging-parity.spec.ts`
@@ -126,6 +124,25 @@ and shows the **full CV-resolved metadata tree** (chromatogram CV params + precu
 isolation window + activation + product/selected ion + promoted columns) via the shared
 `TreeView`. Engine reads `reader.chromatogramMetadata` (no signal I/O); `plainify` exported
 from `fileMeta.ts`. The computed TIC remains as a fallback. **Effort:** M.
+
+---
+
+## Deferred / parked (not scheduled — revisit only on the stated trigger)
+
+- **MG-03b · preload re-centering** — *parked 2026-06-16.* Re-centering the background
+  prefetch on a jumped-to selection requires **random-access reads**, which fight the
+  measured bulk-sequential-stream fast path ([memory: cold-read-bandwidth-bound,
+  reader-findpagefor-rowgroup-bug]); you also can't reorder an in-flight stream (must
+  stop+restart from an offset, which needs a page index the profile files lack); and the
+  value is marginal (the jumped-to spectrum is already read on-demand + cached). MG-03a
+  (the valuable half) shipped. **Revisit trigger:** the converter row-group/page-index fix
+  lands AND a benchmark shows jump-heavy browsing is actually slow.
+- **MG-08 · USI as input** — file-discovery from a USI needs an online ProteomeXchange
+  lookup (breaks client-side-only; no accession in `mzpeak_index.json`). Emit side shipped.
+  **Revisit trigger:** an online resolver becomes acceptable.
+- **MG-06 · minimal parquet-wasm build** — premise falsified (corpus is ZSTD → a
+  codec-stripped build can't decode). **Revisit trigger:** a full-corpus codec audit shows
+  a viable minimal build that keeps the codecs in use.
 
 ---
 
