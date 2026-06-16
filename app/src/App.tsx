@@ -31,6 +31,7 @@ import { Imaging } from "./views/Imaging";
 import { GridView } from "./views/GridView";
 import { Idle } from "./views/Idle";
 import { ShareButton } from "./ShareButton";
+import { AboutButton } from "./AboutButton";
 import { currentShareUrl, isTauriApp } from "./urlSync";
 
 // ---------------------------------------------------------------------------
@@ -502,8 +503,11 @@ function TopBar() {
         </span>
       )}
 
-      <span style={{ marginLeft: "auto" }}>
+      <span
+        style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "0.5rem" }}
+      >
         <ShareButton />
+        <AboutButton />
       </span>
 
       {/* Hidden input is NOT wrapped in a label — clicking the buttons below calls

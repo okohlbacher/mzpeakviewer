@@ -23,6 +23,7 @@ import {
   DEFAULT_VIEW_STATE,
 } from "@mzpeak/contracts";
 import { useStore } from "./store";
+import { idsCarryScans, resolveScanToIndex } from "./scan";
 
 // ---------------------------------------------------------------------------
 /** True in the Tauri desktop app (window.location.origin is "tauri://localhost").
@@ -44,8 +45,11 @@ function modeFromCapabilities(): FileMode {
  * Apply a resolved ViewState to the store. Maps the grammar's rich selector to
  * the app store's narrower `selectSpectrum(index)` action where possible:
  *   - by:"spectrum" → selectSpectrum(index)   (direct absolute index)
- *   - by:"scan"     → selectSpectrum(scan)    (best-effort: treat as index;
- *                     the engine resolves native scan→index; falls back safely)
+ *   - by:"scan"     → resolve the NATIVE scan number → absolute index CLIENT-SIDE
+ *                     via resolveScanToIndex(browse, scan), because native scan ≠
+ *                     index for Bruker/Thermo (scan = index + 1). The engine does
+ *                     NOT do this resolution. Falls back to treating scan as the
+ *                     index only when ids don't carry scans / nothing resolves.
  *   - by:"pixel"    → not directly indexable from the URL alone; the view is
  *                     set so the user lands on the right panel, selection no-op.
  * Chromatogram mode "tic" routes to loadChrom({mode:"tic"}); other chrom modes
@@ -63,9 +67,28 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
     if (sel.by === "spectrum" && Number.isInteger(sel.index) && sel.index >= 0) {
       await st.selectSpectrum(sel.index).catch(() => {});
     } else if (sel.by === "scan" && Number.isInteger(sel.scan) && sel.scan >= 0) {
-      // Best-effort: app store selects by absolute index. A native-scan deep
-      // link is treated as an index here; if out of range the engine drops it.
-      await st.selectSpectrum(sel.scan).catch(() => {});
+      // Native scan → absolute index. The app store selects by absolute index,
+      // but native scan ≠ index for Bruker/Thermo (scan = index + 1), so a naive
+      // selectSpectrum(scan) lands one spectrum off. Resolve client-side against
+      // the browse ids when they actually carry scans; otherwise fall back to the
+      // old index-as-scan behaviour so files where scan==index don't regress.
+      const browse = useStore.getState().browse;
+      const resolved =
+        browse && idsCarryScans(browse.id)
+          ? resolveScanToIndex(browse, sel.scan)
+          : null;
+      if (resolved != null) {
+        await st.selectSpectrum(resolved).catch(() => {});
+      } else {
+        // Fallback: ids don't carry scans, browse absent, or scan not found.
+        // Treat the scan as an absolute index (correct when scan==index). Guard
+        // against an obvious out-of-range value so we don't select a wrong/last
+        // spectrum when we can already tell it can't be a valid index.
+        const n = browse?.id.length ?? null;
+        if (n == null || sel.scan < n) {
+          await st.selectSpectrum(sel.scan).catch(() => {});
+        }
+      }
     }
     // by:"pixel" → no index-only action available; view was already set.
   }

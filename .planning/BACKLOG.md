@@ -41,11 +41,18 @@ stream fast path (see cold-read / ion-image bulk-read findings). Low value too: 
 jumped-to spectrum is read on-demand and cached regardless. Revisit only with a measured
 need. Carried from Explorer (EX-ENG-03/04).
 
-### MG-04 · Imaging feature-parity validation
-The IV imaging features (Part B, BL-01…BL-09) are implemented in mzPeakIV and must
-reach **parity** in the merged shell (Phase 4 wires them behind the MSI accordion +
-lazy chunk). This item tracks an explicit parity checklist + e2e per feature, so no
-imaging capability silently regresses in the merge. **Effort:** M (validation).
+### MG-04 · Imaging feature-parity validation — **AUDIT DONE (2026-06-16)**
+Audit + e2e written: `.planning/MG-04-imaging-parity-audit.md` + `app/e2e/imaging-parity.spec.ts`
+(4 cases on wired paths). **Finding: only 2 of 10 IV imaging features are actually wired in
+the merged shell** (BL-02 RGB overlay, BL-S3 URL load). The other 8 are NOT-WIRED — the
+Part B "implemented" table describes mzPeakIV, not the merge. Migration is split into:
+
+- **MG-04b · wire-up (engine already built + tested):** BL-01 TIC-norm toggle, BL-03 mean
+  spectrum, BL-06 ROI→mean (rectangle-draw UI), BL-08 peak table, BL-09 peak-click→ion.
+  These have working engine ops with **no UI callers** — highest value-per-effort. **Effort:** M.
+- **MG-04c · port IV compute/export modules (new code):** BL-04 Gaussian smoothing
+  (`smooth.ts`), BL-07 histogram contrast (`histogram.ts`), BL-05 ion-image TIFF export
+  (`tiff.ts`) — none ported into the merged repo. Main-thread on cached `store.ionImage`. **Effort:** M.
 
 ### MG-05 · SDRF study-metadata long tail
 Long-tail characteristics matrix + study protocols + ontology-source registry,
@@ -70,6 +77,12 @@ threaded through `scanBreakdown`. Older/IV data lacking the field falls back to 
 rows.
 
 ### MG-08 · Align deep-link URLs / API with USI (Universal Spectrum Identifier)
+**Prerequisite DONE (2026-06-16):** native-scan→index resolver (`app/src/scan.ts`:
+`scanNumberOf` / `resolveScanToIndex` / `idsCarryScans`) now backs both the spectrum picker
+and a correct `?scan=N` deep link (previously `urlSync` treated scan as the absolute index —
+off-by-one for files where scan≠index; now resolved via `browse.id` with a range-guarded
+fallback). This is the `:scan:`/`:nativeId:` resolution USI needs. Remaining USI work below.
+
 Adopt the PSI **USI** grammar (`mzspec:<collection>:<msRun>:<index|scan|nativeId>[:<interp>]`,
 e.g. `mzspec:PXD000001:run1:scan:131`) as a first-class addressing scheme for spectra,
 alongside the current `?file=…&spectrum=…` grammar. Goals: (1) accept a USI as a deep-link
@@ -84,7 +97,11 @@ offline / for local files); how USI's nativeId/scan selectors line up with the a
 absolute-index selector (see the selector-narrowing note in `urlSync.ts`). Spec:
 PSI USI (`https://www.psidev.info/usi`, HUPO-PSI/usi). **Effort:** M.
 
-### MG-09 · About button with version / build info
+### MG-09 · About button with version / build info — **DONE (2026-06-16)**
+Top-bar About button (`data-testid="about-btn"`) → dismissible popover showing version
+(from `tauri.conf.json`, `0.5.3`), git SHA, build date, and platform (web/desktop), plus a
+releases link. Build info injected via Vite `define` (`__APP_VERSION__`/`__BUILD_SHA__`/
+`__BUILD_DATE__`); SHA falls back to `"dev"` when git is unavailable. ~~Original ask:~~
 Add an "About" affordance (e.g. a button in the top bar or a footer item) surfacing the
 app **version** and **build** — at minimum the app version (Tauri `tauri.conf.json` /
 package version), ideally the git **commit SHA** + **build date**, and the platform (web
@@ -100,8 +117,10 @@ desktop app). Small modal or popover; include a link to the repo / releases. **E
 
 Source (verbatim, with full implementation notes):
 `research/source-backlogs/mzPeakIV-BACKLOG.md`. **Status:** BL-01…BL-09 are
-**implemented in mzPeakIV** — for the merged app they are a **parity list** (see
-MG-04), not pending work. Listed here so nothing is lost and parity is auditable.
+**implemented in mzPeakIV**. ⚠️ The table below is the **mzPeakIV** status, NOT the merged
+shell — the MG-04 audit (2026-06-16) found **only BL-02 + BL-S3 are wired in the merge**;
+the other 8 are unported (tracked as **MG-04b** wire-up / **MG-04c** module-port). Treat the
+"implemented" column as "exists in mzPeakIV source", not "available in the viewer".
 
 | ID | Feature | Status in mzPeakIV |
 |---|---|---|

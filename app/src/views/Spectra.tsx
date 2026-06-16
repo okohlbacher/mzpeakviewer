@@ -1,6 +1,7 @@
 // Spectra view — browse list / index picker → selectSpectrum → SpectrumPlot.
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
+import { scanNumberOf } from "../scan";
 import { SpectrumPlot, Select, Button, TreeView, spectrumReporters, type SelectOption, type ReporterMarker, type ReporterPeak } from "@mzpeak/ui-kit";
 
 // Categorical palette for isobaric channels — shared by the pills + the peak dots
@@ -12,15 +13,10 @@ const CHANNEL_PALETTE = [
 ];
 const channelColor = (i: number) => CHANNEL_PALETTE[i % CHANNEL_PALETTE.length]!;
 
-// The native scan number a mass-spectrometrist reads off the spectrum id (e.g.
-// "scan=1800") — typically 1-based and NOT equal to the 0-based absolute index
-// (commonly scan = index + 1). Parse it so the picker can navigate by the number
-// the user actually sees, instead of the internal index (which felt "off by one").
-function scanNumberOf(id: string | undefined | null): number | null {
-  if (!id) return null;
-  const m = /(?:^|\s)scan=(\d+)/i.exec(id) ?? /(\d+)\s*$/.exec(id);
-  return m ? Number(m[1]) : null;
-}
+// scanNumberOf parses the native scan number a mass-spectrometrist reads off the
+// spectrum id (e.g. "scan=1800") — typically 1-based and NOT equal to the 0-based
+// absolute index (commonly scan = index + 1). It lives in ../scan so the picker
+// (here) and the ?scan= deep-link resolver (urlSync) share one implementation.
 
 export function Spectra() {
   const phase = useStore((s) => s.phase);
