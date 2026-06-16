@@ -27,6 +27,7 @@ import type {
   ImagingGridWire,
   OpticalImageMeta,
   ChromatogramSeries,
+  ChromatogramInfo,
   ParquetFooter,
   ColumnPage,
   ColumnSample,
@@ -82,6 +83,8 @@ export type WorkerRequest =
 
   // --- chromatograms (Explorer) -------------------------------------------
   | { type: "extractChrom"; chrom: ChromRequest; requestId: number }
+  // List the file's stored chromatograms + their metadata (Chromatograms view).
+  | { type: "chromatogramList"; requestId: number }
 
   // --- archive / parquet structure (Explorer Structure tab) ----------------
   | { type: "archiveList"; requestId: number }
@@ -131,6 +134,7 @@ export type WorkerResponse =
   | { type: "scanBreakdownResult"; requestId: number; stats: FileStats; browse: BrowseIndex; ticColumn: Presence }
   | { type: "meanSpectrumResult"; requestId: number; spectrum: SpectrumArrays }
   | { type: "chromResult"; requestId: number; series: ChromatogramSeries }
+  | { type: "chromatogramListResult"; requestId: number; chromatograms: ChromatogramInfo[] }
   | { type: "archiveListResult"; requestId: number; members: ArchiveMemberList }
   | { type: "parquetFooterResult"; requestId: number; footer: ParquetFooter }
   // Paged: `page.values.buffer` TRANSFERRED; `hasMore` signals further pages.
@@ -215,6 +219,7 @@ export const MESSAGE_POLICY: Record<RequestType, MessagePolicy> = {
   roiSpectrum: { cancellation: "stale-drop", transfersResult: true, paged: false },
   // Chromatogram extraction streams row groups → abortable at chunk boundaries.
   extractChrom: { cancellation: "abort", transfersResult: true, paged: false },
+  chromatogramList: { cancellation: "stale-drop", transfersResult: false, paged: false },
   archiveList: { cancellation: "stale-drop", transfersResult: false, paged: false },
   parquetFooter: { cancellation: "stale-drop", transfersResult: false, paged: false },
   deepColumn: { cancellation: "abort", transfersResult: true, paged: true },

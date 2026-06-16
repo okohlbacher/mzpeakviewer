@@ -16,8 +16,9 @@
 //   F2 — `tic` mode prefers the per-spectrum (promoted) TIC from the scan rows, is
 //        MS1-only, and only falls back to a whole-file extractXIC (also MS1-filtered).
 import type { ChromRequest } from "@mzpeak/contracts";
-import type { ChromatogramSeries } from "@mzpeak/contracts";
+import type { ChromatogramSeries, ChromatogramInfo } from "@mzpeak/contracts";
 import { adaptChromatogram, type ChromInput } from "../adapt/chrom";
+import { plainify } from "../reader/fileMeta";
 import type { Reader } from "../reader/openUrl";
 import {
   chromatogramIds,
@@ -44,6 +45,76 @@ export type ChromContext = {
 /** Spectra past this count are too expensive to sum in the browser for a TIC fallback
  *  (mirrors Explorer's AUTO_SCAN_LIMIT guard in buildTic). */
 const AUTO_SCAN_LIMIT = 50_000;
+
+// CV accessions for the chromatogram summary fields (promoted columns).
+const CHROM_TYPE_ACC = "MS_1000626_chromatogram_type";
+const POLARITY_ACC = "MS_1000465_scan_polarity";
+const NPOINTS_ACC = "MS_1003060_number_of_data_points";
+
+/** Recursively find the first finite number under a key containing `frag` (an accession
+ *  fragment like "1000827"). Pulls the precursor/product m/z out of the plainified
+ *  precursor / selected-ion subtrees without hard-coding their reader-internal shape. */
+function findNumberByKeyFragment(node: unknown, frag: string, depth = 0): number | null {
+  if (node == null || depth > 8) return null;
+  if (Array.isArray(node)) {
+    for (const v of node) {
+      const r = findNumberByKeyFragment(v, frag, depth + 1);
+      if (r != null) return r;
+    }
+    return null;
+  }
+  if (typeof node === "object") {
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (k.includes(frag) && typeof v === "number" && Number.isFinite(v)) return v;
+      const r = findNumberByKeyFragment(v, frag, depth + 1);
+      if (r != null) return r;
+    }
+  }
+  return null;
+}
+
+/**
+ * List the file's STORED chromatograms with summary fields + a full CV-resolvable
+ * metadata tree (chromatogram CV params, precursor isolation window, product/selected
+ * ion — i.e. SRM/MRM transitions). Reads the eagerly-loaded chromatogram metadata only;
+ * no signal I/O. The summary fields drive the Chromatograms list; `meta` feeds the
+ * CV-aware TreeView detail panel.
+ */
+export function engineChromatogramList(reader: Reader): ChromatogramInfo[] {
+  const cm = reader.chromatogramMetadata;
+  const n = cm?.length ?? 0;
+  const out: ChromatogramInfo[] = [];
+  for (let i = 0; i < n; i++) {
+    const rec = cm!.get(i) as unknown as {
+      id?: unknown; index?: unknown; params?: unknown;
+      precursors?: unknown; selectedIons?: unknown; meta?: unknown;
+    };
+    const meta = plainify({
+      id: rec.id,
+      index: rec.index,
+      params: rec.params,
+      precursors: rec.precursors,
+      selectedIons: rec.selectedIons,
+      promotedColumns: rec.meta,
+    });
+    const promoted = (rec.meta ?? {}) as Record<string, unknown>;
+    const polRaw = promoted[POLARITY_ACC];
+    const typeRaw = promoted[CHROM_TYPE_ACC];
+    const nPtsRaw = promoted[NPOINTS_ACC];
+    out.push({
+      index: i,
+      id: String(rec.id ?? i),
+      typeAccession: typeof typeRaw === "string" ? typeRaw : null,
+      polarity: polRaw === -1 ? "-" : polRaw === 1 ? "+" : null,
+      nPoints:
+        typeof nPtsRaw === "number" ? nPtsRaw : typeof nPtsRaw === "bigint" ? Number(nPtsRaw) : null,
+      precursorMz: findNumberByKeyFragment(plainify(rec.precursors), "1000827"),
+      productMz: findNumberByKeyFragment(plainify(rec.selectedIons), "1000744"),
+      meta,
+    });
+  }
+  return out;
+}
 
 /** Split a ChromPoint[] into parallel time/intensity arrays (index-aligned). */
 function unpackPoints(points: ChromPoint[]): { time: number[]; intensity: number[] } {

@@ -126,6 +126,30 @@ export type ChromatogramSeries = {
   intensity: Float32Array;
 };
 
+/**
+ * Per-stored-chromatogram metadata for the Chromatograms list + detail panel. Summary
+ * fields drive the list row; `meta` is the FULL plain, structured-clone-safe record
+ * (chromatogram CV params + precursor isolation window + product/selected ion +
+ * promoted columns) for a CV-resolved TreeView — the comprehensive view.
+ */
+export type ChromatogramInfo = {
+  index: number;
+  id: string;
+  /** MS:1000626 chromatogram type as a raw CV accession (UI resolves to a label). */
+  typeAccession: string | null;
+  /** Scan polarity: "+" / "-" / null (unknown). */
+  polarity: "+" | "-" | null;
+  /** Declared number of data points (MS:1003060), when present. */
+  nPoints: number | null;
+  /** Precursor isolation-window target m/z (MS:1000827), for SRM/MRM transitions. */
+  precursorMz: number | null;
+  /** Product / selected-ion m/z (MS:1000744), for SRM/MRM transitions. */
+  productMz: number | null;
+  /** Full CV-resolvable metadata tree (plainified): id, params, precursors,
+   *  selectedIons, promoted columns. Rendered by the UI's CV-aware TreeView. */
+  meta: unknown;
+};
+
 /** One column's footer-level metadata (what the Structure tab renders per column). */
 export type ParquetColumn = {
   name: string;

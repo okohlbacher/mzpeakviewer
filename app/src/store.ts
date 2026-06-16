@@ -147,7 +147,7 @@ export interface AppState {
    *  in-place (route=false). Used by an imaging pick and by a `?px=` deep link. No-op
    *  if there's no grid or the pixel has no spectrum. (MG-01) */
   selectPixel: (x: number, y: number, route?: boolean) => Promise<void>;
-  loadChrom: (req: { mode: "tic" }) => Promise<void>;
+  loadChrom: (req: { mode: "tic" } | { mode: "stored"; id: string }) => Promise<void>;
   dismissNotice: (id: string) => void;
   toggleAccordion: (key: "advanced" | "imaging") => void;
 }
@@ -513,14 +513,15 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // -------------------------------------------------------------------------
-  // loadChrom — extract a chromatogram (TIC for now).
+  // loadChrom — extract a chromatogram: the computed TIC, or a STORED chromatogram
+  // (SRM/MRM transition etc.) looked up by its native id.
   // Stale-async guard: drop result if a newer openFile started.
   // -------------------------------------------------------------------------
-  loadChrom: async ({ mode }: { mode: "tic" }) => {
+  loadChrom: async (req: { mode: "tic" } | { mode: "stored"; id: string }) => {
     const seq = currentOpenSeq;
     set({ chromLoading: true });
     try {
-      const series = await engine.extractChrom({ mode });
+      const series = await engine.extractChrom(req);
       // Drop if a newer file was opened while we waited.
       if (seq !== currentOpenSeq) {
         set({ chromLoading: false });

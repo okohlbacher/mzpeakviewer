@@ -15,7 +15,7 @@ import { openEngineFile, openEngineUrl, type EngineFile } from "../engine/open";
 import { readEngineSpectrumCached, prefetchSpectrumCache } from "../engine/spectrum";
 import { CacheBudget, SpectrumLruCache, IonCacheStore } from "../engine/cache";
 import { engineScanBreakdown } from "../engine/scanBreakdown";
-import { engineExtractChrom, type ChromContext } from "../engine/chrom";
+import { engineExtractChrom, engineChromatogramList, type ChromContext } from "../engine/chrom";
 import { engineRenderIonImage, engineMeanSpectrum, engineRoiSpectrum, prefetchIonCache, type SpectraArrayCache } from "../engine/imaging";
 import { Mutex } from "../engine/mutex";
 import { engineRenderMultiChannel } from "../engine/multichannel";
@@ -345,6 +345,12 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         const reader = requireActive(ctx).reader;
         const series = await engineExtractChrom(reader, req.chrom, ctx.scan ?? undefined);
         respond({ type: "chromResult", requestId: req.requestId, series }, buffersOf(series.time, series.intensity));
+        return;
+      }
+
+      case "chromatogramList": {
+        const reader = requireActive(ctx).reader;
+        respond({ type: "chromatogramListResult", requestId: req.requestId, chromatograms: engineChromatogramList(reader) });
         return;
       }
 

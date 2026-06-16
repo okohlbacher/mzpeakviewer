@@ -12,6 +12,7 @@ const REQUEST_TYPES: RequestType[] = [
   "meanSpectrum",
   "roiSpectrum",
   "extractChrom",
+  "chromatogramList",
   "archiveList",
   "parquetFooter",
   "deepColumn",

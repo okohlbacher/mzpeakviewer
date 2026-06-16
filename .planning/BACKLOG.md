@@ -110,6 +110,17 @@ the running version at a glance. Wire the version/SHA/date in at build time (Vit
 `define` / `import.meta.env` for the web build; Tauri exposes its own version for the
 desktop app). Small modal or popover; include a link to the repo / releases. **Effort:** S.
 
+### MG-10 · Comprehensive chromatogram metadata exposure — **DONE (2026-06-16)**
+The Chromatograms view previously only computed a TIC from the per-spectrum RT index and
+ignored the file's STORED chromatograms entirely. Now it lists every stored chromatogram
+(`engine.chromatogramList()` → new `ChromatogramInfo[]` wire type + `chromatogramList`
+worker op) with summary columns (id, CV-resolved type, polarity, precursor m/z → product
+m/z for SRM/MRM, points); clicking a row loads its trace (`loadChrom({mode:"stored",id})`)
+and shows the **full CV-resolved metadata tree** (chromatogram CV params + precursor
+isolation window + activation + product/selected ion + promoted columns) via the shared
+`TreeView`. Engine reads `reader.chromatogramMetadata` (no signal I/O); `plainify` exported
+from `fileMeta.ts`. The computed TIC remains as a fallback. **Effort:** M.
+
 ---
 
 ## Part B — Inherited from mzPeakIV (imaging features)

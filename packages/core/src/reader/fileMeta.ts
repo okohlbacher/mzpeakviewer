@@ -23,7 +23,7 @@ const MS_LEVEL_ACCESSION = "MS_1000511_ms_level";
  * Defensive at the boundary because the reader hands us mixed
  * Arrow/class/bigint shapes (only validate at system boundaries — CLAUDE.md).
  */
-function plainify(value: unknown, depth = 0): unknown {
+export function plainify(value: unknown, depth = 0): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value === "bigint") return Number(value);
   if (

@@ -28,6 +28,7 @@ import type {
   BrowseIndex,
   Presence,
   ChromatogramSeries,
+  ChromatogramInfo,
   ArchiveMemberList,
   ParquetFooter,
   ColumnPage,
@@ -171,6 +172,7 @@ const RESOLVE_TYPE: Partial<Record<WorkerRequest["type"], WorkerResponse["type"]
   meanSpectrum: "meanSpectrumResult",
   roiSpectrum: "meanSpectrumResult",
   extractChrom: "chromResult",
+  chromatogramList: "chromatogramListResult",
   archiveList: "archiveListResult",
   parquetFooter: "parquetFooterResult",
   deepColumn: "deepColumnResult",
@@ -352,6 +354,11 @@ export class EngineClient {
   /** Extract a chromatogram (TIC / XIC / XIC-range / stored). */
   extractChrom(chrom: ChromRequest): Promise<ChromatogramSeries> {
     return this.request<ChromatogramSeries>((requestId) => ({ type: "extractChrom", chrom, requestId }));
+  }
+
+  /** List the file's stored chromatograms + their metadata (Chromatograms view). */
+  chromatogramList(): Promise<ChromatogramInfo[]> {
+    return this.request<ChromatogramInfo[]>((requestId) => ({ type: "chromatogramList", requestId }));
   }
 
   /** List archive members (Explorer Structure tab). */
@@ -642,6 +649,8 @@ export class EngineClient {
         return msg.spectrum;
       case "chromResult":
         return msg.series;
+      case "chromatogramListResult":
+        return msg.chromatograms;
       case "archiveListResult":
         return msg.members;
       case "parquetFooterResult":
