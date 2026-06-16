@@ -97,10 +97,15 @@ const DEFAULT_PREFETCH_COOLDOWN_MS = 350;
 const MIN_LATENCY_SAMPLES = 5;
 /** Bounded ring size — recent reads only, so the cooldown tracks the CURRENT regime. */
 const READ_LATENCY_SAMPLES = 50;
-/** Clamp bounds. FLOOR keeps a single pathologically-fast read from making the prefetch
- *  hyper-aggressive (barging in on the next user read); CEILING keeps a single slow read
- *  from suppressing the warm-up so long it effectively never resumes. */
-const MIN_ADAPTIVE_COOLDOWN_MS = 150;
+/** Clamp bounds. FLOOR is pinned to the fixed default ON PURPOSE: the timed read
+ *  (selectSpectrum) is usually a warm-cache HIT (sub-ms), so an unclamped p75 would
+ *  collapse toward 0 and make the prefetch MORE aggressive than the proven-safe 350ms
+ *  — the opposite of the back-off's goal. Flooring at the default means adaptation can
+ *  only ever LENGTHEN the cooldown (genuinely slow remote hosts, where ≥25% of recent
+ *  reads exceed 350ms), never shorten it below today's behaviour. CEILING keeps one
+ *  pathological slow read from suppressing the warm-up so long it never resumes.
+ *  (A future refinement could record cache MISSES only for a cleaner I/O signal.) */
+const MIN_ADAPTIVE_COOLDOWN_MS = DEFAULT_PREFETCH_COOLDOWN_MS;
 const MAX_ADAPTIVE_COOLDOWN_MS = 1000;
 
 /** `performance.now()` with a Date.now fallback (mirrors imaging.ts/spectrum.ts — kept
@@ -118,9 +123,9 @@ function recordReadLatency(ctx: EngineContext, ms: number): void {
  * Adaptive prefetch cooldown derived from recent user-read latency.
  *
  * With < MIN_LATENCY_SAMPLES samples we can't be representative → fall back to the fixed
- * default. Otherwise we use the p75 of observed latencies (clamped to [150, 1000]ms): the
- * 75th percentile (rather than the median) biases slightly conservative so the back-off
- * comfortably covers a typical user read without over-reacting to the slowest tail.
+ * default. Otherwise we use the p75 of observed latencies, clamped to [default, 1000]ms
+ * (see the clamp comment): the floor means this only lengthens the cooldown on slow hosts
+ * and can never regress the steady-state-browse responsiveness vs the old fixed 350ms.
  */
 function adaptiveCooldown(ctx: EngineContext): number {
   const xs = ctx.readLatenciesMs;

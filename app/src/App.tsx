@@ -782,11 +782,17 @@ export function App() {
   // replaceState does NOT fire popstate, so there's no hydration feedback loop.
   useEffect(() => {
     let lastWritten: string | null = null;
+    let pendingUrl: string | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const unsubscribe = useStore.subscribe((state) => {
       if (!state.urlSyncEnabled || isTauriApp() || state.sourceUrl == null) return;
       const url = currentShareUrl();
-      if (url === lastWritten) return;
+      // The subscription fires on EVERY store mutation, including transient render-frame
+      // updates (ionImage/multiChannel) that don't change the URL. Only (re)arm the timer
+      // when the URL actually changed — otherwise a long ion render would reset the
+      // debounce every frame and starve the write indefinitely.
+      if (url === lastWritten || url === pendingUrl) return;
+      pendingUrl = url;
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         try {

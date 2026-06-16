@@ -172,8 +172,12 @@ function ImagingInner({
       { mz: "", tol: "0.5" },
       { mz: "", tol: "0.5" },
     ];
-    storeRgbChannels.slice(0, 3).forEach((c, i) => {
-      base[i] = { mz: String(c.mz), tol: String(c.tolDa) };
+    // Restore each channel to its OWN R/G/B row by matching its color — not
+    // positionally — so a ?ch= link that filled only Green+Blue round-trips back
+    // into the Green+Blue rows (positional restore would shift them to Red+Green).
+    storeRgbChannels.forEach((c) => {
+      const row = (CHANNEL_COLORS as readonly string[]).indexOf(c.color);
+      if (row >= 0) base[row] = { mz: String(c.mz), tol: String(c.tolDa) };
     });
     return base;
   });
