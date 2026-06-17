@@ -26,6 +26,7 @@ import {
   getStoredChromatogram,
 } from "../reader/explorer/browse";
 import type { ChromPoint, SpectrumIndexRow } from "../reader/explorer/types";
+import { engineDiaXic } from "./dia";
 
 /**
  * Optional precomputed context the dispatcher may pass through from a prior
@@ -255,6 +256,10 @@ export async function engineExtractChrom(
       intensity: stored?.intensity ?? new Float32Array(0),
     };
     return adaptChromatogram(input);
+  }
+
+  if (req.mode === "diaXic") {
+    return engineDiaXic(reader, req, ctx);
   }
 
   const rt = req.rt ?? null;

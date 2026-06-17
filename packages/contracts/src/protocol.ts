@@ -62,6 +62,9 @@ export type ChromRequest =
   | { mode: "tic"; rt?: [number, number] }
   | { mode: "xic"; mz: number; tolDa: number; rt?: [number, number] }
   | { mode: "xicRange"; mzLo: number; mzHi: number; rt?: [number, number] }
+  // DIA fragment XIC: sum mz ± tolDa over the MS2 spectra whose isolation window contains
+  // `precursorMz` (one transition per request; the view overlays several).
+  | { mode: "diaXic"; precursorMz: number; mz: number; tolDa: number; rt?: [number, number] }
   | { mode: "stored"; id: string };
 
 export type WorkerRequest =

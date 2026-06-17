@@ -6,8 +6,11 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { useStore, seriesToPoints } from "../store";
 import { engine } from "../engine";
-import { ChromPlot, Button, TreeView, useCvTerms, cvName } from "@mzpeak/ui-kit";
+import { ChromPlot, MultiChromPlot, Button, TreeView, useCvTerms, cvName, type ChromTrace } from "@mzpeak/ui-kit";
 import type { ChromatogramInfo } from "@mzpeak/contracts";
+
+// Categorical palette for the overlaid DIA fragment traces.
+const DIA_PALETTE = ["#3b54da", "#c00000", "#2e9e5b", "#e8820c", "#8a3ffc", "#0e9bb5", "#d6336c", "#7cb518"];
 
 // Shared style for the XIC numeric inputs (width in rem to fit m/z vs. tolerance).
 const xicInputStyle = (widthRem: number): CSSProperties => ({
@@ -39,6 +42,17 @@ export function Chromatograms() {
   // XIC (extracted-ion chromatogram) inputs: m/z center + half-window in Da.
   const [xicMz, setXicMz] = useState("");
   const [xicTol, setXicTol] = useState("0.01");
+
+  // DIA fragment extractor (Stage A): a precursor m/z (selects the isolation window) + a
+  // list of fragment m/z transitions → one MS2 window-filtered XIC per transition,
+  // overlaid. No peptide→m/z chemistry yet (the user enters m/z directly).
+  const [diaPrecursor, setDiaPrecursor] = useState("");
+  const [diaFragments, setDiaFragments] = useState("");
+  const [diaTol, setDiaTol] = useState("0.02");
+  const [diaRtCenter, setDiaRtCenter] = useState("");
+  const [diaTraces, setDiaTraces] = useState<ChromTrace[] | null>(null);
+  const [diaBusy, setDiaBusy] = useState(false);
+  const [diaNote, setDiaNote] = useState<string | null>(null);
 
   // Keep the controls + stored-row highlight in sync with the loaded request (chromReq):
   //  - xic   → prefill the m/z + tol inputs (so a ?xic= deep link mirrors the trace);
@@ -117,6 +131,53 @@ export function Chromatograms() {
     if (!xicValid) return;
     setSelectedId(null); // an XIC is not one of the stored chromatograms
     void loadChrom({ mode: "xic", mz: xicMzNum, tolDa: xicTolNum });
+  }
+
+  // DIA: parse the fragment list (any of comma / whitespace / newline separated), keep
+  // finite positives. The precursor m/z selects the isolation window; each fragment is a
+  // transition extracted over that window's MS2 spectra.
+  const diaPrecursorNum = Number(diaPrecursor);
+  const diaTolNum = Number(diaTol);
+  const diaFragmentMzs = diaFragments
+    .split(/[\s,;]+/)
+    .map((s) => Number(s))
+    .filter((v) => Number.isFinite(v) && v > 0);
+  const diaValid =
+    Number.isFinite(diaPrecursorNum) && diaPrecursorNum > 0 &&
+    Number.isFinite(diaTolNum) && diaTolNum > 0 &&
+    diaFragmentMzs.length > 0;
+
+  async function extractDia() {
+    if (!diaValid || diaBusy) return;
+    setDiaBusy(true);
+    setDiaNote(null);
+    // Optional RT focus: center ± 60 s narrows the read (faster) and frames the peak.
+    const c = Number(diaRtCenter);
+    const rt: [number, number] | undefined =
+      diaRtCenter.trim() !== "" && Number.isFinite(c) ? [c - 60, c + 60] : undefined;
+    try {
+      const series = await Promise.all(
+        diaFragmentMzs.map((mz) =>
+          engine.extractChrom({ mode: "diaXic", precursorMz: diaPrecursorNum, mz, tolDa: diaTolNum, ...(rt ? { rt } : {}) }),
+        ),
+      );
+      const traces: ChromTrace[] = series.map((s, i) => ({
+        label: `m/z ${diaFragmentMzs[i]!.toFixed(3)}`,
+        color: DIA_PALETTE[i % DIA_PALETTE.length]!,
+        points: seriesToPoints(s),
+      }));
+      setDiaTraces(traces);
+      if (traces.every((t) => t.points.length === 0)) {
+        setDiaNote(
+          `No MS2 isolation window contains m/z ${diaPrecursorNum.toFixed(4)} — check the precursor m/z, or this file may not be DIA.`,
+        );
+      }
+    } catch (err) {
+      setDiaNote(err instanceof Error ? err.message : String(err));
+      setDiaTraces(null);
+    } finally {
+      setDiaBusy(false);
+    }
   }
 
   // Label for the loaded trace. The series carries only kind/id, so the XIC m/z window
@@ -260,6 +321,58 @@ export function Chromatograms() {
           </div>
         </details>
       )}
+
+      {/* ── DIA fragment extractor (Stage A) ───────────────────────────────────────
+          Enter a precursor m/z (picks the DIA isolation window) + a list of fragment
+          m/z transitions → one MS2 window-filtered XIC per fragment, overlaid. */}
+      <details data-testid="dia-extractor" style={{ marginTop: "0.4rem", borderTop: "1px solid var(--border-hairline, #eee)", paddingTop: "0.6rem" }}>
+        <summary style={{ cursor: "pointer", fontSize: "0.9rem", fontWeight: 600, userSelect: "none" }}>
+          DIA fragment extractor
+        </summary>
+        <p style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", margin: "0.4rem 0" }}>
+          Enter a precursor m/z (selects the DIA isolation window) and one or more fragment
+          m/z values; each is extracted over that window&apos;s MS2 spectra and overlaid by
+          retention time. Fragment m/z are entered directly here — peptide→fragment
+          calculation is a later stage.
+        </p>
+        <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-end", flexWrap: "wrap", marginBottom: "0.5rem" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
+            Precursor m/z
+            <input data-testid="dia-precursor-input" type="number" step="any" placeholder="620.83" value={diaPrecursor}
+              onChange={(e) => setDiaPrecursor(e.target.value)} style={xicInputStyle(7)} />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)", flex: "1 1 16rem", minWidth: "12rem" }}>
+            Fragment m/z (comma / space separated)
+            <input data-testid="dia-fragments-input" type="text" placeholder="545.30, 802.45, 917.48" value={diaFragments}
+              onChange={(e) => setDiaFragments(e.target.value)}
+              style={{ ...xicInputStyle(7), width: "100%", fontFamily: "var(--font-mono)" }} />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
+            ± Da
+            <input data-testid="dia-tol-input" type="number" step="any" value={diaTol}
+              onChange={(e) => setDiaTol(e.target.value)} style={xicInputStyle(4.5)} />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
+            RT center (s, optional)
+            <input data-testid="dia-rt-input" type="number" step="any" placeholder="full run" value={diaRtCenter}
+              onChange={(e) => setDiaRtCenter(e.target.value)} style={xicInputStyle(6)} />
+          </label>
+          <Button variant="secondary" size="sm" onClick={() => void extractDia()} disabled={!diaValid || diaBusy} data-testid="dia-extract-btn">
+            {diaBusy ? "Extracting…" : "Extract fragments"}
+          </Button>
+        </div>
+        {diaNote && (
+          <p data-testid="dia-note" style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", margin: "0.25rem 0" }}>{diaNote}</p>
+        )}
+        {diaTraces && diaTraces.some((t) => t.points.length > 0) && (
+          <div data-testid="dia-plot-host">
+            <MultiChromPlot traces={diaTraces} />
+            <p style={{ margin: "0.25rem 0 0", fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
+              {diaTraces.length} transition{diaTraces.length === 1 ? "" : "s"} · scroll to zoom · double-click to reset
+            </p>
+          </div>
+        )}
+      </details>
     </div>
   );
 }
