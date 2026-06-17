@@ -73,6 +73,11 @@ export function ShareButton() {
         variant="secondary"
         size="sm"
         disabled={!canShare}
+        title={
+          localOnly
+            ? "Local files can't be shared — open the dataset from a URL for a shareable link."
+            : "Copy a link to this exact view — the dataset plus your current tab, spectrum, pixel, ion image, RGB channels or ROI. Anyone opening it lands on the same state."
+        }
         onClick={() => void onShare()}
         iconLeft={
           <svg
@@ -99,7 +104,7 @@ export function ShareButton() {
         variant="secondary"
         size="sm"
         disabled={!canShare}
-        title="Copy a Universal Spectrum Identifier (USI) for the current spectrum"
+        title="Copy a Universal Spectrum Identifier (PSI 'mzspec:…') for the current spectrum — a standard, citeable address that USI-aware tools (ProteomeXchange, PRIDE, etc.) can resolve."
         onClick={() => void onCopyUsi()}
       >
         {usiCopied ? "Copied" : "Copy USI"}
