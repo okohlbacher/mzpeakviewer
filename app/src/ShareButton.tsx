@@ -8,23 +8,17 @@
 // element text or location.href.
 
 import { useState, useCallback } from "react";
-import { Button, Checkbox } from "@mzpeak/ui-kit";
+import { Button } from "@mzpeak/ui-kit";
 import { useStore } from "./store";
-import { currentShareUrl, currentUsi, isTauriApp } from "./urlSync";
+import { currentShareUrl, currentUsi } from "./urlSync";
 
 export function ShareButton() {
   const phase = useStore((s) => s.phase);
   const sourceUrl = useStore((s) => s.sourceUrl);
-  const urlSyncEnabled = useStore((s) => s.urlSyncEnabled);
-  const setUrlSyncEnabled = useStore((s) => s.setUrlSyncEnabled);
   const [copied, setCopied] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [usiCopied, setUsiCopied] = useState(false);
   const [usi, setUsi] = useState<string | null>(null);
-
-  // The address bar is meaningless in the Tauri desktop app, so hide the live-sync
-  // toggle entirely there (MG-02).
-  const showUrlSyncToggle = !isTauriApp();
 
   // A share link must reference the dataset by URL. A LOCAL file has no shareable URL, so
   // sharing is disabled — a `?spectrum=N`-style link with no `file=` is useless off this machine.
@@ -74,16 +68,6 @@ export function ShareButton() {
       style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
       title={localOnly ? "Local files can't be shared — open the dataset from a URL for a shareable link." : undefined}
     >
-      {showUrlSyncToggle && (
-        <span data-testid="urlsync-toggle" style={{ fontSize: "0.8rem", color: "var(--text-secondary, #475569)" }}>
-          <Checkbox
-            checked={urlSyncEnabled}
-            onChange={setUrlSyncEnabled}
-            ariaLabel="Automatically update the address bar as you navigate"
-            label="Sync URL"
-          />
-        </span>
-      )}
       <Button
         data-testid="share-btn"
         variant="secondary"

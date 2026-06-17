@@ -26,12 +26,12 @@ All four imaging deep-links now round-trip end to end, wired through the store �
   producer) emits `roi=x0,y0,x1,y1`, and a `?roi=` link re-runs the region-mean (loop-guarded).
 Verified: px= and roi= apply→store→re-emit round-trips confirmed headless.
 
-### MG-02 · Live address-bar URL sync (toggle) — **DONE (2026-06-16)**
-Opt-in "Sync URL" checkbox (default off, persisted in `localStorage` `mzpeak.urlSync`)
-next to Share. A single debounced (~400 ms) zustand subscription in `App.tsx` mirrors
-`currentShareUrl()` into `history.replaceState` on store changes; compare-before-write
-avoids churn; hidden + no-op in Tauri (no meaningful address bar) and for local files.
-Carried from Explorer (EX-URL-01).
+### MG-02 · Live address-bar URL sync (toggle) — **REMOVED (2026-06-16)**
+Was shipped (an opt-in "Sync URL" checkbox + a debounced zustand subscription mirroring
+`currentShareUrl()` into `history.replaceState`), then **removed at the operator's request**
+— the toggle UI (ShareButton), the `App.tsx` subscription, and the `urlSyncEnabled` store
+field/action/localStorage were all deleted. The explicit **Share view** button (one-shot
+copy + address-bar mirror) remains. Carried from Explorer (EX-URL-01).
 
 ### MG-03 · Adaptive preload + re-centering — **part (a) DONE (2026-06-16)**
 (a) **Done:** the fixed `PREFETCH_COOLDOWN_MS = 350` is now derived from a rolling p75 of

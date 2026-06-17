@@ -89,10 +89,6 @@ export interface AppState {
    *  region-mean selection round-trips as `roi=x0,y0,x1,y1` in the share URL. */
   roiRect: [number, number, number, number] | null;
 
-  // Live address-bar URL sync (MG-02): opt-in user preference, default OFF.
-  // Persisted to localStorage; NOT reset on file close.
-  urlSyncEnabled: boolean;
-
   // navigation
   view: View;
 
@@ -149,8 +145,6 @@ export interface AppState {
   setRoiRect: (rect: [number, number, number, number] | null) => void;
   /** MG-01: mirror the RGB channels list so ?ch= can round-trip. */
   setRgbChannels: (channels: { mz: number; tolDa: number; color: string }[]) => void;
-  /** MG-02: toggle live address-bar URL sync (persisted to localStorage). */
-  setUrlSyncEnabled: (on: boolean) => void;
   /** Load a spectrum by index. `route` (default true) switches to the Spectra view
    *  on success; pass false to load the spectrum without leaving the current view
    *  (used by the imaging spectrum dock for in-place pixel-pick). */
@@ -331,10 +325,6 @@ export const useStore = create<AppState>((set, get) => ({
   rgbChannels: [],
   roiRect: null,
 
-  // live URL sync preference (MG-02) — read from localStorage, default OFF.
-  urlSyncEnabled:
-    typeof window !== "undefined" && localStorage.getItem("mzpeak.urlSync") === "1",
-
   // navigation
   view: "summary",
 
@@ -480,11 +470,6 @@ export const useStore = create<AppState>((set, get) => ({
   },
   setRoiRect: (rect: [number, number, number, number] | null) => {
     set({ roiRect: rect });
-  },
-
-  setUrlSyncEnabled: (on: boolean) => {
-    if (typeof window !== "undefined") localStorage.setItem("mzpeak.urlSync", on ? "1" : "0");
-    set({ urlSyncEnabled: on });
   },
 
   // -------------------------------------------------------------------------
