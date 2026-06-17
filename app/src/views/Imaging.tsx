@@ -716,7 +716,7 @@ function ImagingInner({
   const showColormapControls = mode === "overview" || mode === "ion" || mode === "overlay";
 
   return (
-    <section aria-label={`Imaging — ${mode}`} data-testid={`imaging-${mode}`} style={{ display: "flex", flexDirection: "column", gap: "0.75rem", height: "100%", minHeight: 0 }}>
+    <section aria-label={`Imaging — ${mode}`} data-testid={`imaging-${mode}`} style={{ display: "flex", flexDirection: "column", gap: "0.75rem", height: "100%", minHeight: 0, overflow: "auto" }}>
       {/* ── Controls ─────────────────────────────────────────────────────── */}
       <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-end", flexWrap: "wrap" }}>
         {mode === "ion" && (
@@ -923,7 +923,12 @@ function ImagingInner({
           style={{
             flex: 1,
             minWidth: 0,
-            minHeight: 240,
+            // Must be 0 (not 240) so this flex child can actually shrink when the lower docks
+            // (pixel spectrum + aux mean/ROI spectrum, both flex-shrink:0) open — otherwise the
+            // stage floors at 240px and overflows its flex parent, spilling the canvas over the
+            // panels below. The contain-fit ResizeObserver re-fits the canvas to whatever height
+            // remains, so the image just gets smaller instead of breaking the layout.
+            minHeight: 0,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
