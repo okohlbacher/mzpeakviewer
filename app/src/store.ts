@@ -10,6 +10,7 @@ import type {
   ImagingGridWire,
   OpticalImageMeta,
   ChromatogramSeries,
+  ChromRequest,
   BrowseIndex,
   IonImageStats,
   ChannelAssignment,
@@ -114,6 +115,9 @@ export interface AppState {
 
   // chromatogram
   chrom: ChromatogramSeries | null;
+  /** The request that produced `chrom` (tic / xic / xicRange / stored) — kept so the
+   *  Share link can round-trip the exact trace (xic m/z window, stored id). */
+  chromReq: ChromRequest | null;
   chromLoading: boolean;
 
   // notices
@@ -154,7 +158,7 @@ export interface AppState {
    *  in-place (route=false). Used by an imaging pick and by a `?px=` deep link. No-op
    *  if there's no grid or the pixel has no spectrum. (MG-01) */
   selectPixel: (x: number, y: number, route?: boolean) => Promise<void>;
-  loadChrom: (req: { mode: "tic" } | { mode: "stored"; id: string }) => Promise<void>;
+  loadChrom: (req: ChromRequest) => Promise<void>;
   dismissNotice: (id: string) => void;
   toggleAccordion: (key: "advanced" | "imaging") => void;
 }
@@ -207,6 +211,7 @@ const INITIAL_OPEN_STATE = {
   spectrumLoading: false,
   browse: null,
   chrom: null,
+  chromReq: null,
   chromLoading: false,
   notices: [],
 } satisfies Partial<AppState>;
@@ -340,6 +345,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   // chrom
   chrom: null,
+  chromReq: null,
   chromLoading: false,
 
   // notices
@@ -439,6 +445,7 @@ export const useStore = create<AppState>((set, get) => ({
       spectrumLoading: false,
       browse: null,
       chrom: null,
+      chromReq: null,
       chromLoading: false,
       notices: [],
     });
@@ -528,11 +535,13 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // -------------------------------------------------------------------------
-  // loadChrom — extract a chromatogram: the computed TIC, or a STORED chromatogram
-  // (SRM/MRM transition etc.) looked up by its native id.
+  // loadChrom — extract a chromatogram: the computed TIC, an extracted-ion
+  // chromatogram (xic over m/z ± tol, or xicRange over [mzLo, mzHi]), or a STORED
+  // chromatogram (SRM/MRM transition etc.) looked up by its native id. The request
+  // is retained in `chromReq` so the Share link can reproduce the exact trace.
   // Stale-async guard: drop result if a newer openFile started.
   // -------------------------------------------------------------------------
-  loadChrom: async (req: { mode: "tic" } | { mode: "stored"; id: string }) => {
+  loadChrom: async (req: ChromRequest) => {
     const seq = currentOpenSeq;
     set({ chromLoading: true });
     try {
@@ -542,7 +551,7 @@ export const useStore = create<AppState>((set, get) => ({
         set({ chromLoading: false });
         return;
       }
-      set({ chrom: series, chromLoading: false });
+      set({ chrom: series, chromReq: req, chromLoading: false });
     } catch (err) {
       if (seq !== currentOpenSeq) {
         set({ chromLoading: false });

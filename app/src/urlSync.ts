@@ -97,9 +97,21 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
     }
   }
 
-  // 3. Chromatogram (only the TIC path is wired in the app store today).
-  if (v.chromMode === "tic" && v.view === "chromatograms") {
-    await st.loadChrom({ mode: "tic" }).catch(() => {});
+  // 3. Chromatogram (tic / xic / stored all wired into the app store). The grammar
+  // routes any chrom param to the "chromatograms" view, so gate on that. An optional
+  // ?rt= window applies to tic + xic.
+  if (v.view === "chromatograms") {
+    const rt = v.chromTimeRange ?? undefined;
+    // Guard the xic window: a malformed/round-tripped link can carry tolDa==0 (the
+    // grammar's 4-decimal num() can quantize a sub-0.5-mDa tolerance to 0), which would
+    // extract a degenerate empty trace. Fail safe — fall through rather than load it.
+    if (v.chromMode === "xic" && v.xic && v.xic.mz > 0 && v.xic.tolDa > 0) {
+      await st.loadChrom({ mode: "xic", mz: v.xic.mz, tolDa: v.xic.tolDa, ...(rt ? { rt } : {}) }).catch(() => {});
+    } else if (v.chromMode === "stored" && v.chromStoredId) {
+      await st.loadChrom({ mode: "stored", id: v.chromStoredId }).catch(() => {});
+    } else if (v.chromMode === "tic") {
+      await st.loadChrom({ mode: "tic", ...(rt ? { rt } : {}) }).catch(() => {});
+    }
   }
 
   // 3b. Imaging deep-link controls (MG-01): prefill the Ion-image m/z+tol and the
@@ -182,14 +194,32 @@ export function currentShareUrl(): string {
     selector = { by: "spectrum", index: s.selector.index, id: null };
   }
 
+  // chrom: round-trip the exact loaded trace (tic / xic / stored) from the last
+  // loadChrom request. xicRange collapses to center ± half-width (the grammar's xic
+  // form). Only meaningful on the chromatograms view; elsewhere fall back to default.
+  let chromMode = DEFAULT_VIEW_STATE.chromMode;
+  let chromXic = DEFAULT_VIEW_STATE.xic;
+  let chromStoredId = DEFAULT_VIEW_STATE.chromStoredId;
+  let chromTimeRange = DEFAULT_VIEW_STATE.chromTimeRange;
+  if (s.view === "chromatograms" && s.chromReq) {
+    const r = s.chromReq;
+    if (r.mode === "xic") { chromMode = "xic"; chromXic = { mz: r.mz, tolDa: r.tolDa }; }
+    else if (r.mode === "xicRange") { chromMode = "xic"; chromXic = { mz: (r.mzLo + r.mzHi) / 2, tolDa: (r.mzHi - r.mzLo) / 2 }; }
+    else if (r.mode === "stored") { chromMode = "stored"; chromStoredId = r.id; }
+    else chromMode = "tic";
+    // rt window round-trips for tic + xic (the grammar re-applies it for those modes).
+    if ("rt" in r && r.rt) chromTimeRange = r.rt;
+  }
+
   const v: ViewState = {
     ...DEFAULT_VIEW_STATE,
     sourceUrl: s.sourceUrl,
     view: s.view,
     selector,
-    // chrom: only the TIC mode is meaningful in the current store; emit it so
-    // a chromatograms deep link round-trips. (xic/stored aren't tracked yet.)
-    chromMode: s.view === "chromatograms" ? "tic" : DEFAULT_VIEW_STATE.chromMode,
+    chromMode,
+    xic: chromXic,
+    chromStoredId,
+    chromTimeRange,
     // imaging (MG-01): emit the last Ion-image request + RGB channels so ?ion=/?ch=
     // round-trip. DEFAULT_VIEW_STATE has ion:null / channels:[] — only set when present.
     ion: s.ionRequest ?? DEFAULT_VIEW_STATE.ion,
