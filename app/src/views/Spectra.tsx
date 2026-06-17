@@ -1,7 +1,7 @@
 // Spectra view — browse list / index picker → selectSpectrum → SpectrumPlot.
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../store";
-import { scanNumberOf } from "../scan";
+import { buildLevelIndex, activeSet, rankOf, absoluteOf } from "../levelIndex";
 import { SpectrumPlot, Select, Button, TreeView, spectrumReporters, type SelectOption, type ReporterMarker, type ReporterPeak } from "@mzpeak/ui-kit";
 
 // Categorical palette for isobaric channels — shared by the pills + the peak dots
@@ -13,10 +13,12 @@ const CHANNEL_PALETTE = [
 ];
 const channelColor = (i: number) => CHANNEL_PALETTE[i % CHANNEL_PALETTE.length]!;
 
-// scanNumberOf parses the native scan number a mass-spectrometrist reads off the
-// spectrum id (e.g. "scan=1800") — typically 1-based and NOT equal to the 0-based
-// absolute index (commonly scan = index + 1). It lives in ../scan so the picker
-// (here) and the ?scan= deep-link resolver (urlSync) share one implementation.
+// The picker numbers spectra by their 1-based position within the selected MS level
+// (so a level with 1000 spectra runs 1..1000, never the native scan number); "All"
+// numbers 1..numSpectra by absolute index + 1. The relative↔absolute mapping is the
+// per-level array set built by buildLevelIndex (../levelIndex), memoized on `browse`.
+// (Native scan numbers still drive the ?scan= deep link via ../scan + urlSync — that
+// resolves to an absolute index and is independent of how the picker numbers things.)
 
 export function Spectra() {
   const phase = useStore((s) => s.phase);
@@ -47,6 +49,10 @@ export function Spectra() {
   const spectrumIndex = spectrum?.index ?? null;
   useEffect(() => { setSelectedChannel(null); }, [spectrumIndex]);
 
+  // Per-MS-level relative↔absolute mapping, built once per file (rebuilds only when
+  // `browse` changes — switching MS levels just selects a different prebuilt array).
+  const levelIndex = useMemo(() => buildLevelIndex(browse), [browse]);
+
   if (phase !== "ready" || !stats) {
     return (
       <p
@@ -70,43 +76,29 @@ export function Spectra() {
   const currentIndex = selector?.index ?? 0;
 
   // MS-level filter (only levels actually present in the file populate the dropdown;
-  // filled by scanBreakdown). Filtering needs the per-spectrum browse.msLevel column.
+  // filled by scanBreakdown). Filtering reads the prebuilt per-level mapping arrays.
   const availableLevels = stats.msLevels ?? [];
-  const allIndices = browse
-    ? Array.from(browse.msLevel, (_, i) => i)
+  // The active set of absolute indices for the current filter: a level's prebuilt
+  // array, or every index in order for "All". Before `browse` arrives (the brief
+  // window after open, or if scanBreakdown failed) fall back to a plain 0..n-1 range
+  // and ignore any level filter — without msLevel data we can't honour it.
+  const active = browse
+    ? activeSet(levelIndex, msLevelFilter)
     : Array.from({ length: numSpectra }, (_, i) => i);
   const filtered = msLevelFilter != null && !!browse;
-  const filteredIndices = !filtered
-    ? allIndices
-    : allIndices.filter((i) => browse!.msLevel[i] === msLevelFilter);
+  // 1-based position of the current spectrum in the active set (what the picker shows
+  // and what users type). Null only if the current spectrum isn't in the active set
+  // (e.g. mid-filter-switch before applyFilter jumps to the first match).
+  const currentRank = rankOf(active, currentIndex);
 
-  // Native scan-number navigation. When the file's spectrum ids carry scan numbers,
-  // the index input navigates by SCAN NUMBER — the value shown in the header and the
-  // one users think in — not the 0-based absolute index. (Scan is usually 1-based:
-  // for this file scan = index + 1, which is exactly why typing the index read as
-  // "off by one".) Resolution stays within the active (filtered) set.
-  const scanOf = (i: number): number | null => scanNumberOf(browse?.id[i]);
-  const firstScan = filteredIndices.length ? scanOf(filteredIndices[0]!) : null;
-  const lastScan = filteredIndices.length ? scanOf(filteredIndices[filteredIndices.length - 1]!) : null;
-  const hasScans = firstScan != null && lastScan != null;
-  const currentScan = scanOf(currentIndex);
-
-  const levelOf = (i: number): number | null => (browse ? browse.msLevel[i] ?? null : null);
-  const curLevel = levelOf(currentIndex);
-  // Within-level rank (1-based) of the current spectrum among all spectra of its level.
-  // When a filter is active this equals the position in the filtered set; with "All" it
-  // still reports the position within the spectrum's own MS level (so #2's readout holds).
-  let withinLevelRank: number | null = null;
-  if (browse && curLevel != null) {
-    let r = 0;
-    for (let j = 0; j <= currentIndex && j < browse.msLevel.length; j++) {
-      if (browse.msLevel[j] === curLevel) r++;
-    }
-    withinLevelRank = r;
-  }
-  // Total spectra at the current level (for "#M of N").
-  const levelTotal =
-    browse && curLevel != null ? allIndices.filter((i) => browse.msLevel[i] === curLevel).length : null;
+  // Current spectrum's own MS level + its rank/total WITHIN that level — shown in the
+  // meta readout regardless of the active filter, straight off the mapping arrays.
+  // `?? null` guards an out-of-range currentIndex (TypedArray → undefined); an
+  // in-bounds spectrum with no MS level is -1 (MSLEVEL_ABSENT), not null.
+  const curLevel = browse ? (browse.msLevel[currentIndex] ?? null) : null;
+  const levelSet = curLevel != null ? activeSet(levelIndex, curLevel) : null;
+  const withinLevelRank = levelSet ? rankOf(levelSet, currentIndex) : null;
+  const levelTotal = levelSet ? levelSet.length : null;
 
   // Isobaric reporter ions (TMT/iTRAQ): if the run carries SDRF channels and the
   // current spectrum is MSn≥2, match each channel's reporter m/z to a peak. Pills
@@ -153,52 +145,43 @@ export function Spectra() {
   function applyFilter(level: number | null) {
     setMsLevelFilter(level);
     if (level != null && browse && browse.msLevel[currentIndex] !== level) {
-      const first = allIndices.find((i) => browse.msLevel[i] === level);
+      const first = levelIndex.byLevel.get(level)?.[0];
       if (first != null) void selectSpectrum(first);
     }
   }
 
-  // Build select options from the (filtered) browse index, else a simple range. Cap at
-  // 1000 options. When filtered the displayed index is the within-level position
-  // (1-based); "All" keeps the absolute index.
+  // Build select options from the active set. Cap at 1000 options. The displayed
+  // number is always the 1-based position within the active set: within a level it is
+  // the within-level index (1..count); in "All" it is absolute index + 1.
   const MAX_OPTS = 1000;
-  const optIndices = filteredIndices.slice(0, MAX_OPTS);
+  const optIndices = active.slice(0, MAX_OPTS);
   const selectOptions: SelectOption[] = optIndices.map((i, pos) => ({
     value: String(i),
     label: !browse
-      ? `Spectrum ${i}`
+      ? `Spectrum ${pos + 1}`
       : filtered
         ? `MS${msLevelFilter} #${pos + 1} · ${browse.id[i]}`
-        : `#${i} ${browse.id[i]}`,
+        : `#${pos + 1} · ${browse.id[i]}`,
   }));
 
-  // Prev/Next step WITHIN the filtered set.
-  const filterPos = filteredIndices.indexOf(currentIndex);
-  const prevIdx = filterPos > 0 ? filteredIndices[filterPos - 1]! : null;
+  // Prev/Next step WITHIN the active set, using the current 1-based rank.
+  const prevIdx = currentRank != null && currentRank > 1 ? active[currentRank - 2]! : null;
   const nextIdx =
-    filterPos >= 0 && filterPos < filteredIndices.length - 1 ? filteredIndices[filterPos + 1]! : null;
+    currentRank != null && currentRank < active.length ? active[currentRank]! : null;
 
-  // Large-file index input. Priority: navigate by NATIVE SCAN NUMBER when ids carry
-  // one (resolve the typed scan → absolute index within the active set). Otherwise
-  // fall back: filtered → 1-based within-level index; "All" → 0-based absolute index.
+  // Large-file index input: the typed number is the 1-based position within the active
+  // set (within-level for a level, absolute+1 for "All"); absoluteOf maps it back to
+  // the absolute index to select. Out-of-range input is ignored.
   function commitInput() {
     const v = Number(inputVal.trim());
     if (Number.isFinite(v)) {
-      const n = Math.floor(v);
-      if (hasScans) {
-        const abs = filteredIndices.find((i) => scanOf(i) === n);
-        if (abs != null) void selectSpectrum(abs);
-      } else if (filtered) {
-        const abs = filteredIndices[n - 1];
-        if (abs != null) void selectSpectrum(abs);
-      } else if (n >= 0 && n < numSpectra) {
-        void selectSpectrum(n);
-      }
+      const abs = absoluteOf(active, Math.floor(v));
+      if (abs != null) void selectSpectrum(abs);
     }
     setInputVal("");
   }
 
-  const hasLargeFile = filteredIndices.length > MAX_OPTS;
+  const hasLargeFile = active.length > MAX_OPTS;
 
   return (
     <div
@@ -242,20 +225,18 @@ export function Spectra() {
                 whiteSpace: "nowrap",
               }}
             >
-              {hasScans
-                ? `Scan number (${firstScan}–${lastScan}):`
-                : filtered
-                  ? `MS${msLevelFilter} index (1–${filteredIndices.length}):`
-                  : `Spectrum index (0–${numSpectra - 1}):`}
+              {filtered
+                ? `MS${msLevelFilter} index (1–${active.length}):`
+                : `Spectrum index (1–${active.length}):`}
             </label>
             <input
               id="spectrum-index-input"
               data-testid="spectrum-index-input"
               type="number"
-              min={hasScans ? firstScan! : 0}
-              max={hasScans ? lastScan! : numSpectra - 1}
+              min={1}
+              max={active.length}
               value={inputVal}
-              placeholder={hasScans ? (currentScan != null ? String(currentScan) : "") : String(currentIndex)}
+              placeholder={currentRank != null ? String(currentRank) : ""}
               onChange={(e) => setInputVal(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitInput();

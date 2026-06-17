@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
     "e2e": "playwright test",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
