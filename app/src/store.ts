@@ -30,6 +30,12 @@ import { engine } from "./engine";
 
 let currentOpenSeq = 0;
 
+// Monotonic chromatogram-request counter. Overlapping loadChrom() calls (e.g. clicking
+// a stored row then hitting Enter in the XIC inputs) must not let a slower older request
+// overwrite a newer one's trace — each call captures its seq and commits only if still
+// the latest (codex review).
+let currentChromSeq = 0;
+
 // ---------------------------------------------------------------------------
 // Store shape
 // ---------------------------------------------------------------------------
@@ -543,20 +549,18 @@ export const useStore = create<AppState>((set, get) => ({
   // -------------------------------------------------------------------------
   loadChrom: async (req: ChromRequest) => {
     const seq = currentOpenSeq;
+    const chromSeq = ++currentChromSeq;
     set({ chromLoading: true });
+    // Stale if a newer file opened OR a newer chromatogram request was issued. A stale
+    // result must NOT touch chrom/chromReq/chromLoading — the newer in-flight request
+    // owns them (and will clear chromLoading on its own completion).
+    const stale = () => seq !== currentOpenSeq || chromSeq !== currentChromSeq;
     try {
       const series = await engine.extractChrom(req);
-      // Drop if a newer file was opened while we waited.
-      if (seq !== currentOpenSeq) {
-        set({ chromLoading: false });
-        return;
-      }
+      if (stale()) return;
       set({ chrom: series, chromReq: req, chromLoading: false });
     } catch (err) {
-      if (seq !== currentOpenSeq) {
-        set({ chromLoading: false });
-        return;
-      }
+      if (stale()) return;
       set({
         chromLoading: false,
         error: err instanceof Error ? err.message : String(err),

@@ -40,13 +40,22 @@ export function Chromatograms() {
   const [xicMz, setXicMz] = useState("");
   const [xicTol, setXicTol] = useState("0.01");
 
-  // Prefill the inputs when an XIC arrives from a ?xic= deep link (so the controls
-  // mirror the shown trace). Only fires when the loaded request is an xic.
+  // Keep the controls + stored-row highlight in sync with the loaded request (chromReq):
+  //  - xic   → prefill the m/z + tol inputs (so a ?xic= deep link mirrors the trace);
+  //  - stored→ highlight the row + open its metadata panel (so a ?chrom=<id> deep link
+  //            isn't left with a blank selection — the row click sets this too);
+  //  - null  → new file: clear the inputs back to defaults (no stale m/z from file A).
+  // A tic load leaves the typed m/z untouched (so "type m/z, click Build TIC to compare"
+  // doesn't wipe the user's input). selectedId clears for tic/xic.
   useEffect(() => {
     if (chromReq?.mode === "xic") {
       setXicMz(String(chromReq.mz));
       setXicTol(String(chromReq.tolDa));
+    } else if (chromReq == null) {
+      setXicMz("");
+      setXicTol("0.01");
     }
+    setSelectedId(chromReq?.mode === "stored" ? chromReq.id : null);
   }, [chromReq]);
 
   useEffect(() => {

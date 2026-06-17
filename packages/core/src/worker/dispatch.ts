@@ -482,8 +482,8 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         return;
       }
 
-      // Not yet implemented (archive/parquet = Structure spike; imaging render/optical
-      // = next imaging slice). Fail loudly, never silently.
+      // Defensive fallback: every protocol request type is handled above. This catches
+      // an unknown/future request type (or a client/worker version skew). Fail loudly.
       default: {
         const requestId = (req as { requestId?: number }).requestId;
         respond({

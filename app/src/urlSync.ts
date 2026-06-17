@@ -55,8 +55,8 @@ function modeFromCapabilities(): FileMode {
  *                     index only when ids don't carry scans / nothing resolves.
  *   - by:"pixel"    → not directly indexable from the URL alone; the view is
  *                     set so the user lands on the right panel, selection no-op.
- * Chromatogram mode "tic" routes to loadChrom({mode:"tic"}); other chrom modes
- * are left to their views (the app store has no XIC action yet).
+ * Chromatogram modes tic / xic / stored all route to loadChrom() (the app store
+ * tracks the request in chromReq for the reverse round-trip).
  */
 async function applyViewState(v: ViewState, notices: { code: string; message: string }[]) {
   const st = useStore.getState();
@@ -64,11 +64,19 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
   // 1. View first (so the panel is correct even if selection is a no-op).
   if (v.view) st.setView(v.view);
 
+  // 1b. MS-level filter (?ms=) — set before selection so the Spectra picker shows the
+  // right within-level numbering for the deep-linked spectrum.
+  if (v.msLevelFilter != null) st.setMsLevelFilter(v.msLevelFilter);
+
   // 2. Selection (spectrum/scan → selectSpectrum). Defensive: only when numeric.
+  // selectSpectrum routes to the Spectra view by default; suppress that when the deep
+  // link targets a non-Spectra view (chromatograms/imaging) — otherwise the selection
+  // would overwrite the view set above (codex review). The pixel path already does this.
   const sel: SpectrumSelector = v.selector;
+  const routeToSpectra = v.view === "spectra";
   if (sel) {
     if (sel.by === "spectrum" && Number.isInteger(sel.index) && sel.index >= 0) {
-      await st.selectSpectrum(sel.index).catch(() => {});
+      await st.selectSpectrum(sel.index, routeToSpectra).catch(() => {});
     } else if (sel.by === "scan" && Number.isInteger(sel.scan) && sel.scan >= 0) {
       // Native scan → absolute index. The app store selects by absolute index,
       // but native scan ≠ index for Bruker/Thermo (scan = index + 1), so a naive
@@ -79,7 +87,7 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
       const carriesScans = !!browse && idsCarryScans(browse.id);
       const resolved = carriesScans ? resolveScanToIndex(browse!, sel.scan) : null;
       if (resolved != null) {
-        await st.selectSpectrum(resolved).catch(() => {});
+        await st.selectSpectrum(resolved, routeToSpectra).catch(() => {});
       } else if (!carriesScans) {
         // Fallback ONLY when ids don't carry scans (or browse absent): treat the scan
         // as an absolute index (correct when scan==index). Range-guarded. When ids DO
@@ -87,7 +95,7 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
         // misaligned index (review P2) — a non-existent scan shouldn't land elsewhere.
         const n = browse?.id.length ?? null;
         if (n == null || sel.scan < n) {
-          await st.selectSpectrum(sel.scan).catch(() => {});
+          await st.selectSpectrum(sel.scan, routeToSpectra).catch(() => {});
         }
       }
     } else if (sel.by === "pixel" && Number.isInteger(sel.x) && Number.isInteger(sel.y)) {
@@ -173,7 +181,7 @@ export async function hydrateFromLocation(): Promise<void> {
 
 /**
  * Build the shareable URL for the store's current state. Maps the app store's
- * fields onto a ViewState (omitting fields the store doesn't track yet), then
+ * fields onto a ViewState (spectrumZoom / opticalRef aren't tracked yet), then
  * delegates to the pure buildShareUrl(). Uses window.location origin+pathname.
  */
 export function currentShareUrl(): string {
@@ -216,6 +224,9 @@ export function currentShareUrl(): string {
     sourceUrl: s.sourceUrl,
     view: s.view,
     selector,
+    // ?ms= — round-trip the Spectra MS-level filter so a shared within-level view
+    // (e.g. "MS2 #5") reloads filtered, not as "All".
+    msLevelFilter: s.msLevelFilter,
     chromMode,
     xic: chromXic,
     chromStoredId,
