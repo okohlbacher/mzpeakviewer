@@ -14,7 +14,9 @@ export function classifyOpticalBand(
     return null;
   }
 
-  if (minNm > maxNm || maxNm <= 0) {
+  // Wavelengths are positive nm; reject non-positive bounds (a negative/zero min with a
+  // positive max would otherwise misclassify as a band).
+  if (minNm > maxNm || minNm <= 0 || maxNm <= 0) {
     return null;
   }
 

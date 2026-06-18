@@ -471,7 +471,9 @@ function MetricTile({ label, value, unit, accent }: { label: string; value: stri
  *  present. Violet accent matches the UV/VIS demo chip on the start page. */
 function OpticalBandPill({ range, count }: { range: [number, number] | null; count: number }) {
   const band = range ? classifyOpticalBand(range[0], range[1]) : null;
-  const label = band ?? "UV/VIS";
+  // Neutral label when the range is unknown/unclassifiable — "UV/VIS" is itself a real
+  // band, so showing it for a range-less file would read as a (wrong) classification.
+  const label = band ?? "Optical";
   const rangeText = range ? `${Math.round(range[0])}–${Math.round(range[1])} nm` : null;
   const spectra = `${count.toLocaleString()} wavelength spectr${count === 1 ? "um" : "a"}`;
   const tooltip = rangeText ? `${spectra} · ${rangeText}` : `${spectra} · range unknown`;

@@ -25,6 +25,7 @@ import type {
   SpectrumArrays,
   WavelengthSpectrumArrays,
   WavelengthBrowseIndex,
+  WavelengthMatrix,
   IonImageStats,
   ImagingGridWire,
   OpticalImageMeta,
@@ -89,6 +90,8 @@ export type WorkerRequest =
   // --- UV/VIS wavelength spectra (DATA layer; SEPARATE from MS spectra) -----
   // Lazy per-wavelength-spectrum browse index (built on first UV access).
   | { type: "wavelengthBrowse"; requestId: number }
+  // Dense time × wavelength matrix (built lazily on first PDA-view access).
+  | { type: "wavelengthMatrix"; requestId: number }
   // Select by zero-based ARRAY POSITION; selectId orders rapid clicks (echoed),
   // mirroring selectSpectrum's stale-drop model.
   | { type: "selectWavelengthSpectrum"; index: number; selectId: number }
@@ -147,6 +150,7 @@ export type WorkerResponse =
   | { type: "meanSpectrumResult"; requestId: number; spectrum: SpectrumArrays }
   // UV/VIS — browse arrays transfer; wavelength/intensity buffers transfer (selectId echoed).
   | { type: "wavelengthBrowseResult"; requestId: number; browse: WavelengthBrowseIndex }
+  | { type: "wavelengthMatrixResult"; requestId: number; matrix: WavelengthMatrix }
   | { type: "wavelengthSpectrumResult"; spectrum: WavelengthSpectrumArrays; selectId: number }
   | { type: "chromResult"; requestId: number; series: ChromatogramSeries }
   | { type: "chromatogramListResult"; requestId: number; chromatograms: ChromatogramInfo[] }
@@ -233,6 +237,7 @@ export const MESSAGE_POLICY: Record<RequestType, MessagePolicy> = {
   meanSpectrum: { cancellation: "stale-drop", transfersResult: true, paged: false },
   // UV/VIS — mirror the MS browse/select policies (stale-drop, transfers typed arrays).
   wavelengthBrowse: { cancellation: "stale-drop", transfersResult: true, paged: false },
+  wavelengthMatrix: { cancellation: "stale-drop", transfersResult: true, paged: false },
   selectWavelengthSpectrum: { cancellation: "stale-drop", transfersResult: true, paged: false },
   roiSpectrum: { cancellation: "stale-drop", transfersResult: true, paged: false },
   // Chromatogram extraction streams row groups → abortable at chunk boundaries.

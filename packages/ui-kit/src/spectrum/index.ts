@@ -8,6 +8,11 @@ export type { ReporterMarker } from "./SpectrumPlot";
 export { WavelengthSpectrumPlot } from "./WavelengthSpectrumPlot";
 export type { WavelengthPlotMode } from "./WavelengthSpectrumPlot";
 
+// PDA/DAD derived views over the time×wavelength matrix: chromatogram traces
+// (max / extracted single-λ) and the 2D viridis heatmap.
+export { WavelengthChromatogramPlot } from "./WavelengthChromatogramPlot";
+export { WavelengthHeatmap } from "./WavelengthHeatmap";
+
 // Chromatogram navigator (time vs intensity, click-to-pick).
 export { ChromPlot } from "./ChromPlot";
 export type { ChromPoint } from "./ChromPlot";

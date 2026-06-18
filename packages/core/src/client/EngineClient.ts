@@ -26,6 +26,7 @@ import type {
   SpectrumArrays,
   WavelengthSpectrumArrays,
   WavelengthBrowseIndex,
+  WavelengthMatrix,
   FileStats,
   BrowseIndex,
   Presence,
@@ -172,6 +173,7 @@ const RESOLVE_TYPE: Partial<Record<WorkerRequest["type"], WorkerResponse["type"]
   open: "opened",
   scanBreakdown: "scanBreakdownResult",
   wavelengthBrowse: "wavelengthBrowseResult",
+  wavelengthMatrix: "wavelengthMatrixResult",
   meanSpectrum: "meanSpectrumResult",
   roiSpectrum: "meanSpectrumResult",
   extractChrom: "chromResult",
@@ -350,6 +352,14 @@ export class EngineClient {
    */
   wavelengthBrowse(): Promise<WavelengthBrowseIndex> {
     return this.request<WavelengthBrowseIndex>((requestId) => ({ type: "wavelengthBrowse", requestId }));
+  }
+
+  /**
+   * Dense time × wavelength matrix for PDA/DAD UV/VIS data (built lazily on first access).
+   * requestId-correlated; the typed-array buffers are transferred.
+   */
+  wavelengthMatrix(): Promise<WavelengthMatrix> {
+    return this.request<WavelengthMatrix>((requestId) => ({ type: "wavelengthMatrix", requestId }));
   }
 
   /**
@@ -724,6 +734,8 @@ export class EngineClient {
         return { stats: msg.stats, browse: msg.browse, ticColumn: msg.ticColumn };
       case "wavelengthBrowseResult":
         return msg.browse;
+      case "wavelengthMatrixResult":
+        return msg.matrix;
       case "meanSpectrumResult":
         return msg.spectrum;
       case "chromResult":

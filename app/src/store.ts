@@ -16,6 +16,7 @@ import type {
   ChannelAssignment,
   WavelengthBrowseIndex,
   WavelengthSpectrumArrays,
+  WavelengthMatrix,
 } from "@mzpeak/contracts";
 import { showChromatograms } from "@mzpeak/contracts";
 import { rebuildCoordMap } from "@mzpeak/core";
@@ -131,6 +132,9 @@ export interface AppState {
   /** The current wavelength spectrum (null until one is selected). */
   wavelengthSpectrum: WavelengthSpectrumArrays | null;
   wavelengthSpectrumLoading: boolean;
+  /** Dense time × wavelength matrix for PDA/DAD UV/VIS views (null until loaded). */
+  wavelengthMatrix: WavelengthMatrix | null;
+  wavelengthMatrixLoading: boolean;
   /** Which spectra domain the Spectra view shows. Reset on open: "ms" when MS spectra
    *  exist, else "uv" (UV-only files). */
   spectraDomain: "ms" | "uv";
@@ -187,6 +191,8 @@ export interface AppState {
   /** Switch the Spectra view between MS and UV/VIS domains. On first switch to "uv" the
    *  wavelength browse + first spectrum are lazily loaded. */
   setSpectraDomain: (d: "ms" | "uv") => void;
+  /** Load the dense time × wavelength matrix once (idempotent, stale-guarded). */
+  loadWavelengthMatrix: () => Promise<void>;
   dismissNotice: (id: string) => void;
   toggleAccordion: (key: "advanced" | "imaging") => void;
 }
@@ -243,6 +249,8 @@ const INITIAL_OPEN_STATE = {
   wavelengthBrowse: null,
   wavelengthSpectrum: null,
   wavelengthSpectrumLoading: false,
+  wavelengthMatrix: null,
+  wavelengthMatrixLoading: false,
   spectraDomain: "ms",
   chrom: null,
   chromReq: null,
@@ -427,6 +435,8 @@ export const useStore = create<AppState>((set, get) => ({
   wavelengthBrowse: null,
   wavelengthSpectrum: null,
   wavelengthSpectrumLoading: false,
+  wavelengthMatrix: null,
+  wavelengthMatrixLoading: false,
   spectraDomain: "ms",
 
   // chrom
@@ -535,6 +545,8 @@ export const useStore = create<AppState>((set, get) => ({
       wavelengthBrowse: null,
       wavelengthSpectrum: null,
       wavelengthSpectrumLoading: false,
+      wavelengthMatrix: null,
+      wavelengthMatrixLoading: false,
       spectraDomain: "ms",
       chrom: null,
       chromReq: null,
@@ -707,6 +719,44 @@ export const useStore = create<AppState>((set, get) => ({
       void ensureWavelengthLoaded(set, get, seq);
     }
   },
+
+  // -------------------------------------------------------------------------
+  // loadWavelengthMatrix — dense time × wavelength matrix for PDA/DAD views.
+  // Idempotent: if already loaded or already loading, returns the existing promise.
+  // Stale-guarded against currentOpenSeq; resets loading flag on completion/failure.
+  // -------------------------------------------------------------------------
+  loadWavelengthMatrix: (() => {
+    let inFlight: Promise<void> | null = null;
+    return async (): Promise<void> => {
+      if (get().wavelengthMatrix) return;
+      if (get().wavelengthMatrixLoading) {
+        if (inFlight) return inFlight;
+      }
+      const seq = currentOpenSeq;
+      set({ wavelengthMatrixLoading: true });
+      inFlight = (async () => {
+        try {
+          const matrix = await engine.wavelengthMatrix();
+          if (seq !== currentOpenSeq) return;
+          set({ wavelengthMatrix: matrix, wavelengthMatrixLoading: false });
+        } catch (err) {
+          if (seq !== currentOpenSeq) {
+            set({ wavelengthMatrixLoading: false });
+            return;
+          }
+          const name = err instanceof Error ? err.name : "";
+          if (name === "SupersededError" || name === "CancelledError") {
+            set({ wavelengthMatrixLoading: false });
+            return;
+          }
+          set({ wavelengthMatrixLoading: false, error: err instanceof Error ? err.message : String(err) });
+        } finally {
+          inFlight = null;
+        }
+      })();
+      return inFlight;
+    };
+  })(),
 
   // -------------------------------------------------------------------------
   // dismissNotice

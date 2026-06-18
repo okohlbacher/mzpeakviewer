@@ -23,4 +23,9 @@ describe("classifyOpticalBand", () => {
     expect(classifyOpticalBand(500, 400)).toBeNull();
     expect(classifyOpticalBand(-10, 0)).toBeNull();
   });
+
+  it("rejects non-positive minimum even with a positive maximum", () => {
+    expect(classifyOpticalBand(-10, 390)).toBeNull();
+    expect(classifyOpticalBand(0, 500)).toBeNull();
+  });
 });

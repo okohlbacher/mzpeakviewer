@@ -139,6 +139,35 @@ export type WavelengthBrowseIndex = {
   total: Float32Array;
 };
 
+/**
+ * The full PDA/DAD data cube as a dense **time × wavelength** matrix — the single
+ * wire object both the UV chromatogram views (PDA max-trace + extracted single-λ
+ * chromatogram) and the 2D heatmap derive from (cheap array reductions in the UI,
+ * no extra worker round-trips). Built lazily on first PDA-view access from the
+ * wavelength_spectra rows; transfer all buffers.
+ *
+ * Rows are retention times (ascending), columns are a common wavelength grid
+ * (ascending). `intensity` is **row-major T×W** (`intensity[t * width + w]`) and may
+ * be **signed** (baseline-subtracted). When per-spectrum wavelength axes differ,
+ * the engine aligns to a shared grid (nearest-sample); cells with no source sample
+ * are NaN.
+ */
+export type WavelengthMatrix = {
+  /** Retention time per row, seconds, ascending. Length = height (T). */
+  time: Float32Array;
+  /** Common wavelength grid per column, nm, ascending. Length = width (W). */
+  wavelength: Float32Array;
+  /** Row-major T×W signal: `intensity[t * width + w]`. Signed; NaN = no sample. */
+  intensity: Float32Array;
+  width: number; // W (wavelength columns)
+  height: number; // T (time rows)
+  /** Finite min/max over `intensity` (for color/axis scaling). */
+  min: number;
+  max: number;
+  /** y-unit label resolved from the array unit CURIE ("counts" | "AU" | "Intensity"). */
+  intensityUnit: string;
+};
+
 /** Ion-image intensity stats sent with renderResult. */
 export type IonImageStats = { nonzeroCount: number; min: number; max: number };
 

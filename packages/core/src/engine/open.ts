@@ -25,6 +25,7 @@ import type {
   OpticalImageMeta,
 } from "@mzpeak/contracts";
 import { buildCapabilityModel } from "../adapt/capability";
+import { wavelengthRange } from "./wavelength";
 import { flattenGrid } from "../adapt/grid";
 import { fileMeta, manifest as readManifest } from "../reader/fileMeta";
 import { openBlob, openUrl, type Reader } from "../reader/openUrl";
@@ -253,6 +254,12 @@ async function assembleEngineFile(reader: Reader): Promise<EngineFile> {
     hasOptical: opticalImages.length > 0,
     count: opticalImages.length,
   };
+
+  // MG-11: observed wavelength range for the Summary UV/VIS band pill, materialized
+  // ONCE from the first wavelength spectrum (PDA scans share one grid). One small read.
+  if (capabilities.wavelength.present) {
+    capabilities.wavelength.range = await wavelengthRange(reader);
+  }
 
   // ── File metadata + stats ──────────────────────────────────────────────────
   const fm = fileMeta(reader);

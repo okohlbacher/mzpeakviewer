@@ -13,7 +13,7 @@
 // Selection is by ZERO-BASED ARRAY POSITION (the file `wavelength_spectrum_index` is a
 // uint64 and not a safe JS number); the native id is kept as an opaque string.
 
-import type { WavelengthSpectrumArrays, WavelengthBrowseIndex } from "@mzpeak/contracts";
+import type { WavelengthSpectrumArrays, WavelengthBrowseIndex, WavelengthMatrix } from "@mzpeak/contracts";
 import { plainify } from "../reader/fileMeta";
 import type { Reader } from "../reader/openUrl";
 
@@ -340,4 +340,144 @@ export function buildWavelengthBrowse(reader: Reader): WavelengthBrowseIndex {
   }
 
   return { id, rt, lambdaMax, total };
+}
+
+/**
+ * Dataset-level observed wavelength range [minNm, maxNm] across the file's wavelength
+ * spectra, or null when unknown (MG-11 — drives the Summary UV / VIS / UV-VIS pill).
+ * Metadata only (NO signal I/O): reads the per-spectrum lowest (MS:1000619) / highest
+ * (MS:1000618) observed-wavelength CV terms from the in-memory wavelength metadata and
+ * takes the min of the lows / max of the highs. Returns null when neither term is
+ * present on any spectrum (we do NOT decode arrays just to find the range).
+ */
+export async function wavelengthRange(reader: Reader): Promise<[number, number] | null> {
+  const n = reader.wavelengthMetadata?.length ?? reader.numWavelengthSpectra ?? 0;
+  if (!n) return null;
+  // The FIRST wavelength spectrum only (review): PDA/DAD scans share one common
+  // wavelength grid, so spectrum 0's observed range is the dataset range — no need to
+  // read every spectrum. Materialized once onto capability.wavelength.range at open.
+  let spec: WavelengthSpectrumArrays;
+  try {
+    spec = await readWavelengthSpectrum(reader, 0);
+  } catch {
+    return null; // EmptyWavelengthSpectrumError / transient read error → no range
+  }
+  // Prefer the validated observed-range metadata; else the sorted wavelength-array bounds.
+  const lo = spec.observedRange ? spec.observedRange[0] : spec.wavelength[0];
+  const hi = spec.observedRange ? spec.observedRange[1] : spec.wavelength[spec.wavelength.length - 1];
+  if (lo == null || hi == null || !Number.isFinite(lo) || !Number.isFinite(hi) || lo <= 0 || hi <= 0 || lo > hi) {
+    return null;
+  }
+  return [lo, hi];
+}
+
+// ── Time × wavelength matrix (PDA/DAD data cube) ───────────────────────────────
+
+/**
+ * Build the dense time × wavelength matrix for PDA/DAD UV/VIS data.
+ * Common grid = spectrum 0's ascending wavelength array. Each spectrum is mapped onto
+ * that grid by nearest sample; cells with no source sample within half the local grid
+ * step become NaN. Rows are ordered by ascending acquisition time. All typed-array
+ * buffers are fresh copies suitable for transfer.
+ */
+export async function buildWavelengthMatrix(reader: Reader): Promise<WavelengthMatrix> {
+  const n = reader.numWavelengthSpectra ?? 0;
+  if (n === 0) {
+    return {
+      time: new Float32Array(0),
+      wavelength: new Float32Array(0),
+      intensity: new Float32Array(0),
+      width: 0,
+      height: 0,
+      min: NaN,
+      max: NaN,
+      intensityUnit: "Intensity",
+    };
+  }
+
+  const spectra: WavelengthSpectrumArrays[] = [];
+  for (let i = 0; i < n; i++) {
+    spectra.push(await readWavelengthSpectrum(reader, i));
+  }
+
+  // Common grid: spectrum 0's wavelength axis (already ascending from reconstruct).
+  const grid = spectra[0]!.wavelength.slice();
+  const width = grid.length;
+  const intensityUnit = spectra[0]!.intensityUnit;
+
+  // Sort rows by ascending acquisition time; spectra with missing time sink to the end.
+  spectra.sort((a, b) => {
+    const fa = Number.isFinite(a.timeSec);
+    const fb = Number.isFinite(b.timeSec);
+    if (fa && fb) return a.timeSec - b.timeSec;
+    if (fa) return -1;
+    if (fb) return 1;
+    return 0;
+  });
+
+  const height = spectra.length;
+  const time = new Float32Array(height);
+  const intensity = new Float32Array(height * width);
+
+  // Half the local grid step per column: used as the inclusion radius for nearest-sample
+  // mapping. Boundaries use the one-sided neighbor spacing; a single-column grid accepts
+  // any nearest sample.
+  const halfStep = new Float32Array(width);
+  for (let w = 0; w < width; w++) {
+    if (width === 1) {
+      halfStep[w] = Infinity;
+    } else {
+      let step = Infinity;
+      if (w > 0) step = Math.min(step, grid[w]! - grid[w - 1]!);
+      if (w < width - 1) step = Math.min(step, grid[w + 1]! - grid[w]!);
+      halfStep[w] = step / 2;
+    }
+  }
+
+  let min = Infinity;
+  let max = -Infinity;
+
+  for (let t = 0; t < height; t++) {
+    const spec = spectra[t]!;
+    time[t] = spec.timeSec;
+
+    const srcW = spec.wavelength;
+    const srcI = spec.intensity;
+    let srcIdx = 0;
+
+    for (let w = 0; w < width; w++) {
+      const targetW = grid[w]!;
+      // Advance the source pointer while the next sample is closer to the target.
+      while (
+        srcIdx < srcW.length - 1 &&
+        Math.abs(srcW[srcIdx + 1]! - targetW) < Math.abs(srcW[srcIdx]! - targetW)
+      ) {
+        srcIdx++;
+      }
+
+      let val = NaN;
+      if (srcIdx < srcW.length) {
+        const d = Math.abs(srcW[srcIdx]! - targetW);
+        if (d <= halfStep[w]!) {
+          val = srcI[srcIdx]!;
+          if (Number.isFinite(val)) {
+            if (val < min) min = val;
+            if (val > max) max = val;
+          }
+        }
+      }
+      intensity[t * width + w] = val;
+    }
+  }
+
+  return {
+    time,
+    wavelength: grid,
+    intensity,
+    width,
+    height,
+    min: Number.isFinite(min) ? min : NaN,
+    max: Number.isFinite(max) ? max : NaN,
+    intensityUnit,
+  };
 }

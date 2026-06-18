@@ -10,10 +10,10 @@
 // Cancellation is the stale-drop model (the client suppresses stale results by
 // requestId/selectId); `cancel` is acknowledged.
 
-import type { WorkerRequest, ReaderErrorClass, UnsupportedFinding } from "@mzpeak/contracts";
+import type { WorkerRequest, ReaderErrorClass, UnsupportedFinding, WavelengthMatrix } from "@mzpeak/contracts";
 import { openEngineFile, openEngineUrl, type EngineFile } from "../engine/open";
 import { readEngineSpectrumCached, prefetchSpectrumCache } from "../engine/spectrum";
-import { readWavelengthSpectrum, buildWavelengthBrowse } from "../engine/wavelength";
+import { readWavelengthSpectrum, buildWavelengthBrowse, buildWavelengthMatrix } from "../engine/wavelength";
 import { CacheBudget, SpectrumLruCache, WavelengthLruCache, IonCacheStore } from "../engine/cache";
 import { engineScanBreakdown } from "../engine/scanBreakdown";
 import { engineExtractChrom, engineChromatogramList, type ChromContext } from "../engine/chrom";
@@ -46,6 +46,9 @@ export type EngineContext = {
   /** LRU of decoded UV/VIS wavelength spectra (full wire object) — accelerates repeat
    *  selectWavelengthSpectrum. SEPARATE from spectrumCache; shares `budget`. */
   wavelengthCache: WavelengthLruCache;
+  /** Cached dense time × wavelength matrix — built once on first PDA-view access and
+   *  cleared on every open/close. Shares no mutable state with wavelengthCache. */
+  wavelengthMatrix: WavelengthMatrix | null;
   /** Serializes ALL reader access (dispatched reads + the background prefetch) — the
    *  reader is single-threaded / non-reentrant. */
   mutex: Mutex;
@@ -77,6 +80,7 @@ export function createContext(): EngineContext {
     budget,
     spectrumCache: new SpectrumLruCache(budget),
     wavelengthCache: new WavelengthLruCache(budget),
+    wavelengthMatrix: null,
     mutex: new Mutex(),
     lastUserActivity: 0,
     readLatenciesMs: [],
@@ -251,6 +255,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         ctx.ionCache.clear(); // decoded-spectra cache is per-file — drop it
         ctx.spectrumCache.clear(); // per-file spectrum LRU — drop it
         ctx.wavelengthCache.clear(); // per-file UV/VIS LRU — drop it
+        ctx.wavelengthMatrix = null; // per-file PDA matrix — drop it
         ctx.budget.resetUsage(); // all caches cleared → reset the shared usage
         ctx.remote = false; // reset per-open so a failed/superseded open can't leave a stale prefetch gate
         clearStructureCache(); // path-keyed footer cache must not leak across files
@@ -292,6 +297,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         ctx.ionCache.clear();
         ctx.spectrumCache.clear();
         ctx.wavelengthCache.clear();
+        ctx.wavelengthMatrix = null;
         ctx.budget.resetUsage();
         ctx.remote = false;
         return; // no correlated response
@@ -344,6 +350,21 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         respond(
           { type: "wavelengthBrowseResult", requestId: req.requestId, browse },
           buffersOf(browse.rt, browse.lambdaMax, browse.total),
+        );
+        return;
+      }
+
+      case "wavelengthMatrix": {
+        // Dense time × wavelength matrix — built once per file on first PDA-view access
+        // and cached on the context. All typed-array buffers transfer.
+        const reader = requireActive(ctx).reader;
+        if (!ctx.wavelengthMatrix) {
+          ctx.wavelengthMatrix = await buildWavelengthMatrix(reader);
+        }
+        const matrix = ctx.wavelengthMatrix;
+        respond(
+          { type: "wavelengthMatrixResult", requestId: req.requestId, matrix },
+          buffersOf(matrix.time, matrix.wavelength, matrix.intensity),
         );
         return;
       }
