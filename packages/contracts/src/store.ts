@@ -16,6 +16,8 @@ export type View =
   | "spectra"
   // capability-gated (LC)
   | "chromatograms"
+  // capability-gated — UV/VIS (wavelength / PDA / DAD) spectra (its own sidebar entry)
+  | "wavelength"
   // Advanced accordion
   | "metadata"
   | "structure"
@@ -32,6 +34,7 @@ export const ALL_VIEWS: readonly View[] = [
   "summary",
   "spectra",
   "chromatograms",
+  "wavelength",
   "metadata",
   "structure",
   "overview",
@@ -45,7 +48,7 @@ export const ALL_VIEWS: readonly View[] = [
 /** Views that only make sense for imaging files. */
 export const IMAGING_VIEWS: readonly View[] = ["overview", "ion", "multi", "optical", "overlay", "grid"] as const;
 /** Views that only make sense for LC/general files. */
-export const LC_VIEWS: readonly View[] = ["chromatograms"] as const;
+export const LC_VIEWS: readonly View[] = ["chromatograms", "wavelength"] as const;
 
 /** Chromatogram display mode (Explorer parity). */
 export type ChromMode = "tic" | "xic" | "stored";

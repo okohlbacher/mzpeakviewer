@@ -64,6 +64,7 @@ const VALID_VIEWS = new Set<View>([
   "summary",
   "spectra",
   "chromatograms",
+  "wavelength", // UV/VIS (PDA) — its own sidebar view; ?view=wavelength deep-links
   "metadata",
   "structure",
   "overview", // imaging TIC overview — was missing, so ?view=overview didn't deep-link

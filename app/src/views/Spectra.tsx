@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../store";
 import { buildLevelIndex, activeSet, rankOf, absoluteOf } from "../levelIndex";
-import { SpectrumPlot, WavelengthSpectrumPlot, WavelengthChromatogramPlot, WavelengthHeatmap, RadioSegmentedControl, Select, Button, TreeView, spectrumReporters, type SelectOption, type ReporterMarker, type ReporterPeak } from "@mzpeak/ui-kit";
+import { SpectrumPlot, Select, Button, TreeView, spectrumReporters, type SelectOption, type ReporterMarker, type ReporterPeak } from "@mzpeak/ui-kit";
 
 // Categorical palette for isobaric channels — shared by the pills + the peak dots
 // so a channel reads as the same colour in both places.
@@ -20,9 +20,10 @@ const channelColor = (i: number) => CHANNEL_PALETTE[i % CHANNEL_PALETTE.length]!
 // (Native scan numbers still drive the ?scan= deep link via ../scan + urlSync — that
 // resolves to an absolute index and is independent of how the picker numbers things.)
 
-function MsSpectra() {
+export function Spectra() {
   const phase = useStore((s) => s.phase);
   const stats = useStore((s) => s.stats);
+  const hasWavelength = useStore((s) => s.hasWavelength);
   const browse = useStore((s) => s.browse);
   const spectrum = useStore((s) => s.spectrum);
   const spectrumLoading = useStore((s) => s.spectrumLoading);
@@ -68,7 +69,9 @@ function MsSpectra() {
   if (numSpectra === 0) {
     return (
       <p data-testid="spectra-empty" style={{ color: "var(--text-muted)" }}>
-        This file contains no spectra.
+        {hasWavelength
+          ? "This file has no MS spectra — see the UV/VIS tab for its wavelength spectra."
+          : "This file contains no spectra."}
       </p>
     );
   }
@@ -595,256 +598,3 @@ function ChannelPills({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Spectra view shell — gates MS vs UV/VIS (wavelength) subtabs.
-//
-// The "Spectrum tab gains MS · UV/VIS subtabs shown ONLY when more than one
-// spectrum type is present" requirement: MS-only → MsSpectra, no control;
-// UV-only → UvVisPanel, no control; both → a segmented MS|UV control above the
-// active panel; neither → empty state. The effective domain never selects a
-// type that isn't present (so a stale store `spectraDomain` can't show a blank
-// panel). MsSpectra is unchanged (keeps its `spectra-view` testid).
-// ---------------------------------------------------------------------------
-export function Spectra() {
-  const phase = useStore((s) => s.phase);
-  const stats = useStore((s) => s.stats);
-  const hasWavelength = useStore((s) => s.hasWavelength);
-  const spectraDomain = useStore((s) => s.spectraDomain);
-  const setSpectraDomain = useStore((s) => s.setSpectraDomain);
-
-  if (phase !== "ready" || !stats) {
-    return (
-      <p data-testid="spectra-empty" style={{ color: "var(--text-muted)", padding: "1rem 0" }}>
-        Open a file to browse spectra.
-      </p>
-    );
-  }
-
-  const msPresent = stats.numSpectra > 0;
-  const uvPresent = hasWavelength;
-  if (!msPresent && !uvPresent) {
-    return (
-      <p data-testid="spectra-empty" style={{ color: "var(--text-muted)" }}>
-        This file contains no spectra.
-      </p>
-    );
-  }
-
-  const showTabs = msPresent && uvPresent;
-  // Never render a domain that isn't present (guards a stale store value).
-  const domain: "ms" | "uv" = !msPresent ? "uv" : !uvPresent ? "ms" : spectraDomain;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      {showTabs && (
-        <RadioSegmentedControl
-          ariaLabel="Spectrum type"
-          options={[
-            { value: "ms", label: "MS" },
-            { value: "uv", label: "UV/VIS" },
-          ]}
-          value={domain}
-          onChange={(v) => setSpectraDomain(v === "uv" ? "uv" : "ms")}
-        />
-      )}
-      {domain === "ms" ? <MsSpectra /> : <UvVisPanel />}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// UV/VIS (wavelength) panel — picker + WavelengthSpectrumPlot + λmax/range
-// readout + per-spectrum metadata. Mirrors the MS picker but simpler (UV files
-// are small; select by zero-based array position). All state lives in the store;
-// switching here triggered the lazy browse load via setSpectraDomain.
-// ---------------------------------------------------------------------------
-type UvView = "spectrum" | "chromatogram" | "heatmap";
-
-function UvVisPanel() {
-  const browse = useStore((s) => s.wavelengthBrowse);
-  const spectrum = useStore((s) => s.wavelengthSpectrum);
-  const loading = useStore((s) => s.wavelengthSpectrumLoading);
-  const select = useStore((s) => s.selectWavelengthSpectrum);
-  const matrix = useStore((s) => s.wavelengthMatrix);
-  const matrixLoading = useStore((s) => s.wavelengthMatrixLoading);
-  const loadMatrix = useStore((s) => s.loadWavelengthMatrix);
-
-  // Sub-view within the UV/VIS panel: per-time Spectrum, derived Chromatogram
-  // (PDA max / extracted single-λ), or the 2D time×wavelength Heatmap.
-  const [uvView, setUvView] = useState<UvView>("spectrum");
-  const [chromMode, setChromMode] = useState<"max" | "xwc">("max");
-  const [xwcLambda, setXwcLambda] = useState<string>("");
-
-  // The Chromatogram + Heatmap derive from the dense matrix — load it lazily the
-  // first time either is opened (idempotent + stale-guarded in the store).
-  const needsMatrix = uvView === "chromatogram" || uvView === "heatmap";
-  useEffect(() => {
-    if (needsMatrix && !matrix && !matrixLoading) void loadMatrix();
-  }, [needsMatrix, matrix, matrixLoading, loadMatrix]);
-
-  // Heatmap/chromatogram click → jump to the spectrum at the nearest retention time.
-  const pickTime = (timeSec: number) => {
-    if (!browse) return;
-    let best = 0;
-    let bestD = Infinity;
-    for (let i = 0; i < browse.rt.length; i++) {
-      const d = Math.abs((browse.rt[i] ?? NaN) - timeSec);
-      if (Number.isFinite(d) && d < bestD) { bestD = d; best = i; }
-    }
-    void select(best);
-    setUvView("spectrum");
-  };
-
-  const n = browse?.id.length ?? 0;
-  const cur = spectrum?.index ?? 0;
-
-  if (n === 0 && !spectrum) {
-    return (
-      <p data-testid="uvvis-empty" style={{ color: "var(--text-muted)", padding: "0.5rem 0" }}>
-        {loading ? "Loading UV/VIS spectra…" : "No UV/VIS spectra to display."}
-      </p>
-    );
-  }
-
-  const opts: SelectOption[] = browse
-    ? browse.id.slice(0, 1000).map((id, i) => {
-        const rt = browse.rt[i];
-        const rtLabel = rt != null && Number.isFinite(rt) ? ` · ${rt.toFixed(1)} s` : "";
-        return { value: String(i), label: `#${i + 1} · ${id}${rtLabel}` };
-      })
-    : [];
-
-  const prev = cur > 0 ? cur - 1 : null;
-  const next = cur < n - 1 ? cur + 1 : null;
-
-  return (
-    <div data-testid="uvvis-view" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      {/* UV/VIS sub-navigation — Spectrum (per time) · Chromatogram (over time) · Heatmap */}
-      <RadioSegmentedControl
-        ariaLabel="UV/VIS view"
-        options={[
-          { value: "spectrum", label: "Spectrum" },
-          { value: "chromatogram", label: "Chromatogram" },
-          { value: "heatmap", label: "Heatmap" },
-        ]}
-        value={uvView}
-        onChange={(v) => setUvView(v as UvView)}
-      />
-
-      {uvView === "spectrum" && (
-        <>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-            {opts.length > 0 && (
-              <Select
-                data-testid="uvvis-select"
-                value={String(cur)}
-                onChange={(v) => void select(Number(v))}
-                options={opts}
-                ariaLabel="Select UV/VIS spectrum"
-                size="sm"
-              />
-            )}
-            <Button variant="ghost" size="sm" disabled={prev == null || loading} onClick={() => prev != null && void select(prev)} aria-label="Previous UV/VIS spectrum" data-testid="uvvis-prev">
-              ‹ Prev
-            </Button>
-            <Button variant="ghost" size="sm" disabled={next == null || loading} onClick={() => next != null && void select(next)} aria-label="Next UV/VIS spectrum" data-testid="uvvis-next">
-              Next ›
-            </Button>
-            {spectrum && (
-              <span data-testid="uvvis-meta" style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", marginLeft: "auto" }}>
-                {[
-                  `#${cur + 1}${n ? `/${n}` : ""}`,
-                  spectrum.lambdaMax != null ? `λmax ${spectrum.lambdaMax.toFixed(1)} nm` : null,
-                  spectrum.observedRange ? `${spectrum.observedRange[0].toFixed(0)}–${spectrum.observedRange[1].toFixed(0)} nm` : null,
-                  Number.isFinite(spectrum.timeSec) ? `${spectrum.timeSec.toFixed(1)} s` : null,
-                  `${spectrum.wavelength.length} pts`,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-            )}
-            {loading && <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>loading…</span>}
-          </div>
-
-          <div data-testid="uvvis-plot-host" className="chart-host" style={{ height: 320, position: "relative" }}>
-            <WavelengthSpectrumPlot spectrum={spectrum} />
-          </div>
-
-          {spectrum && (
-            <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
-              <span data-testid="uvvis-points">{spectrum.wavelength.length}</span>
-              {` points · wavelength (nm) vs ${spectrum.intensityUnit} · scroll to zoom · double-click to reset`}
-            </p>
-          )}
-
-          {spectrum && spectrum.meta != null && (
-            <details data-testid="uvvis-metadata-panel" style={{ marginTop: "0.1rem" }}>
-              <summary style={{ cursor: "pointer", fontSize: "var(--text-sm)", color: "var(--text-muted)", userSelect: "none" }}>
-                Spectrum metadata
-              </summary>
-              <div style={{ marginTop: "0.5rem", maxWidth: 820 }}>
-                <TreeView label="wavelength spectrum" value={spectrum.meta} defaultOpen={2} />
-              </div>
-            </details>
-          )}
-        </>
-      )}
-
-      {uvView === "chromatogram" && (
-        <>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-            <RadioSegmentedControl
-              ariaLabel="Chromatogram mode"
-              options={[
-                { value: "max", label: "Max trace" },
-                { value: "xwc", label: "Single λ" },
-              ]}
-              value={chromMode}
-              onChange={(v) => setChromMode(v as "max" | "xwc")}
-            />
-            {chromMode === "xwc" && (
-              <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
-                λ (nm)
-                <input
-                  data-testid="uvvis-xwc-lambda"
-                  type="number"
-                  value={xwcLambda}
-                  placeholder="254"
-                  onChange={(e) => setXwcLambda(e.target.value)}
-                  style={{ width: "5.5rem", padding: "0.3rem 0.4rem", border: "1px solid var(--border-default)", borderRadius: "var(--radius-sm)", fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", background: "var(--surface-input)", color: "var(--text-heading)" }}
-                />
-                ± 2
-              </label>
-            )}
-            {matrixLoading && <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>building matrix…</span>}
-          </div>
-          <div data-testid="uvvis-chrom-host" className="chart-host" style={{ height: 320, position: "relative" }}>
-            <WavelengthChromatogramPlot
-              matrix={matrix}
-              mode={chromMode}
-              lambdaNm={chromMode === "xwc" && xwcLambda.trim() !== "" ? Number(xwcLambda) : undefined}
-              tolNm={2}
-            />
-          </div>
-          <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
-            {chromMode === "max"
-              ? "PDA max trace — maximum absorbance across all wavelengths at each retention time."
-              : "Extracted single-wavelength chromatogram — mean absorbance in λ ± 2 nm over time."}
-          </p>
-        </>
-      )}
-
-      {uvView === "heatmap" && (
-        <>
-          {matrixLoading && <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>building matrix…</span>}
-          <div data-testid="uvvis-heatmap-host" className="chart-host" style={{ height: 440, position: "relative" }}>
-            <WavelengthHeatmap matrix={matrix} onPickTime={pickTime} />
-          </div>
-          <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
-            Time × wavelength absorbance (viridis) · click a column to open that retention time's spectrum.
-          </p>
-        </>
-      )}
-    </div>
-  );
-}

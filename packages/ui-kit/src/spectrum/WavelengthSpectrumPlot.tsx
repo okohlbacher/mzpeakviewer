@@ -96,17 +96,20 @@ function toData(s: WavelengthSpectrumArrays, shape: Shape): uPlot.AlignedData {
   const med = medianSpacing(x);
   const threshold = med > 0 ? GAP_K * med : Infinity;
   const xs: number[] = [];
-  const ys: number[] = [];
+  // y must be a plain array (not Float32Array) so it can hold `null`: uPlot treats a
+  // NULL y as a gap (line + spline paths both skip it), whereas NaN is fed straight
+  // into the path coordinates and corrupts the curve — especially the spline.
+  const ys: (number | null)[] = [];
   for (let i = 0; i < x.length; i++) {
     if (i > 0 && x[i]! - x[i - 1]! > threshold) {
-      // Insert a break: a NaN y at the previous x stops the stroke before the hole.
+      // Break the stroke before the hole with a null y at the previous x.
       xs.push(x[i - 1]!);
-      ys.push(NaN);
+      ys.push(null);
     }
     xs.push(x[i]!);
     ys.push(y[i]!);
   }
-  return [Float64Array.from(xs), Float64Array.from(ys)];
+  return [Float64Array.from(xs), ys as unknown as (number | null)[]] as uPlot.AlignedData;
 }
 
 /** y-scale range: always spans 0, padded; flat data gets a unit window. */
@@ -153,6 +156,12 @@ export function WavelengthSpectrumPlot({
 
       const drawLine = shape === "line";
       const drawPoints = shape === "stem" || shape === "single" || shape === "line";
+      // UV/VIS spectra are smooth, densely-sampled curves — draw the connecting line as a
+      // monotone-ish cubic SPLINE (not straight segments) with a marker at every
+      // wavelength. uPlot draws the spline per contiguous run, so the null gap-breaks
+      // from toData() still split the curve. (Optional chaining: older uPlot builds may
+      // lack paths.spline.)
+      const splinePath = uPlot.paths?.spline?.();
 
       const opts: uPlot.Options = {
         width,
@@ -168,9 +177,11 @@ export function WavelengthSpectrumPlot({
           {
             label: "intensity",
             stroke: STAGE.line,
-            // Line only for the dense/monotonic shape; width 0 hides the stroke for
-            // sparse/stem/single so only markers (and our drawn stems) show.
-            width: drawLine ? 1.25 : 0,
+            // Line only for the dense shape; width 0 hides the stroke for sparse/stem/
+            // single so only markers (and our drawn stems) show.
+            width: drawLine ? 1.5 : 0,
+            // Spline interpolation for the connecting line (smooth UV/VIS curve).
+            ...(drawLine && splinePath ? { paths: splinePath } : {}),
             points: drawPoints
               ? { show: true, size: shape === "single" ? 7 : 4, stroke: STAGE.line, fill: STAGE.pointFill }
               : { show: false },

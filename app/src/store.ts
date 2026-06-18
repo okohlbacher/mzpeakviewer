@@ -18,7 +18,7 @@ import type {
   WavelengthSpectrumArrays,
   WavelengthMatrix,
 } from "@mzpeak/contracts";
-import { showChromatograms } from "@mzpeak/contracts";
+import { showChromatograms, showWavelength } from "@mzpeak/contracts";
 import { rebuildCoordMap } from "@mzpeak/core";
 import type { View } from "@mzpeak/contracts";
 import type { SpectrumArrays } from "@mzpeak/ui-kit";
@@ -135,9 +135,6 @@ export interface AppState {
   /** Dense time × wavelength matrix for PDA/DAD UV/VIS views (null until loaded). */
   wavelengthMatrix: WavelengthMatrix | null;
   wavelengthMatrixLoading: boolean;
-  /** Which spectra domain the Spectra view shows. Reset on open: "ms" when MS spectra
-   *  exist, else "uv" (UV-only files). */
-  spectraDomain: "ms" | "uv";
 
   // chromatogram
   chrom: ChromatogramSeries | null;
@@ -188,9 +185,10 @@ export interface AppState {
   /** Load a wavelength spectrum by ZERO-BASED ARRAY POSITION. Lazily loads the wavelength
    *  browse index on first call if not already present. SEPARATE from selectSpectrum. */
   selectWavelengthSpectrum: (index: number) => Promise<void>;
-  /** Switch the Spectra view between MS and UV/VIS domains. On first switch to "uv" the
-   *  wavelength browse + first spectrum are lazily loaded. */
-  setSpectraDomain: (d: "ms" | "uv") => void;
+  /** Idempotently load the wavelength browse + the first signal-bearing spectrum (the
+   *  shared loader used by both the UV-only eager path at open and the UV/VIS view on
+   *  mount — so both pick the same first-non-blank scan). No-op once the browse exists. */
+  ensureWavelength: () => Promise<void>;
   /** Load the dense time × wavelength matrix once (idempotent, stale-guarded). */
   loadWavelengthMatrix: () => Promise<void>;
   dismissNotice: (id: string) => void;
@@ -251,7 +249,6 @@ const INITIAL_OPEN_STATE = {
   wavelengthSpectrumLoading: false,
   wavelengthMatrix: null,
   wavelengthMatrixLoading: false,
-  spectraDomain: "ms",
   chrom: null,
   chromReq: null,
   chromLoading: false,
@@ -274,10 +271,8 @@ async function finishOpen(
   if (seq !== currentOpenSeq) return;
   const isImaging = opened.capabilities.imaging.isImaging;
   // UV/VIS presence is authoritative from capabilities (known at open). Choose the default
-  // Spectra domain: "ms" when the file has MS spectra, else "uv" for a UV-only file.
   const wavelength = opened.capabilities.wavelength;
   const hasMs = (opened.stats?.numSpectra ?? 0) > 0;
-  const spectraDomain: "ms" | "uv" = hasMs ? "ms" : wavelength.present ? "uv" : "ms";
   set({
     phase: "ready",
     capabilities: opened.capabilities,
@@ -290,7 +285,6 @@ async function finishOpen(
     fileSize: opened.fileSize,
     hasWavelength: wavelength.present,
     wavelengthCount: wavelength.count,
-    spectraDomain,
     // Default accordion: Advanced closed; MSI open only for imaging files.
     expanded: { advanced: false, imaging: isImaging },
     notices: opened.mixedRepresentationWarning
@@ -341,7 +335,7 @@ async function finishOpen(
 
   // UV-only files (no MS spectra): eagerly load the wavelength browse + first wavelength
   // spectrum so the Spectra view has UV content to show immediately. Files that ALSO have
-  // MS spectra load UV lazily on the first switch to the "uv" domain (setSpectraDomain).
+  // MS spectra load UV lazily when the UV/VIS view first mounts (store.ensureWavelength).
   if (!hasMs && wavelength.present) {
     if (seq !== currentOpenSeq) return;
     await ensureWavelengthLoaded(set, get, seq);
@@ -437,7 +431,6 @@ export const useStore = create<AppState>((set, get) => ({
   wavelengthSpectrumLoading: false,
   wavelengthMatrix: null,
   wavelengthMatrixLoading: false,
-  spectraDomain: "ms",
 
   // chrom
   chrom: null,
@@ -547,7 +540,6 @@ export const useStore = create<AppState>((set, get) => ({
       wavelengthSpectrumLoading: false,
       wavelengthMatrix: null,
       wavelengthMatrixLoading: false,
-      spectraDomain: "ms",
       chrom: null,
       chromReq: null,
       chromLoading: false,
@@ -667,6 +659,15 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // -------------------------------------------------------------------------
+  // ensureWavelength — the ONE idempotent wavelength loader, shared by the UV-only
+  // eager path (finishOpen) and the UV/VIS view's mount effect, so both land on the
+  // same first-signal-bearing scan and a concurrent navigation can't double-load.
+  // -------------------------------------------------------------------------
+  ensureWavelength: async () => {
+    await ensureWavelengthLoaded(set, get, currentOpenSeq);
+  },
+
+  // -------------------------------------------------------------------------
   // selectWavelengthSpectrum — load a UV/VIS spectrum by zero-based array position.
   // SEPARATE from selectSpectrum (different engine route, cache, and state slice).
   // Lazily loads the wavelength browse on first use. Same stale-async guard model.
@@ -703,20 +704,6 @@ export const useStore = create<AppState>((set, get) => ({
         wavelengthSpectrumLoading: false,
         error: err instanceof Error ? err.message : String(err),
       });
-    }
-  },
-
-  // -------------------------------------------------------------------------
-  // setSpectraDomain — switch the Spectra view between MS and UV/VIS. On the first
-  // switch to "uv" the wavelength browse + first spectrum are lazily loaded.
-  // -------------------------------------------------------------------------
-  setSpectraDomain: (d: "ms" | "uv") => {
-    // Switching back to MS clears any in-flight UV loading flag so the UV panel
-    // doesn't keep a stale spinner the next time it's shown.
-    set(d === "ms" ? { spectraDomain: d, wavelengthSpectrumLoading: false } : { spectraDomain: d });
-    if (d === "uv" && get().hasWavelength && !get().wavelengthBrowse) {
-      const seq = currentOpenSeq;
-      void ensureWavelengthLoaded(set, get, seq);
     }
   },
 
@@ -782,4 +769,4 @@ engine.on("ionIndexReady", () => {
 });
 
 // Re-export helpers so views can use them without importing contracts directly
-export { showChromatograms };
+export { showChromatograms, showWavelength };

@@ -20,11 +20,12 @@ import "@fontsource/ibm-plex-sans/500.css";
 import "@fontsource/ibm-plex-sans/600.css";
 import "@fontsource/ibm-plex-mono/400.css";
 
-import { useStore, showChromatograms } from "./store";
+import { useStore, showChromatograms, showWavelength } from "./store";
 import type { View } from "@mzpeak/contracts";
 import { Summary } from "./views/Summary";
 import { Spectra } from "./views/Spectra";
 import { Chromatograms } from "./views/Chromatograms";
+import { Wavelength } from "./views/Wavelength";
 import { Metadata } from "./views/Metadata";
 import { Structure } from "./views/Structure";
 import { Imaging } from "./views/Imaging";
@@ -43,6 +44,7 @@ const NAV_ICON_PATHS: Record<View, string> = {
   summary: "M4 5h16M4 10h16M4 15h10",
   spectra: "M3 18 7 6l3 12 3-16 3 16 2-8h2",
   chromatograms: "M3 17c3 0 3-8 6-8s3 6 6 6 3-4 6-4",
+  wavelength: "M3 12c2.5-7 5-7 7.5 0s5 7 7.5 0",
   metadata: "M4 5h16v6H4zM4 15h10",
   structure: "M4 6h16M4 12h16M4 18h16M9 4v16",
   overview: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
@@ -84,6 +86,8 @@ function Sidebar() {
 
   // Show chromatograms if the capability helper says so
   const showChrom = caps ? showChromatograms(caps) : false;
+  // Show the UV/VIS (wavelength) entry only when the file carries wavelength spectra.
+  const showWl = caps ? showWavelength(caps) : false;
   const isImaging = caps ? caps.imaging.isImaging : false;
 
   // Build the flat list of VISIBLE tab items for roving tabindex.
@@ -92,6 +96,7 @@ function Sidebar() {
   // a button that is hidden inside a collapsed accordion region.
   const allTabs: View[] = ["summary", "spectra"];
   if (showChrom) allTabs.push("chromatograms");
+  if (showWl) allTabs.push("wavelength");
   // MSI accordion items FIRST (only when imaging AND open) — Advanced is always last.
   // Optical/Overlay only appear when the file actually carries an optical image.
   if (isImaging && expanded.imaging) {
@@ -316,6 +321,12 @@ function Sidebar() {
         {/* Chromatograms — shown when capability gate passes */}
         {showChrom && (
           <TabButton id="chromatograms" label="Chromatograms" data-testid="nav-tab-chromatograms" />
+        )}
+
+        {/* UV/VIS (wavelength) — its own sidebar entry, shown when the file has
+            wavelength (PDA/DAD optical) spectra. */}
+        {showWl && (
+          <TabButton id="wavelength" label="UV/VIS" data-testid="nav-tab-wavelength" />
         )}
 
         {/* MSI accordion — only when isImaging. Rendered BEFORE Advanced so Advanced is always
@@ -641,6 +652,7 @@ const VIEW_META: Record<View, { title: string; subtitle: string }> = {
   summary: { title: "Summary", subtitle: "File overview, stats and capabilities" },
   spectra: { title: "Spectra", subtitle: "m/z vs intensity for the selected spectrum" },
   chromatograms: { title: "Chromatograms", subtitle: "Total-ion / extracted chromatograms over time" },
+  wavelength: { title: "UV/VIS", subtitle: "Wavelength (PDA/DAD optical) spectra, chromatogram and heatmap" },
   metadata: { title: "Metadata", subtitle: "File-level metadata (file description, instruments, software)" },
   structure: { title: "Structure", subtitle: "Parquet members and column footers" },
   overview: { title: "Overview (TIC)", subtitle: "Per-pixel total-ion-current heatmap" },
@@ -699,6 +711,7 @@ function ViewRouter() {
       {view === "summary" && <Summary />}
       {view === "spectra" && <Spectra />}
       {view === "chromatograms" && <Chromatograms />}
+      {view === "wavelength" && <Wavelength />}
       {view === "metadata" && <Metadata />}
       {view === "structure" && <Structure />}
       {view === "overview" && <Imaging mode="overview" />}

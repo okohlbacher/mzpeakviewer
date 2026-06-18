@@ -129,6 +129,11 @@ export function showChromatograms(c: CapabilityModel): boolean {
   return c.chromatograms.numChromatograms > 0 || c.chromatograms.ticColumn === "present";
 }
 
+/** True when the UV/VIS (wavelength) nav entry should be shown. */
+export function showWavelength(c: CapabilityModel): boolean {
+  return c.wavelength.present;
+}
+
 /** True when Optical + Overlay nav entries should be shown (imaging-gated). */
 export function showOptical(c: CapabilityModel): boolean {
   return c.imaging.isImaging && c.optical.hasOptical;
