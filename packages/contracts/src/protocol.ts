@@ -23,6 +23,8 @@ import type {
   FileStats,
   BrowseIndex,
   SpectrumArrays,
+  WavelengthSpectrumArrays,
+  WavelengthBrowseIndex,
   IonImageStats,
   ImagingGridWire,
   OpticalImageMeta,
@@ -84,6 +86,13 @@ export type WorkerRequest =
   | { type: "meanSpectrum"; requestId: number }
   | { type: "roiSpectrum"; spectrumIndices: number[]; requestId: number }
 
+  // --- UV/VIS wavelength spectra (DATA layer; SEPARATE from MS spectra) -----
+  // Lazy per-wavelength-spectrum browse index (built on first UV access).
+  | { type: "wavelengthBrowse"; requestId: number }
+  // Select by zero-based ARRAY POSITION; selectId orders rapid clicks (echoed),
+  // mirroring selectSpectrum's stale-drop model.
+  | { type: "selectWavelengthSpectrum"; index: number; selectId: number }
+
   // --- chromatograms (Explorer) -------------------------------------------
   | { type: "extractChrom"; chrom: ChromRequest; requestId: number }
   // List the file's stored chromatograms + their metadata (Chromatograms view).
@@ -136,6 +145,9 @@ export type WorkerResponse =
   // ticColumn resolves CapabilityModel.chromatograms.ticColumn (was "unknown" at open).
   | { type: "scanBreakdownResult"; requestId: number; stats: FileStats; browse: BrowseIndex; ticColumn: Presence }
   | { type: "meanSpectrumResult"; requestId: number; spectrum: SpectrumArrays }
+  // UV/VIS — browse arrays transfer; wavelength/intensity buffers transfer (selectId echoed).
+  | { type: "wavelengthBrowseResult"; requestId: number; browse: WavelengthBrowseIndex }
+  | { type: "wavelengthSpectrumResult"; spectrum: WavelengthSpectrumArrays; selectId: number }
   | { type: "chromResult"; requestId: number; series: ChromatogramSeries }
   | { type: "chromatogramListResult"; requestId: number; chromatograms: ChromatogramInfo[] }
   | { type: "archiveListResult"; requestId: number; members: ArchiveMemberList }
@@ -219,6 +231,9 @@ export const MESSAGE_POLICY: Record<RequestType, MessagePolicy> = {
   selectSpectrum: { cancellation: "stale-drop", transfersResult: true, paged: false },
   scanBreakdown: { cancellation: "stale-drop", transfersResult: true, paged: false },
   meanSpectrum: { cancellation: "stale-drop", transfersResult: true, paged: false },
+  // UV/VIS — mirror the MS browse/select policies (stale-drop, transfers typed arrays).
+  wavelengthBrowse: { cancellation: "stale-drop", transfersResult: true, paged: false },
+  selectWavelengthSpectrum: { cancellation: "stale-drop", transfersResult: true, paged: false },
   roiSpectrum: { cancellation: "stale-drop", transfersResult: true, paged: false },
   // Chromatogram extraction streams row groups → abortable at chunk boundaries.
   extractChrom: { cancellation: "abort", transfersResult: true, paged: false },

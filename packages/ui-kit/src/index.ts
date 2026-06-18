@@ -6,6 +6,14 @@
 
 // Design-system primitives (from mzPeakIV ds/*)
 export * from "./primitives";
+// Accessible interactive controls. Aliased to avoid a name clash with the
+// primitives' tablist-flavored SegmentedControl: this radio-group variant is
+// the one to use for value-selecting subtabs.
+export {
+  SegmentedControl as RadioSegmentedControl,
+  type SegmentedControlProps as RadioSegmentedControlProps,
+  type SegmentedControlOption as RadioSegmentedControlOption,
+} from "./controls";
 // Spectrum plot stack (from mzPeakExplorer)
 export * from "./spectrum";
 // Metadata JSON tree (from mzPeakExplorer)

@@ -4,6 +4,10 @@
 export { SpectrumPlot } from "./SpectrumPlot";
 export type { ReporterMarker } from "./SpectrumPlot";
 
+// UV/VIS (wavelength) spectrum plot — separate from the MS SpectrumPlot.
+export { WavelengthSpectrumPlot } from "./WavelengthSpectrumPlot";
+export type { WavelengthPlotMode } from "./WavelengthSpectrumPlot";
+
 // Chromatogram navigator (time vs intensity, click-to-pick).
 export { ChromPlot } from "./ChromPlot";
 export type { ChromPoint } from "./ChromPlot";

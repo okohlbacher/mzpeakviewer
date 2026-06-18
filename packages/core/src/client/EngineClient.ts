@@ -24,6 +24,8 @@ import type {
   ChromRequest,
   ChannelRequest,
   SpectrumArrays,
+  WavelengthSpectrumArrays,
+  WavelengthBrowseIndex,
   FileStats,
   BrowseIndex,
   Presence,
@@ -169,6 +171,7 @@ type PendingResolver = {
 const RESOLVE_TYPE: Partial<Record<WorkerRequest["type"], WorkerResponse["type"]>> = {
   open: "opened",
   scanBreakdown: "scanBreakdownResult",
+  wavelengthBrowse: "wavelengthBrowseResult",
   meanSpectrum: "meanSpectrumResult",
   roiSpectrum: "meanSpectrumResult",
   extractChrom: "chromResult",
@@ -201,6 +204,10 @@ export class EngineClient {
   private nextSelectId = 1;
   /** The latest selectId we've sent — older spectrumResults are stale-dropped. */
   private latestSelectId = 0;
+  /** Monotonic counter for selectWavelengthSpectrum's selectId (independent of MS). */
+  private nextWavelengthSelectId = 1;
+  /** The latest UV selectId we've sent — older wavelengthSpectrumResults are stale-dropped. */
+  private latestWavelengthSelectId = 0;
   /** requestId of the in-flight `open`, if any (a new open supersedes it). 0 = none. */
   private openRequestId = 0;
 
@@ -208,6 +215,8 @@ export class EngineClient {
   private readonly pendingByRequestId = new Map<number, PendingResolver>();
   /** selectId → pending resolver (selectSpectrum). */
   private readonly pendingBySelectId = new Map<number, PendingResolver>();
+  /** selectId → pending resolver (selectWavelengthSpectrum); independent of MS selects. */
+  private readonly pendingByWavelengthSelectId = new Map<number, PendingResolver>();
 
   /** event type → subscriber set. */
   private readonly listeners = new Map<EngineEventType, Set<(ev: unknown) => void>>();
@@ -333,6 +342,37 @@ export class EngineClient {
         reject,
       });
       this.send({ type: "selectSpectrum", index, selectId });
+    });
+  }
+
+  /**
+   * Lazy UV/VIS wavelength browse index (built on first access). requestId-correlated.
+   * Mirrors `scanBreakdown` (a one-shot aggregate pass), but for wavelength spectra.
+   */
+  wavelengthBrowse(): Promise<WavelengthBrowseIndex> {
+    return this.request<WavelengthBrowseIndex>((requestId) => ({ type: "wavelengthBrowse", requestId }));
+  }
+
+  /**
+   * Select a wavelength spectrum by ZERO-BASED ARRAY POSITION. Correlated by its OWN
+   * monotonic selectId (independent of MS selectSpectrum); latest-wins. A new UV select
+   * supersedes any pending UV select (its Promise rejects with SupersededError). MS selects
+   * are untouched — the two domains never cross-supersede.
+   */
+  selectWavelengthSpectrum(index: number): Promise<WavelengthSpectrumArrays> {
+    for (const [sid, pending] of this.pendingByWavelengthSelectId) {
+      this.pendingByWavelengthSelectId.delete(sid);
+      pending.reject(new SupersededError("selectWavelengthSpectrum"));
+    }
+    const selectId = this.nextWavelengthSelectId++;
+    this.latestWavelengthSelectId = selectId;
+    return new Promise<WavelengthSpectrumArrays>((resolve, reject) => {
+      this.pendingByWavelengthSelectId.set(selectId, {
+        resolveType: "wavelengthSpectrumResult",
+        resolve: resolve as (v: unknown) => void,
+        reject,
+      });
+      this.send({ type: "selectWavelengthSpectrum", index, selectId });
     });
   }
 
@@ -504,8 +544,10 @@ export class EngineClient {
   private rejectAllPending(makeErr: () => Error): void {
     for (const p of this.pendingByRequestId.values()) p.reject(makeErr());
     for (const p of this.pendingBySelectId.values()) p.reject(makeErr());
+    for (const p of this.pendingByWavelengthSelectId.values()) p.reject(makeErr());
     this.pendingByRequestId.clear();
     this.pendingBySelectId.clear();
+    this.pendingByWavelengthSelectId.clear();
     this.openRequestId = 0;
     // Drop buffered-but-unsent requests too (their Promises are now rejected).
     this.outbox = [];
@@ -545,6 +587,11 @@ export class EngineClient {
       // selectId-correlated -------------------------------------------------
       case "spectrumResult":
         this.onSpectrumResult(msg);
+        return;
+
+      // UV/VIS selectId-correlated (independent of MS selects) --------------
+      case "wavelengthSpectrumResult":
+        this.onWavelengthSpectrumResult(msg);
         return;
 
       // gen-echoed optical events ------------------------------------------
@@ -594,12 +641,20 @@ export class EngineClient {
         return;
       }
     }
-    // selectId-correlated failure (selects aren't requestId-keyed — review C1).
+    // selectId-correlated failure (selects aren't requestId-keyed — review C1). A select
+    // error carries only a selectId; it could be an MS or a UV select. Try MS first, then
+    // UV (the two maps use independent selectId sequences, so at most one will match).
     if (msg.selectId !== undefined) {
       const pending = this.pendingBySelectId.get(msg.selectId);
       if (pending) {
         this.pendingBySelectId.delete(msg.selectId);
         pending.reject(err);
+        return;
+      }
+      const wpending = this.pendingByWavelengthSelectId.get(msg.selectId);
+      if (wpending) {
+        this.pendingByWavelengthSelectId.delete(msg.selectId);
+        wpending.reject(err);
         return;
       }
     }
@@ -627,6 +682,28 @@ export class EngineClient {
     }
   }
 
+  private onWavelengthSpectrumResult(
+    msg: Extract<WorkerResponse, { type: "wavelengthSpectrumResult" }>,
+  ): void {
+    const pending = this.pendingByWavelengthSelectId.get(msg.selectId);
+    // Stale-drop: a result older than the latest UV select. Reject (not silently drop) so
+    // the awaiting caller unblocks and nothing leaks (mirrors onSpectrumResult).
+    if (
+      MESSAGE_POLICY.selectWavelengthSpectrum.cancellation === "stale-drop" &&
+      msg.selectId < this.latestWavelengthSelectId
+    ) {
+      if (pending) {
+        this.pendingByWavelengthSelectId.delete(msg.selectId);
+        pending.reject(new SupersededError("selectWavelengthSpectrum"));
+      }
+      return;
+    }
+    if (pending) {
+      this.pendingByWavelengthSelectId.delete(msg.selectId);
+      pending.resolve(msg.spectrum);
+    }
+  }
+
   private onCorrelatedResult(msg: WorkerResponse): void {
     const requestId = (msg as { requestId?: number }).requestId;
     if (requestId === undefined) return;
@@ -645,6 +722,8 @@ export class EngineClient {
       }
       case "scanBreakdownResult":
         return { stats: msg.stats, browse: msg.browse, ticColumn: msg.ticColumn };
+      case "wavelengthBrowseResult":
+        return msg.browse;
       case "meanSpectrumResult":
         return msg.spectrum;
       case "chromResult":

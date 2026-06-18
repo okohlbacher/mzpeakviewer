@@ -14,6 +14,8 @@ import type {
   BrowseIndex,
   IonImageStats,
   ChannelAssignment,
+  WavelengthBrowseIndex,
+  WavelengthSpectrumArrays,
 } from "@mzpeak/contracts";
 import { showChromatograms } from "@mzpeak/contracts";
 import { rebuildCoordMap } from "@mzpeak/core";
@@ -119,6 +121,20 @@ export interface AppState {
   // browse index (from scanBreakdown)
   browse: BrowseIndex | null;
 
+  // ── UV/VIS (wavelength) spectra — SEPARATE from the MS spectrum path ──────────
+  /** Whether the file has wavelength spectra (from capabilities.wavelength). */
+  hasWavelength: boolean;
+  /** Number of wavelength spectra (0 when absent). */
+  wavelengthCount: number;
+  /** Lazy wavelength browse index (loaded on first UV access; null until then). */
+  wavelengthBrowse: WavelengthBrowseIndex | null;
+  /** The current wavelength spectrum (null until one is selected). */
+  wavelengthSpectrum: WavelengthSpectrumArrays | null;
+  wavelengthSpectrumLoading: boolean;
+  /** Which spectra domain the Spectra view shows. Reset on open: "ms" when MS spectra
+   *  exist, else "uv" (UV-only files). */
+  spectraDomain: "ms" | "uv";
+
   // chromatogram
   chrom: ChromatogramSeries | null;
   /** The request that produced `chrom` (tic / xic / xicRange / stored) — kept so the
@@ -165,6 +181,12 @@ export interface AppState {
    *  if there's no grid or the pixel has no spectrum. (MG-01) */
   selectPixel: (x: number, y: number, route?: boolean) => Promise<void>;
   loadChrom: (req: ChromRequest) => Promise<void>;
+  /** Load a wavelength spectrum by ZERO-BASED ARRAY POSITION. Lazily loads the wavelength
+   *  browse index on first call if not already present. SEPARATE from selectSpectrum. */
+  selectWavelengthSpectrum: (index: number) => Promise<void>;
+  /** Switch the Spectra view between MS and UV/VIS domains. On first switch to "uv" the
+   *  wavelength browse + first spectrum are lazily loaded. */
+  setSpectraDomain: (d: "ms" | "uv") => void;
   dismissNotice: (id: string) => void;
   toggleAccordion: (key: "advanced" | "imaging") => void;
 }
@@ -216,6 +238,12 @@ const INITIAL_OPEN_STATE = {
   spectrum: null,
   spectrumLoading: false,
   browse: null,
+  hasWavelength: false,
+  wavelengthCount: 0,
+  wavelengthBrowse: null,
+  wavelengthSpectrum: null,
+  wavelengthSpectrumLoading: false,
+  spectraDomain: "ms",
   chrom: null,
   chromReq: null,
   chromLoading: false,
@@ -237,6 +265,11 @@ async function finishOpen(
 ): Promise<void> {
   if (seq !== currentOpenSeq) return;
   const isImaging = opened.capabilities.imaging.isImaging;
+  // UV/VIS presence is authoritative from capabilities (known at open). Choose the default
+  // Spectra domain: "ms" when the file has MS spectra, else "uv" for a UV-only file.
+  const wavelength = opened.capabilities.wavelength;
+  const hasMs = (opened.stats?.numSpectra ?? 0) > 0;
+  const spectraDomain: "ms" | "uv" = hasMs ? "ms" : wavelength.present ? "uv" : "ms";
   set({
     phase: "ready",
     capabilities: opened.capabilities,
@@ -247,6 +280,9 @@ async function finishOpen(
     ticColumn: opened.tic,
     opticalImages: opened.opticalImages,
     fileSize: opened.fileSize,
+    hasWavelength: wavelength.present,
+    wavelengthCount: wavelength.count,
+    spectraDomain,
     // Default accordion: Advanced closed; MSI open only for imaging files.
     expanded: { advanced: false, imaging: isImaging },
     notices: opened.mixedRepresentationWarning
@@ -293,6 +329,36 @@ async function finishOpen(
   if (opened.stats && opened.stats.numSpectra > 0) {
     if (seq !== currentOpenSeq) return;
     await get().selectSpectrum(0, false);
+  }
+
+  // UV-only files (no MS spectra): eagerly load the wavelength browse + first wavelength
+  // spectrum so the Spectra view has UV content to show immediately. Files that ALSO have
+  // MS spectra load UV lazily on the first switch to the "uv" domain (setSpectraDomain).
+  if (!hasMs && wavelength.present) {
+    if (seq !== currentOpenSeq) return;
+    await ensureWavelengthLoaded(set, get, seq);
+  }
+}
+
+/**
+ * Lazily load the wavelength browse index (once) + the first wavelength spectrum. Idempotent:
+ * if the browse is already present it does nothing. Stale-guarded against `currentOpenSeq`.
+ */
+async function ensureWavelengthLoaded(
+  set: StoreApi<AppState>["setState"],
+  get: StoreApi<AppState>["getState"],
+  seq: number,
+): Promise<void> {
+  if (get().wavelengthBrowse) return; // already loaded
+  try {
+    const browse = await engine.wavelengthBrowse();
+    if (seq !== currentOpenSeq) return;
+    set({ wavelengthBrowse: browse });
+    if (browse.id.length > 0 && !get().wavelengthSpectrum) {
+      await get().selectWavelengthSpectrum(0);
+    }
+  } catch {
+    // Non-fatal: the UV browse couldn't be built. The view falls back to empty.
   }
 }
 
@@ -348,6 +414,14 @@ export const useStore = create<AppState>((set, get) => ({
 
   // browse
   browse: null,
+
+  // UV/VIS (wavelength) — safe defaults; unaffected on MS-only files
+  hasWavelength: false,
+  wavelengthCount: 0,
+  wavelengthBrowse: null,
+  wavelengthSpectrum: null,
+  wavelengthSpectrumLoading: false,
+  spectraDomain: "ms",
 
   // chrom
   chrom: null,
@@ -450,6 +524,12 @@ export const useStore = create<AppState>((set, get) => ({
       spectrum: null,
       spectrumLoading: false,
       browse: null,
+      hasWavelength: false,
+      wavelengthCount: 0,
+      wavelengthBrowse: null,
+      wavelengthSpectrum: null,
+      wavelengthSpectrumLoading: false,
+      spectraDomain: "ms",
       chrom: null,
       chromReq: null,
       chromLoading: false,
@@ -565,6 +645,60 @@ export const useStore = create<AppState>((set, get) => ({
         chromLoading: false,
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+  },
+
+  // -------------------------------------------------------------------------
+  // selectWavelengthSpectrum — load a UV/VIS spectrum by zero-based array position.
+  // SEPARATE from selectSpectrum (different engine route, cache, and state slice).
+  // Lazily loads the wavelength browse on first use. Same stale-async guard model.
+  // -------------------------------------------------------------------------
+  selectWavelengthSpectrum: async (index: number) => {
+    const seq = currentOpenSeq;
+    // Lazily build the browse on first access if it isn't loaded yet.
+    if (!get().wavelengthBrowse) {
+      try {
+        const browse = await engine.wavelengthBrowse();
+        if (seq !== currentOpenSeq) return;
+        set({ wavelengthBrowse: browse });
+      } catch {
+        // Non-fatal — proceed to attempt the select anyway.
+      }
+    }
+    set({ wavelengthSpectrumLoading: true });
+    try {
+      const spectrum = await engine.selectWavelengthSpectrum(index);
+      if (seq !== currentOpenSeq) {
+        set({ wavelengthSpectrumLoading: false });
+        return;
+      }
+      set({ wavelengthSpectrum: spectrum, wavelengthSpectrumLoading: false });
+    } catch (err) {
+      const name = err instanceof Error ? err.name : "";
+      if (name === "SupersededError" || name === "CancelledError") {
+        set({ wavelengthSpectrumLoading: false });
+        return;
+      }
+      if (seq !== currentOpenSeq) {
+        set({ wavelengthSpectrumLoading: false });
+        return;
+      }
+      set({
+        wavelengthSpectrumLoading: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+
+  // -------------------------------------------------------------------------
+  // setSpectraDomain — switch the Spectra view between MS and UV/VIS. On the first
+  // switch to "uv" the wavelength browse + first spectrum are lazily loaded.
+  // -------------------------------------------------------------------------
+  setSpectraDomain: (d: "ms" | "uv") => {
+    set({ spectraDomain: d });
+    if (d === "uv" && get().hasWavelength && !get().wavelengthBrowse) {
+      const seq = currentOpenSeq;
+      void ensureWavelengthLoaded(set, get, seq);
     }
   },
 

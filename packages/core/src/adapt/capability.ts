@@ -25,6 +25,8 @@ export type CapabilityInput = {
   ticColumn: Presence;
   /** Embedded optical image count. */
   opticalCount: number;
+  /** Wavelength (UV/VIS) spectrum count (reader.numWavelengthSpectra). */
+  wavelengthCount: number;
   layout: "point" | "chunked" | "mixed" | "unknown";
   encodings: string[];
   unsupported: UnsupportedFinding[];
@@ -51,6 +53,10 @@ export function buildCapabilityModel(input: CapabilityInput): CapabilityModel {
     optical: {
       hasOptical: input.opticalCount > 0,
       count: input.opticalCount,
+    },
+    wavelength: {
+      present: input.wavelengthCount > 0,
+      count: input.wavelengthCount,
     },
     layout: input.layout,
     encodings: input.encodings,

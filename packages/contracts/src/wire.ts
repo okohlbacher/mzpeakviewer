@@ -87,6 +87,58 @@ export type SpectrumArrays = {
   meta?: unknown;
 };
 
+/**
+ * One wavelength (UV/PDA/DAD optical) spectrum's arrays. SEPARATE from `SpectrumArrays`
+ * on purpose (adversarial review, P0): wavelength is in **nm** (not m/z), and intensity
+ * may be **signed** (baseline-subtracted counts) and is NOT absorbance unless the unit
+ * says so. The spectrum plot adapts both MS and wavelength spectra to a domain-neutral
+ * input at its boundary; MS code paths never touch this type. Transfer both buffers.
+ */
+export type WavelengthSpectrumArrays = {
+  /** Zero-based array position among wavelength spectra. This is the UI selection key —
+   *  file `wavelength_spectrum_index` is uint64 and not a safe JS number, so we select
+   *  by position and keep the native id opaque. */
+  index: number;
+  /** Native spectrum id (opaque string, e.g. "function=3 process=0 scan=2"). */
+  id: string;
+  /** Wavelength axis in nanometers, **sorted ascending by the engine**. */
+  wavelength: Float32Array;
+  /** Signal per wavelength (detector counts or absorbance — see `intensityUnit`). MAY be
+   *  negative (baseline-subtracted) and MAY be all-zero (empty scan). */
+  intensity: Float32Array;
+  /** Display label for the y unit, resolved from the array unit CURIE: "counts"
+   *  (MS:1000131), "AU" (absorbance CV terms), else "Intensity". */
+  intensityUnit: string;
+  /** Acquisition/retention time in **seconds** (normalized from the file's minutes);
+   *  NaN when absent. */
+  timeSec: number;
+  /** λmax in nm — from metadata (MS:1003812) when present and meaningful (non-zero
+   *  scan), else null (UI may compute argmax as a display fallback). */
+  lambdaMax: number | null;
+  /** Observed wavelength range [lo, hi] in nm (metadata MS:1000619/MS:1000618, validated
+   *  against the array min/max), else null. */
+  observedRange: [number, number] | null;
+  /** Full per-spectrum metadata tree (plain, structured-clone-safe) for the metadata
+   *  panel; CV-resolved in the UI. Omitted for derived spectra. */
+  meta?: unknown;
+};
+
+/**
+ * Per-wavelength-spectrum browse index — parallel arrays, length = numWavelengthSpectra.
+ * The UV/VIS picker + list read this; built lazily on first UV access (selected spectra
+ * are fetched on demand + LRU-cached, never all materialized).
+ */
+export type WavelengthBrowseIndex = {
+  /** Native spectrum id strings. */
+  id: string[];
+  /** Retention time in seconds; NaN where absent. */
+  rt: Float32Array;
+  /** λmax in nm; NaN where absent/meaningless. */
+  lambdaMax: Float32Array;
+  /** Total signal per spectrum (TIC-analog) for list display. */
+  total: Float32Array;
+};
+
 /** Ion-image intensity stats sent with renderResult. */
 export type IonImageStats = { nonzeroCount: number; min: number; max: number };
 

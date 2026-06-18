@@ -13,7 +13,8 @@
 import type { WorkerRequest, ReaderErrorClass, UnsupportedFinding } from "@mzpeak/contracts";
 import { openEngineFile, openEngineUrl, type EngineFile } from "../engine/open";
 import { readEngineSpectrumCached, prefetchSpectrumCache } from "../engine/spectrum";
-import { CacheBudget, SpectrumLruCache, IonCacheStore } from "../engine/cache";
+import { readWavelengthSpectrum, buildWavelengthBrowse } from "../engine/wavelength";
+import { CacheBudget, SpectrumLruCache, WavelengthLruCache, IonCacheStore } from "../engine/cache";
 import { engineScanBreakdown } from "../engine/scanBreakdown";
 import { engineExtractChrom, engineChromatogramList, type ChromContext } from "../engine/chrom";
 import { engineRenderIonImage, engineMeanSpectrum, engineRoiSpectrum, prefetchIonCache, type SpectraArrayCache } from "../engine/imaging";
@@ -42,6 +43,9 @@ export type EngineContext = {
   /** LRU of decoded per-spectrum (m/z, intensity, msLevel) — accelerates repeat
    *  selectSpectrum + (Stage 2) the background prefetch. Shares `budget`. */
   spectrumCache: SpectrumLruCache;
+  /** LRU of decoded UV/VIS wavelength spectra (full wire object) — accelerates repeat
+   *  selectWavelengthSpectrum. SEPARATE from spectrumCache; shares `budget`. */
+  wavelengthCache: WavelengthLruCache;
   /** Serializes ALL reader access (dispatched reads + the background prefetch) — the
    *  reader is single-threaded / non-reentrant. */
   mutex: Mutex;
@@ -72,6 +76,7 @@ export function createContext(): EngineContext {
     ionCache: new IonCacheStore(budget),
     budget,
     spectrumCache: new SpectrumLruCache(budget),
+    wavelengthCache: new WavelengthLruCache(budget),
     mutex: new Mutex(),
     lastUserActivity: 0,
     readLatenciesMs: [],
@@ -245,7 +250,8 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         ctx.scan = null;
         ctx.ionCache.clear(); // decoded-spectra cache is per-file — drop it
         ctx.spectrumCache.clear(); // per-file spectrum LRU — drop it
-        ctx.budget.resetUsage(); // both caches cleared → reset the shared usage
+        ctx.wavelengthCache.clear(); // per-file UV/VIS LRU — drop it
+        ctx.budget.resetUsage(); // all caches cleared → reset the shared usage
         ctx.remote = false; // reset per-open so a failed/superseded open can't leave a stale prefetch gate
         clearStructureCache(); // path-keyed footer cache must not leak across files
         const ef =
@@ -285,6 +291,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         ctx.scan = null;
         ctx.ionCache.clear();
         ctx.spectrumCache.clear();
+        ctx.wavelengthCache.clear();
         ctx.budget.resetUsage();
         ctx.remote = false;
         return; // no correlated response
@@ -325,6 +332,46 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         respond(
           { type: "spectrumResult", spectrum: { ...spectrum, meta }, selectId: req.selectId },
           buffersOf(spectrum.mz, spectrum.intensity),
+        );
+        return;
+      }
+
+      case "wavelengthBrowse": {
+        // Lazy UV/VIS browse index — built from the in-memory wavelength metadata table
+        // (no heavy array decode). Mirrors scanBreakdown's transfer of the columnar arrays.
+        const reader = requireActive(ctx).reader;
+        const browse = buildWavelengthBrowse(reader);
+        respond(
+          { type: "wavelengthBrowseResult", requestId: req.requestId, browse },
+          buffersOf(browse.rt, browse.lambdaMax, browse.total),
+        );
+        return;
+      }
+
+      case "selectWavelengthSpectrum": {
+        // Mirror selectSpectrum: read-through the wavelength LRU (a repeat select hits the
+        // cache; the wire copy is made at the transfer boundary so the cache stays intact),
+        // time the read to feed the adaptive prefetch cooldown, and echo selectId for the
+        // stale-drop ordering. Bounds + error class are handled by the outer try/catch
+        // (selectId-keyed). SEPARATE from the MS path — no MS handler is touched.
+        const reader = requireActive(ctx).reader;
+        const t0 = nowMs();
+        let spectrum = ctx.wavelengthCache.get(req.index);
+        if (!spectrum) {
+          spectrum = await readWavelengthSpectrum(reader, req.index);
+          ctx.wavelengthCache.set(req.index, spectrum);
+        }
+        recordReadLatency(ctx, nowMs() - t0);
+        // The cache holds the canonical object; copy the typed arrays for the transfer so a
+        // cache hit never detaches the cached buffers (mirrors adaptSpectrum's copy rule).
+        const wire = {
+          ...spectrum,
+          wavelength: spectrum.wavelength.slice(),
+          intensity: spectrum.intensity.slice(),
+        };
+        respond(
+          { type: "wavelengthSpectrumResult", spectrum: wire, selectId: req.selectId },
+          buffersOf(wire.wavelength, wire.intensity),
         );
         return;
       }

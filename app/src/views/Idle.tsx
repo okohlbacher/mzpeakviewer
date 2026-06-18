@@ -15,7 +15,7 @@ type Demo = {
   id: string;
   label: string;
   desc: string;
-  kind: "ms" | "imaging" | "sdrf";
+  kind: "ms" | "imaging" | "sdrf" | "uv";
   url: string;          // CDN object URL
   download: string;     // filename used when saved to disk
   stats: string[];
@@ -49,12 +49,22 @@ const DEMOS: Demo[] = [
     download: "PXD011799-TMT10plex-fr8.mzpeak",
     stats: ["~90 MB", "TMT 10-plex", "SDRF"],
   },
+  {
+    id: "uv-pda",
+    label: "UV/VIS PDA - Waters LC-PDA",
+    desc: "Waters PDA/DAD run with both MS and UV/VIS spectra — shows the MS · UV/VIS subtabs",
+    kind: "uv",
+    url: `${CDN}/mzML-examples/waters-pda-uv/QC_LCMS2-2_23_268-1-1.mzpeak`,
+    download: "waters-pda-uv-QC_LCMS2.mzpeak",
+    stats: ["~150 KB", "PDA 210–400 nm", "MS + UV/VIS"],
+  },
 ];
 
 const KIND_COLOR: Record<Demo["kind"], string> = {
   ms: "var(--success, #16a34a)",
   imaging: "var(--blue-600, #3b54da)",
   sdrf: "var(--signal, #c00000)",
+  uv: "var(--violet-600, #8a3ffc)",
 };
 
 export function Idle() {

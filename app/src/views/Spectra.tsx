@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../store";
 import { buildLevelIndex, activeSet, rankOf, absoluteOf } from "../levelIndex";
-import { SpectrumPlot, Select, Button, TreeView, spectrumReporters, type SelectOption, type ReporterMarker, type ReporterPeak } from "@mzpeak/ui-kit";
+import { SpectrumPlot, WavelengthSpectrumPlot, RadioSegmentedControl, Select, Button, TreeView, spectrumReporters, type SelectOption, type ReporterMarker, type ReporterPeak } from "@mzpeak/ui-kit";
 
 // Categorical palette for isobaric channels — shared by the pills + the peak dots
 // so a channel reads as the same colour in both places.
@@ -20,7 +20,7 @@ const channelColor = (i: number) => CHANNEL_PALETTE[i % CHANNEL_PALETTE.length]!
 // (Native scan numbers still drive the ?scan= deep link via ../scan + urlSync — that
 // resolves to an absolute index and is independent of how the picker numbers things.)
 
-export function Spectra() {
+function MsSpectra() {
   const phase = useStore((s) => s.phase);
   const stats = useStore((s) => s.stats);
   const browse = useStore((s) => s.browse);
@@ -591,6 +591,157 @@ function ChannelPills({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Spectra view shell — gates MS vs UV/VIS (wavelength) subtabs.
+//
+// The "Spectrum tab gains MS · UV/VIS subtabs shown ONLY when more than one
+// spectrum type is present" requirement: MS-only → MsSpectra, no control;
+// UV-only → UvVisPanel, no control; both → a segmented MS|UV control above the
+// active panel; neither → empty state. The effective domain never selects a
+// type that isn't present (so a stale store `spectraDomain` can't show a blank
+// panel). MsSpectra is unchanged (keeps its `spectra-view` testid).
+// ---------------------------------------------------------------------------
+export function Spectra() {
+  const phase = useStore((s) => s.phase);
+  const stats = useStore((s) => s.stats);
+  const hasWavelength = useStore((s) => s.hasWavelength);
+  const spectraDomain = useStore((s) => s.spectraDomain);
+  const setSpectraDomain = useStore((s) => s.setSpectraDomain);
+
+  if (phase !== "ready" || !stats) {
+    return (
+      <p data-testid="spectra-empty" style={{ color: "var(--text-muted)", padding: "1rem 0" }}>
+        Open a file to browse spectra.
+      </p>
+    );
+  }
+
+  const msPresent = stats.numSpectra > 0;
+  const uvPresent = hasWavelength;
+  if (!msPresent && !uvPresent) {
+    return (
+      <p data-testid="spectra-empty" style={{ color: "var(--text-muted)" }}>
+        This file contains no spectra.
+      </p>
+    );
+  }
+
+  const showTabs = msPresent && uvPresent;
+  // Never render a domain that isn't present (guards a stale store value).
+  const domain: "ms" | "uv" = !msPresent ? "uv" : !uvPresent ? "ms" : spectraDomain;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+      {showTabs && (
+        <RadioSegmentedControl
+          ariaLabel="Spectrum type"
+          options={[
+            { value: "ms", label: "MS" },
+            { value: "uv", label: "UV/VIS" },
+          ]}
+          value={domain}
+          onChange={(v) => setSpectraDomain(v === "uv" ? "uv" : "ms")}
+        />
+      )}
+      {domain === "ms" ? <MsSpectra /> : <UvVisPanel />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// UV/VIS (wavelength) panel — picker + WavelengthSpectrumPlot + λmax/range
+// readout + per-spectrum metadata. Mirrors the MS picker but simpler (UV files
+// are small; select by zero-based array position). All state lives in the store;
+// switching here triggered the lazy browse load via setSpectraDomain.
+// ---------------------------------------------------------------------------
+function UvVisPanel() {
+  const browse = useStore((s) => s.wavelengthBrowse);
+  const spectrum = useStore((s) => s.wavelengthSpectrum);
+  const loading = useStore((s) => s.wavelengthSpectrumLoading);
+  const select = useStore((s) => s.selectWavelengthSpectrum);
+
+  const n = browse?.id.length ?? 0;
+  const cur = spectrum?.index ?? 0;
+
+  if (n === 0 && !spectrum) {
+    return (
+      <p data-testid="uvvis-empty" style={{ color: "var(--text-muted)", padding: "0.5rem 0" }}>
+        {loading ? "Loading UV/VIS spectra…" : "No UV/VIS spectra to display."}
+      </p>
+    );
+  }
+
+  const opts: SelectOption[] = browse
+    ? browse.id.slice(0, 1000).map((id, i) => {
+        const rt = browse.rt[i];
+        const rtLabel = rt != null && Number.isFinite(rt) ? ` · ${rt.toFixed(1)} s` : "";
+        return { value: String(i), label: `#${i + 1} · ${id}${rtLabel}` };
+      })
+    : [];
+
+  const prev = cur > 0 ? cur - 1 : null;
+  const next = cur < n - 1 ? cur + 1 : null;
+
+  return (
+    <div data-testid="uvvis-view" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+        {opts.length > 0 && (
+          <Select
+            data-testid="uvvis-select"
+            value={String(cur)}
+            onChange={(v) => void select(Number(v))}
+            options={opts}
+            ariaLabel="Select UV/VIS spectrum"
+            size="sm"
+          />
+        )}
+        <Button variant="ghost" size="sm" disabled={prev == null || loading} onClick={() => prev != null && void select(prev)} aria-label="Previous UV/VIS spectrum" data-testid="uvvis-prev">
+          ‹ Prev
+        </Button>
+        <Button variant="ghost" size="sm" disabled={next == null || loading} onClick={() => next != null && void select(next)} aria-label="Next UV/VIS spectrum" data-testid="uvvis-next">
+          Next ›
+        </Button>
+        {spectrum && (
+          <span data-testid="uvvis-meta" style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", marginLeft: "auto" }}>
+            {[
+              `#${cur + 1}${n ? `/${n}` : ""}`,
+              spectrum.lambdaMax != null ? `λmax ${spectrum.lambdaMax.toFixed(1)} nm` : null,
+              spectrum.observedRange ? `${spectrum.observedRange[0].toFixed(0)}–${spectrum.observedRange[1].toFixed(0)} nm` : null,
+              Number.isFinite(spectrum.timeSec) ? `${spectrum.timeSec.toFixed(1)} s` : null,
+              `${spectrum.wavelength.length} pts`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        )}
+        {loading && <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>loading…</span>}
+      </div>
+
+      <div data-testid="uvvis-plot-host" className="chart-host" style={{ height: 320, position: "relative" }}>
+        <WavelengthSpectrumPlot spectrum={spectrum} />
+      </div>
+
+      {spectrum && (
+        <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
+          <span data-testid="uvvis-points">{spectrum.wavelength.length}</span>
+          {` points · wavelength (nm) vs ${spectrum.intensityUnit} · scroll to zoom · double-click to reset`}
+        </p>
+      )}
+
+      {spectrum && spectrum.meta != null && (
+        <details data-testid="uvvis-metadata-panel" style={{ marginTop: "0.1rem" }}>
+          <summary style={{ cursor: "pointer", fontSize: "var(--text-sm)", color: "var(--text-muted)", userSelect: "none" }}>
+            Spectrum metadata
+          </summary>
+          <div style={{ marginTop: "0.5rem", maxWidth: 820 }}>
+            <TreeView label="wavelength spectrum" value={spectrum.meta} defaultOpen={2} />
+          </div>
+        </details>
+      )}
     </div>
   );
 }

@@ -11,6 +11,8 @@ const REQUEST_TYPES: RequestType[] = [
   "scanBreakdown",
   "meanSpectrum",
   "roiSpectrum",
+  "wavelengthBrowse",
+  "selectWavelengthSpectrum",
   "extractChrom",
   "chromatogramList",
   "archiveList",

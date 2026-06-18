@@ -7,6 +7,7 @@ const base: CapabilityInput = {
   numChromatograms: 0,
   ticColumn: "unknown",
   opticalCount: 0,
+  wavelengthCount: 0,
   layout: "point",
   encodings: [],
   unsupported: [],

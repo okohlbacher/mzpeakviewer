@@ -86,6 +86,20 @@ export type OpticalCapability = {
 };
 
 /**
+ * UV/VIS (wavelength / PDA / DAD optical) spectra capability — INDEPENDENT of MS
+ * spectra and of imaging. A file may carry wavelength spectra alongside MS spectra,
+ * or be UV-only. Known immediately from `reader.numWavelengthSpectra` (the wavelength
+ * metadata table is loaded eagerly at open), so this is a plain boolean + count, not a
+ * tri-state Presence — no scan pass is needed to resolve it.
+ */
+export type WavelengthCapability = {
+  /** Whether the file has one or more wavelength spectra. */
+  present: boolean;
+  /** Number of wavelength spectra (0 when `present` is false). */
+  count: number;
+};
+
+/**
  * The unified capability model. The shell derives nav visibility ONLY from this:
  *   - Summary, Spectra            → always
  *   - Chromatograms               → `chromatograms.numChromatograms > 0 || chromatograms.hasTicColumn`
@@ -97,6 +111,8 @@ export type CapabilityModel = {
   imaging: ImagingDetection;
   chromatograms: ChromatogramCapability;
   optical: OpticalCapability;
+  /** UV/VIS (wavelength) spectra — drives the UV/VIS navigation surface. */
+  wavelength: WavelengthCapability;
   /** Storage layout + encodings (diagnostics; carried from both readers). */
   /** "unknown" when the reader can't classify the layout (review: Explorer emits it). */
   layout: "point" | "chunked" | "mixed" | "unknown";

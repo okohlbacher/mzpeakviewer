@@ -239,6 +239,9 @@ async function assembleEngineFile(reader: Reader): Promise<EngineFile> {
     numChromatograms: reader.numChromatograms ?? 0,
     ticColumn: "unknown", // resolved by the scan pass downstream; unknown at open
     opticalCount: 0, // filled below from the parsed optical images
+    // Wavelength (UV/VIS) count is known immediately — the wavelength metadata table is
+    // loaded eagerly at open (reader.init), so numWavelengthSpectra is final here.
+    wavelengthCount: reader.numWavelengthSpectra ?? 0,
     layout: ivCaps.layout,
     encodings: ivCaps.encodings,
     unsupported: ivCaps.unsupported,

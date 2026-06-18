@@ -10,6 +10,7 @@ const base: CapabilityModel = {
   imaging: { isImaging: false, detected: false, confidence: "probed", signals: [], override: null },
   chromatograms: { numChromatograms: 0, ticColumn: "unknown" },
   optical: { hasOptical: false, count: 0 },
+  wavelength: { present: false, count: 0 },
   layout: "point",
   encodings: [],
   unsupported: [],

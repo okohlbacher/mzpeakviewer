@@ -140,6 +140,88 @@ export class SpectrumLruCache {
   }
 }
 
+// ── Wavelength (UV/VIS) LRU ───────────────────────────────────────────────────
+//
+// SEPARATE from the MS SpectrumLruCache (adversarial review, P0): a wavelength
+// spectrum's payload is the full wire WavelengthSpectrumArrays (wavelength f32 +
+// intensity f32 + resolved unit / λmax / observedRange / time / id / meta), not the
+// MS (m/z f64, intensity f32, msLevel) shape. Stored whole so a repeat select is an
+// instant hit; the wire copy is made at the transfer boundary (the cached object is
+// never transferred). Shares the same `CacheBudget` as the MS caches.
+
+import type { WavelengthSpectrumArrays } from "@mzpeak/contracts";
+
+/** Bytes a cached wavelength spectrum occupies (its two f32 axes; scalars negligible). */
+export function wavelengthBytes(s: WavelengthSpectrumArrays): number {
+  return s.wavelength.byteLength + s.intensity.byteLength;
+}
+
+/**
+ * Insertion-order LRU of decoded wavelength spectra, keyed by zero-based array position,
+ * bounded by the SHARED `CacheBudget`. Same eviction discipline as `SpectrumLruCache`
+ * (evict own oldest until the budget fits; keep ≥1). Holds the full wire object.
+ */
+export class WavelengthLruCache {
+  private readonly map = new Map<number, WavelengthSpectrumArrays>();
+  private bytes = 0;
+
+  constructor(private readonly budget: CacheBudget) {}
+
+  get size(): number {
+    return this.map.size;
+  }
+  get heldBytes(): number {
+    return this.bytes;
+  }
+
+  /** Get + mark most-recently-used. Returns undefined on miss. */
+  get(index: number): WavelengthSpectrumArrays | undefined {
+    const e = this.map.get(index);
+    if (e === undefined) return undefined;
+    this.map.delete(index);
+    this.map.set(index, e);
+    return e;
+  }
+
+  has(index: number): boolean {
+    return this.map.has(index);
+  }
+
+  /** Insert (or refresh) a spectrum, evicting own oldest entries to fit the budget. */
+  set(index: number, entry: WavelengthSpectrumArrays): void {
+    const incoming = wavelengthBytes(entry);
+    const prev = this.map.get(index);
+    if (prev) {
+      this.map.delete(index);
+      const prevBytes = wavelengthBytes(prev);
+      this.bytes -= prevBytes;
+      this.budget.sub(prevBytes);
+    }
+    this.map.set(index, entry);
+    this.bytes += incoming;
+    this.budget.add(incoming);
+    this.evictToBudget();
+  }
+
+  private evictToBudget(): void {
+    while (this.budget.used > this.budget.limitBytes && this.map.size > 1) {
+      const oldest = this.map.keys().next().value as number | undefined;
+      if (oldest === undefined) break;
+      const e = this.map.get(oldest)!;
+      this.map.delete(oldest);
+      const b = wavelengthBytes(e);
+      this.bytes -= b;
+      this.budget.sub(b);
+    }
+  }
+
+  /** Drop everything (on file open/close). Caller resets the shared budget usage. */
+  clear(): void {
+    this.map.clear();
+    this.bytes = 0;
+  }
+}
+
 // ── Ion cache: the COMPACT decoded grid-cell spectra ──────────────────────────
 //
 // The single shared store every imaging operation reads/writes — the single-channel ion
