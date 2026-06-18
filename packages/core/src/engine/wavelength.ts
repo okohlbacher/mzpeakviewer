@@ -163,7 +163,10 @@ function readNumeric(rec: RawWavelengthSpectrum, accession: string): number | nu
 function readIntensityUnitCurie(rec: RawWavelengthSpectrum): string | null {
   // Absorbance/counts terms carry the unit on the array param; try the absorbance terms
   // and the counts term, returning the CURIE of whichever has a unit.
-  const p = rec.getParamByAccession?.(UNIT_ABSORBANCE_MS) ?? rec.getParamByAccession?.(UNIT_COUNTS);
+  const p =
+    rec.getParamByAccession?.(UNIT_ABSORBANCE_MS) ??
+    rec.getParamByAccession?.(UNIT_ABSORBANCE_UO) ??
+    rec.getParamByAccession?.(UNIT_COUNTS);
   if (p && typeof p.unit === "string") return p.unit;
   return null;
 }
@@ -199,17 +202,22 @@ export function reconstructWavelengthSpectrum(
   // intensity unit from the array unit CURIE (column name first, then param meta).
   const intensityUnit = resolveIntensityUnit(picked.intensityKey, readIntensityUnitCurie(rec));
 
-  // λmax: from MS:1003812 metadata ONLY when present AND non-zero, else null.
+  // λmax: from MS:1003812 metadata ONLY when present AND a positive finite wavelength
+  // (reject 0 / negative / NaN — a wavelength must be > 0 nm), else null.
   const lambdaMaxRaw = readNumeric(rec, LAMBDA_MAX_ACC);
-  const lambdaMax = lambdaMaxRaw != null && lambdaMaxRaw !== 0 ? lambdaMaxRaw : null;
+  const lambdaMax = lambdaMaxRaw != null && Number.isFinite(lambdaMaxRaw) && lambdaMaxRaw > 0 ? lambdaMaxRaw : null;
 
   // observedRange: from MS:1000619 (lo) / MS:1000618 (hi), validated against array min/max.
-  const observedRange = resolveObservedRange(
-    readNumeric(rec, LOWEST_OBSERVED_ACC),
-    readNumeric(rec, HIGHEST_OBSERVED_ACC),
-    arrMin,
-    arrMax,
-  );
+  // Suppress entirely for an empty spectrum (no points → no meaningful observed range).
+  const observedRange =
+    wavelength.length === 0
+      ? null
+      : resolveObservedRange(
+          readNumeric(rec, LOWEST_OBSERVED_ACC),
+          readNumeric(rec, HIGHEST_OBSERVED_ACC),
+          arrMin,
+          arrMax,
+        );
 
   return {
     index,
@@ -236,6 +244,7 @@ export function resolveObservedRange(
   arrMax: number,
 ): [number, number] | null {
   if (lo == null || hi == null || !Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+  if (lo <= 0 || hi <= 0) return null; // wavelengths are positive nm
   if (lo > hi) return null;
   if (Number.isFinite(arrMin) && Number.isFinite(arrMax)) {
     // Reject a declared range that doesn't intersect the actual array extent.

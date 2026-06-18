@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ImagingGridWire } from "@mzpeak/contracts";
 import { useStore } from "../store";
+import { classifyOpticalBand } from "../opticalBand";
 import { StatRow, Badge, Panel } from "@mzpeak/ui-kit";
 import type { ChannelAssignment } from "@mzpeak/contracts";
 import { rasterizeTic, formatBytes } from "./render";
@@ -75,6 +76,12 @@ export function Summary() {
           <TicThumbnail grid={grid} tic={ticColumn} />
         )}
       </div>
+
+      {/* UV/VIS optical band pill (MG-11) — shown only when the file has wavelength
+          (UV/PDA/DAD) spectra. The band (UV / VIS / UV-VIS) is inferred from the observed
+          wavelength range; when the range is unknown we still flag that optical data is
+          present. */}
+      {caps.wavelength.present && <OpticalBandPill range={caps.wavelength.range} count={caps.wavelength.count} />}
 
       {/* File section */}
       <Panel title="File" defaultOpen testid="summary-file-panel">
@@ -454,6 +461,44 @@ function MetricTile({ label, value, unit, accent }: { label: string; value: stri
       </span>
       <span style={{ fontSize: "var(--text-xs, 0.7rem)", color: "var(--text-muted, #94a3b8)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
         {label}
+      </span>
+    </div>
+  );
+}
+
+/** UV / VIS / UV-VIS band pill (MG-11). The band is classified from the observed
+ *  wavelength range; an unknown range still flags that optical (wavelength) data is
+ *  present. Violet accent matches the UV/VIS demo chip on the start page. */
+function OpticalBandPill({ range, count }: { range: [number, number] | null; count: number }) {
+  const band = range ? classifyOpticalBand(range[0], range[1]) : null;
+  const label = band ?? "UV/VIS";
+  const rangeText = range ? `${Math.round(range[0])}–${Math.round(range[1])} nm` : null;
+  const spectra = `${count.toLocaleString()} wavelength spectr${count === 1 ? "um" : "a"}`;
+  const tooltip = rangeText ? `${spectra} · ${rangeText}` : `${spectra} · range unknown`;
+  return (
+    <div>
+      <span
+        data-testid="summary-optical-pill"
+        title={tooltip}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "0.4rem",
+          padding: "0.15rem 0.6rem",
+          border: "1px solid var(--violet-600, #8a3ffc)",
+          borderRadius: "var(--radius-pill, 999px)",
+          background: "var(--surface-card, #fff)",
+          color: "var(--violet-600, #8a3ffc)",
+          fontSize: "var(--text-xs, 0.72rem)",
+          fontWeight: "var(--weight-semibold, 600)",
+          letterSpacing: "0.04em",
+          whiteSpace: "nowrap",
+        }}
+      >
+        <span style={{ textTransform: "uppercase" }}>{label}</span>
+        {rangeText && (
+          <span style={{ fontFamily: "var(--font-mono, monospace)", fontWeight: 400, color: "var(--text-muted, #64748b)" }}>{rangeText}</span>
+        )}
       </span>
     </div>
   );

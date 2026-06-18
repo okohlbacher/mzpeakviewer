@@ -17,6 +17,7 @@ const respond = makeRespond((msg, transfer) => scope.postMessage(msg, transfer))
 // user stays responsive.
 const USER_READ_TYPES = new Set<WorkerRequest["type"]>([
   "selectSpectrum",
+  "selectWavelengthSpectrum",
   "renderIonImage",
   "renderMultiChannel",
   "meanSpectrum",

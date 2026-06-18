@@ -355,7 +355,13 @@ async function ensureWavelengthLoaded(
     if (seq !== currentOpenSeq) return;
     set({ wavelengthBrowse: browse });
     if (browse.id.length > 0 && !get().wavelengthSpectrum) {
-      await get().selectWavelengthSpectrum(0);
+      // Default to the first scan that actually carries signal (finite λmax),
+      // so a leading all-zero/blank scan doesn't greet the user with "No signal".
+      let first = 0;
+      for (let i = 0; i < browse.lambdaMax.length; i++) {
+        if (Number.isFinite(browse.lambdaMax[i]!)) { first = i; break; }
+      }
+      await get().selectWavelengthSpectrum(first);
     }
   } catch {
     // Non-fatal: the UV browse couldn't be built. The view falls back to empty.
@@ -655,6 +661,8 @@ export const useStore = create<AppState>((set, get) => ({
   // -------------------------------------------------------------------------
   selectWavelengthSpectrum: async (index: number) => {
     const seq = currentOpenSeq;
+    // Bounds guard: ignore out-of-range positions (the worker also validates).
+    if (!Number.isInteger(index) || index < 0 || index >= get().wavelengthCount) return;
     // Lazily build the browse on first access if it isn't loaded yet.
     if (!get().wavelengthBrowse) {
       try {
@@ -668,18 +676,14 @@ export const useStore = create<AppState>((set, get) => ({
     set({ wavelengthSpectrumLoading: true });
     try {
       const spectrum = await engine.selectWavelengthSpectrum(index);
-      if (seq !== currentOpenSeq) {
-        set({ wavelengthSpectrumLoading: false });
-        return;
-      }
+      // Stale (a newer file was opened mid-flight): the open already reset this
+      // file's UV state, so do NOT mutate the now-current file's loading flag.
+      if (seq !== currentOpenSeq) return;
       set({ wavelengthSpectrum: spectrum, wavelengthSpectrumLoading: false });
     } catch (err) {
+      if (seq !== currentOpenSeq) return; // stale — leave current file's state alone
       const name = err instanceof Error ? err.name : "";
       if (name === "SupersededError" || name === "CancelledError") {
-        set({ wavelengthSpectrumLoading: false });
-        return;
-      }
-      if (seq !== currentOpenSeq) {
         set({ wavelengthSpectrumLoading: false });
         return;
       }
@@ -695,7 +699,9 @@ export const useStore = create<AppState>((set, get) => ({
   // switch to "uv" the wavelength browse + first spectrum are lazily loaded.
   // -------------------------------------------------------------------------
   setSpectraDomain: (d: "ms" | "uv") => {
-    set({ spectraDomain: d });
+    // Switching back to MS clears any in-flight UV loading flag so the UV panel
+    // doesn't keep a stale spinner the next time it's shown.
+    set(d === "ms" ? { spectraDomain: d, wavelengthSpectrumLoading: false } : { spectraDomain: d });
     if (d === "uv" && get().hasWavelength && !get().wavelengthBrowse) {
       const seq = currentOpenSeq;
       void ensureWavelengthLoaded(set, get, seq);

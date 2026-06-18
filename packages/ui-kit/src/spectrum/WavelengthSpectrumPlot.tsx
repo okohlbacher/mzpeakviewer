@@ -138,7 +138,10 @@ export function WavelengthSpectrumPlot({
       const shape: Shape = s ? resolveShape(s, mode, ext.n) : "empty";
       const noSignal = !s || shape === "empty" || ext.allZero;
 
-      const yLabel = s?.intensityUnit ? `Intensity (${s.intensityUnit})` : "Intensity";
+      // "Intensity (counts)" / "Intensity (AU)" — but never the redundant
+      // "Intensity (Intensity)" when the unit is the generic fallback label.
+      const unit = s?.intensityUnit;
+      const yLabel = unit && unit !== "Intensity" ? `Intensity (${unit})` : "Intensity";
 
       // Always build a uPlot (even with no data) so the axes + "No signal" overlay
       // render — unlike the MS plot, an empty/all-zero scan must still draw.

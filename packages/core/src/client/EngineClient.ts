@@ -204,9 +204,8 @@ export class EngineClient {
   private nextSelectId = 1;
   /** The latest selectId we've sent — older spectrumResults are stale-dropped. */
   private latestSelectId = 0;
-  /** Monotonic counter for selectWavelengthSpectrum's selectId (independent of MS). */
-  private nextWavelengthSelectId = 1;
-  /** The latest UV selectId we've sent — older wavelengthSpectrumResults are stale-dropped. */
+  /** The latest UV selectId we've sent (drawn from the shared `nextSelectId` counter) —
+   *  older wavelengthSpectrumResults are stale-dropped. */
   private latestWavelengthSelectId = 0;
   /** requestId of the in-flight `open`, if any (a new open supersedes it). 0 = none. */
   private openRequestId = 0;
@@ -354,17 +353,18 @@ export class EngineClient {
   }
 
   /**
-   * Select a wavelength spectrum by ZERO-BASED ARRAY POSITION. Correlated by its OWN
-   * monotonic selectId (independent of MS selectSpectrum); latest-wins. A new UV select
-   * supersedes any pending UV select (its Promise rejects with SupersededError). MS selects
-   * are untouched — the two domains never cross-supersede.
+   * Select a wavelength spectrum by ZERO-BASED ARRAY POSITION. Correlated by a selectId
+   * drawn from the SHARED monotonic counter (so MS and UV selectIds are globally unique
+   * and an error's selectId maps to exactly one pending map — fixes a cross-domain error
+   * mis-routing); latest-wins within the UV domain via `latestWavelengthSelectId`. A new
+   * UV select supersedes any pending UV select; MS selects are untouched.
    */
   selectWavelengthSpectrum(index: number): Promise<WavelengthSpectrumArrays> {
     for (const [sid, pending] of this.pendingByWavelengthSelectId) {
       this.pendingByWavelengthSelectId.delete(sid);
       pending.reject(new SupersededError("selectWavelengthSpectrum"));
     }
-    const selectId = this.nextWavelengthSelectId++;
+    const selectId = this.nextSelectId++;
     this.latestWavelengthSelectId = selectId;
     return new Promise<WavelengthSpectrumArrays>((resolve, reject) => {
       this.pendingByWavelengthSelectId.set(selectId, {
@@ -642,8 +642,8 @@ export class EngineClient {
       }
     }
     // selectId-correlated failure (selects aren't requestId-keyed — review C1). A select
-    // error carries only a selectId; it could be an MS or a UV select. Try MS first, then
-    // UV (the two maps use independent selectId sequences, so at most one will match).
+    // error carries only a selectId; it could be an MS or a UV select. selectIds are drawn
+    // from ONE shared counter (globally unique across MS+UV), so at most one map matches.
     if (msg.selectId !== undefined) {
       const pending = this.pendingBySelectId.get(msg.selectId);
       if (pending) {

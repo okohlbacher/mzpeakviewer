@@ -97,6 +97,9 @@ export type WavelengthCapability = {
   present: boolean;
   /** Number of wavelength spectra (0 when `present` is false). */
   count: number;
+  /** Observed wavelength range [minNm, maxNm] across the file's wavelength spectra, or
+   *  null when unknown. Drives the Summary UV / VIS / UV-VIS band pill (MG-11). */
+  range: [number, number] | null;
 };
 
 /**

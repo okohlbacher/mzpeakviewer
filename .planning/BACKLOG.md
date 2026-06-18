@@ -130,6 +130,25 @@ isolation window + activation + product/selected ion + promoted columns) via the
 `TreeView`. Engine reads `reader.chromatogramMetadata` (no signal I/O); `plainify` exported
 from `fileMeta.ts`. The computed TIC remains as a fallback. **Effort:** M.
 
+### MG-11 · Classify UV / VIS / UV-VIS by wavelength range + Summary pill — **TODO**
+For files with wavelength (UV/PDA/DAD) spectra, infer the optical band from the observed
+wavelength range and show it as a pill on the Summary page (next to the existing badges).
+- **Inference rule (min/max nm):** UV ≈ <400 nm, visible ≈ ≥400 nm. So: `max ≤ ~400` → **UV**;
+  `min ≥ ~400` (≈380 boundary debatable) → **VIS**; spans the boundary (`min < 400 < max`) →
+  **UV/VIS**. Pick + document the exact threshold (400 nm is the conventional UV/visible
+  divide; 380 nm is the human-vision edge — decide one). The Waters PDA demo is 209.95–399.95
+  nm → classifies as **UV**, a good test case.
+- **Data source:** the file/dataset-level observed wavelength range — prefer the metadata
+  terms MS:1000619 (lowest) / MS:1000618 (highest observed wavelength); else aggregate
+  min/max across the wavelength browse / spectra. (`WavelengthSpectrumArrays.observedRange`
+  is per-spectrum; for a dataset pill use the file-level range or the min-of-mins /
+  max-of-maxes across the browse.)
+- **UI:** a small pill in the Summary view, gated on `capabilities.wavelength.present`,
+  labeled "UV" / "VIS" / "UV/VIS" with the nm range in the tooltip. Mirror the existing
+  Summary badge styling (MS-levels / representation pills).
+- **Edge cases:** all-zero / absent range → no pill (or "UV/VIS — range unknown"); a single
+  scan window vs multiple; non-finite bounds. **Effort:** S.
+
 ---
 
 ## Deferred / parked (not scheduled — revisit only on the stated trigger)
