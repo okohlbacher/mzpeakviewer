@@ -33,6 +33,7 @@ import { GridView } from "./views/GridView";
 import { Idle } from "./views/Idle";
 import { ShareButton } from "./ShareButton";
 import { AboutButton } from "./AboutButton";
+import { SettingsButton } from "./SettingsButton";
 
 // ---------------------------------------------------------------------------
 // Sidebar
@@ -517,6 +518,7 @@ function TopBar() {
         style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "0.5rem" }}
       >
         <ShareButton />
+        <SettingsButton />
         <AboutButton />
       </span>
 

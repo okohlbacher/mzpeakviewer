@@ -1,18 +1,17 @@
-// Chromatograms view — the file's STORED chromatograms (with full metadata: type,
-// polarity, SRM/MRM precursor→product, CV params) + a computed TIC fallback.
-//   • Stored list: one row per chromatogram in chromatograms_metadata; click → load its
-//     trace + show a CV-resolved metadata tree (the comprehensive view).
-//   • Build TIC: the per-spectrum total-ion chromatogram computed from the RT index.
-import { useEffect, useState, type CSSProperties } from "react";
-import { useStore, seriesToPoints } from "../store";
+// Chromatograms view — a managed LIST of chromatograms:
+//   • the file's STORED chromatograms (browse table; "+ Add" puts one on a plot, click a
+//     row to inspect its CV-resolved metadata),
+//   • user-GENERATED (in-memory) TIC / XIC traces via "+ add TIC" / "+ add XIC".
+// Each is a card with independent zoom (wheel / double-click reset) + drag-resize. The DIA
+// fragment extractor (separate, overlaid) stays at the bottom.
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useStore, seriesToPoints, CHROM_MIN_H, CHROM_MAX_H, type ChromItem } from "../store";
 import { engine } from "../engine";
 import { ChromPlot, MultiChromPlot, Button, TreeView, useCvTerms, cvName, type ChromTrace } from "@mzpeak/ui-kit";
 import type { ChromatogramInfo } from "@mzpeak/contracts";
 
-// Categorical palette for the overlaid DIA fragment traces.
 const DIA_PALETTE = ["#3b54da", "#c00000", "#2e9e5b", "#e8820c", "#8a3ffc", "#0e9bb5", "#d6336c", "#7cb518"];
 
-// Shared style for the XIC numeric inputs (width in rem to fit m/z vs. tolerance).
 const xicInputStyle = (widthRem: number): CSSProperties => ({
   width: `${widthRem}rem`,
   padding: "0.3rem 0.4rem",
@@ -24,28 +23,35 @@ const xicInputStyle = (widthRem: number): CSSProperties => ({
   color: "var(--text-heading)",
 });
 
+/** Parse an optional RT min/max (seconds) pair; returns undefined when blank/invalid. */
+function parseRt(minS: string, maxS: string): [number, number] | undefined {
+  if (minS.trim() === "" && maxS.trim() === "") return undefined;
+  const lo = Number(minS);
+  const hi = Number(maxS);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo >= hi) return undefined;
+  return [lo, hi];
+}
+
 export function Chromatograms() {
   const phase = useStore((s) => s.phase);
-  const chrom = useStore((s) => s.chrom);
-  const chromReq = useStore((s) => s.chromReq);
-  const chromLoading = useStore((s) => s.chromLoading);
-  const loadChrom = useStore((s) => s.loadChrom);
-  const selectSpectrum = useStore((s) => s.selectSpectrum);
-  const browse = useStore((s) => s.browse);
-  const selector = useStore((s) => s.selector);
+  const chromList = useStore((s) => s.chromList);
+  const settings = useStore((s) => s.settings);
+  const addTic = useStore((s) => s.addTic);
+  const addXic = useStore((s) => s.addXic);
+  const addStoredChrom = useStore((s) => s.addStoredChrom);
+  const clearGeneratedChroms = useStore((s) => s.clearGeneratedChroms);
   const cv = useCvTerms();
 
-  // The file's stored chromatograms (fetched once when the file is ready).
   const [list, setList] = useState<ChromatogramInfo[] | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [metaId, setMetaId] = useState<string | null>(null); // stored row whose metadata is shown
 
-  // XIC (extracted-ion chromatogram) inputs: m/z center + half-window in Da.
+  // add-XIC form (m/z, ± tol from Settings default, optional RT window in seconds).
   const [xicMz, setXicMz] = useState("");
-  const [xicTol, setXicTol] = useState("0.01");
+  const [xicTol, setXicTol] = useState(String(settings.xicTolDa));
+  const [xicRtMin, setXicRtMin] = useState("");
+  const [xicRtMax, setXicRtMax] = useState("");
 
-  // DIA fragment extractor (Stage A): a precursor m/z (selects the isolation window) + a
-  // list of fragment m/z transitions → one MS2 window-filtered XIC per transition,
-  // overlaid. No peptide→m/z chemistry yet (the user enters m/z directly).
+  // DIA fragment extractor (Stage A) — unchanged, view-local + overlaid.
   const [diaPrecursor, setDiaPrecursor] = useState("");
   const [diaFragments, setDiaFragments] = useState("");
   const [diaTol, setDiaTol] = useState("0.02");
@@ -54,37 +60,25 @@ export function Chromatograms() {
   const [diaBusy, setDiaBusy] = useState(false);
   const [diaNote, setDiaNote] = useState<string | null>(null);
 
-  // Keep the controls + stored-row highlight in sync with the loaded request (chromReq):
-  //  - xic   → prefill the m/z + tol inputs (so a ?xic= deep link mirrors the trace);
-  //  - stored→ highlight the row + open its metadata panel (so a ?chrom=<id> deep link
-  //            isn't left with a blank selection — the row click sets this too);
-  //  - null  → new file: clear the inputs back to defaults (no stale m/z from file A).
-  // A tic load leaves the typed m/z untouched (so "type m/z, click Build TIC to compare"
-  // doesn't wipe the user's input). selectedId clears for tic/xic.
+  // Bumped on every file/phase change; the DIA extractor captures it before its await and
+  // drops a stale commit (an extraction from a since-closed file) (review).
+  const diaRunRef = useRef(0);
   useEffect(() => {
-    if (chromReq?.mode === "xic") {
-      setXicMz(String(chromReq.mz));
-      setXicTol(String(chromReq.tolDa));
-    } else if (chromReq == null) {
-      setXicMz("");
-      setXicTol("0.01");
-    }
-    setSelectedId(chromReq?.mode === "stored" ? chromReq.id : null);
-  }, [chromReq]);
-
-  useEffect(() => {
-    if (phase !== "ready") {
-      setList(null);
-      setSelectedId(null);
-      return;
-    }
+    diaRunRef.current++;
+    setDiaTraces(null); setDiaNote(null); setDiaBusy(false); // also clear busy, else a stale
+    // in-flight run's guarded finally skips it and the new view's extractor stays disabled.
+    if (phase !== "ready") { setList(null); setMetaId(null); return; }
     let live = true;
-    engine
-      .chromatogramList()
-      .then((cs) => { if (live) setList(cs); })
-      .catch(() => { if (live) setList([]); });
+    engine.chromatogramList().then((cs) => { if (live) setList(cs); }).catch(() => { if (live) setList([]); });
     return () => { live = false; };
   }, [phase]);
+  // Invalidate any in-flight DIA extraction on unmount so its async tail can't setState on the
+  // gone component (the run-token guard then drops the commit) (review).
+  useEffect(() => () => { diaRunRef.current++; }, []);
+
+  // Keep the add-XIC ± field in sync with the Settings default when it changes while this
+  // view is mounted (the field is seeded from settings only at mount otherwise) (review).
+  useEffect(() => { setXicTol(String(settings.xicTolDa)); }, [settings.xicTolDa]);
 
   if (phase !== "ready") {
     return (
@@ -94,158 +88,76 @@ export function Chromatograms() {
     );
   }
 
-  const points = chrom ? seriesToPoints(chrom) : [];
-  const selected = list?.find((c) => c.id === selectedId) ?? null;
-
-  // Navigate to the spectrum nearest a clicked retention time (TIC only).
-  function handlePick(time: number) {
-    if (!browse) return;
-    let bestIdx = 0;
-    let bestDist = Infinity;
-    for (let i = 0; i < browse.rt.length; i++) {
-      const rt = browse.rt[i] as number;
-      if (!Number.isFinite(rt)) continue;
-      const d = Math.abs(rt - time);
-      if (d < bestDist) { bestDist = d; bestIdx = i; }
-    }
-    void selectSpectrum(bestIdx);
-  }
-
-  let selectedTime: number | null = null;
-  if (selector && browse) {
-    const rt = browse.rt[selector.index] as number | undefined;
-    selectedTime = rt != null && Number.isFinite(rt) ? rt : null;
-  }
-
-  function pickStored(c: ChromatogramInfo) {
-    setSelectedId(c.id);
-    void loadChrom({ mode: "stored", id: c.id });
-  }
-
-  // XIC extraction: m/z center ± tolerance (Da). Both must be finite and positive.
   const xicMzNum = Number(xicMz);
   const xicTolNum = Number(xicTol);
-  const xicValid =
-    xicMz.trim() !== "" && Number.isFinite(xicMzNum) && xicMzNum > 0 && Number.isFinite(xicTolNum) && xicTolNum > 0;
-  function extractXic() {
+  // RT is valid iff BOTH blank (full range) or BOTH a finite lo<hi. Partial/lo>=hi must block,
+  // not silently run a full-range XIC (review — mirrors the peak→chrom popover).
+  const xicRtBlank = xicRtMin.trim() === "" && xicRtMax.trim() === "";
+  const xicRtValid = xicRtBlank || parseRt(xicRtMin, xicRtMax) !== undefined;
+  const xicValid = xicMz.trim() !== "" && Number.isFinite(xicMzNum) && xicMzNum > 0 && Number.isFinite(xicTolNum) && xicTolNum > 0 && xicRtValid;
+  function onAddXic() {
     if (!xicValid) return;
-    setSelectedId(null); // an XIC is not one of the stored chromatograms
-    void loadChrom({ mode: "xic", mz: xicMzNum, tolDa: xicTolNum });
+    addXic({ mz: xicMzNum, tolDa: xicTolNum, rt: parseRt(xicRtMin, xicRtMax) });
   }
-
-  // DIA: parse the fragment list (any of comma / whitespace / newline separated), keep
-  // finite positives. The precursor m/z selects the isolation window; each fragment is a
-  // transition extracted over that window's MS2 spectra.
-  const diaPrecursorNum = Number(diaPrecursor);
-  const diaTolNum = Number(diaTol);
-  const diaFragmentMzs = diaFragments
-    .split(/[\s,;]+/)
-    .map((s) => Number(s))
-    .filter((v) => Number.isFinite(v) && v > 0);
-  const diaValid =
-    Number.isFinite(diaPrecursorNum) && diaPrecursorNum > 0 &&
-    Number.isFinite(diaTolNum) && diaTolNum > 0 &&
-    diaFragmentMzs.length > 0;
-
-  async function extractDia() {
-    if (!diaValid || diaBusy) return;
-    setDiaBusy(true);
-    setDiaNote(null);
-    // Optional RT focus: center ± 60 s narrows the read (faster) and frames the peak.
-    const c = Number(diaRtCenter);
-    const rt: [number, number] | undefined =
-      diaRtCenter.trim() !== "" && Number.isFinite(c) ? [c - 60, c + 60] : undefined;
-    try {
-      const series = await Promise.all(
-        diaFragmentMzs.map((mz) =>
-          engine.extractChrom({ mode: "diaXic", precursorMz: diaPrecursorNum, mz, tolDa: diaTolNum, ...(rt ? { rt } : {}) }),
-        ),
-      );
-      const traces: ChromTrace[] = series.map((s, i) => ({
-        label: `m/z ${diaFragmentMzs[i]!.toFixed(3)}`,
-        color: DIA_PALETTE[i % DIA_PALETTE.length]!,
-        points: seriesToPoints(s),
-      }));
-      setDiaTraces(traces);
-      if (traces.every((t) => t.points.length === 0)) {
-        setDiaNote(
-          `No MS2 isolation window contains m/z ${diaPrecursorNum.toFixed(4)} — check the precursor m/z, or this file may not be DIA.`,
-        );
-      }
-    } catch (err) {
-      setDiaNote(err instanceof Error ? err.message : String(err));
-      setDiaTraces(null);
-    } finally {
-      setDiaBusy(false);
-    }
-  }
-
-  // Label for the loaded trace. The series carries only kind/id, so the XIC m/z window
-  // comes from the retained request (chromReq).
-  const chromLabel = !chrom
-    ? ""
-    : chrom.kind === "stored"
-      ? `stored: ${chrom.id ?? ""}`
-      : chrom.kind === "xic"
-        ? chromReq?.mode === "xic"
-          ? `XIC m/z ${chromReq.mz.toFixed(4)} ± ${chromReq.tolDa} Da`
-          : "XIC"
-        : "TIC";
 
   const fmtMz = (m: number | null) => (m == null ? "—" : m.toFixed(4));
-  const typeLabel = (acc: string | null) =>
-    acc ? (cvName(cv, acc) ?? acc) : "—";
+  const typeLabel = (acc: string | null) => (acc ? (cvName(cv, acc) ?? acc) : "—");
+  const selectedMeta = list?.find((c) => c.id === metaId) ?? null;
+  const generatedCount = chromList.filter((it) => it.source === "generated").length;
+
+  // DIA (unchanged)
+  const diaPrecursorNum = Number(diaPrecursor);
+  const diaTolNum = Number(diaTol);
+  const diaFragmentMzs = diaFragments.split(/[\s,;]+/).map((s) => Number(s)).filter((v) => Number.isFinite(v) && v > 0);
+  const diaValid = Number.isFinite(diaPrecursorNum) && diaPrecursorNum > 0 && Number.isFinite(diaTolNum) && diaTolNum > 0 && diaFragmentMzs.length > 0;
+  async function extractDia() {
+    if (!diaValid || diaBusy) return;
+    const run = diaRunRef.current; // guard: drop the commit if the file changes mid-extraction
+    setDiaBusy(true); setDiaNote(null);
+    const c = Number(diaRtCenter);
+    const rt: [number, number] | undefined = diaRtCenter.trim() !== "" && Number.isFinite(c) ? [c - 60, c + 60] : undefined;
+    try {
+      const series = await Promise.all(diaFragmentMzs.map((mz) => engine.extractChrom({ mode: "diaXic", precursorMz: diaPrecursorNum, mz, tolDa: diaTolNum, ...(rt ? { rt } : {}) })));
+      if (run !== diaRunRef.current) return;
+      const traces: ChromTrace[] = series.map((s, i) => ({ label: `m/z ${diaFragmentMzs[i]!.toFixed(3)}`, color: DIA_PALETTE[i % DIA_PALETTE.length]!, points: seriesToPoints(s) }));
+      setDiaTraces(traces);
+      if (traces.every((t) => t.points.length === 0)) setDiaNote(`No MS2 isolation window contains m/z ${diaPrecursorNum.toFixed(4)} — check the precursor m/z, or this file may not be DIA.`);
+    } catch (err) {
+      if (run !== diaRunRef.current) return;
+      setDiaNote(err instanceof Error ? err.message : String(err)); setDiaTraces(null);
+    } finally { if (run === diaRunRef.current) setDiaBusy(false); }
+  }
 
   return (
     <div data-testid="chromatograms-view" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      {/* Computed TIC + extracted-ion chromatogram (XIC) */}
+      {/* Toolbar: add generated traces */}
       <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
-        <Button variant="secondary" size="sm" onClick={() => { setSelectedId(null); void loadChrom({ mode: "tic" }); }} disabled={chromLoading} data-testid="tic-btn">
-          {chromLoading ? "Computing…" : "Build TIC"}
-        </Button>
+        <Button variant="secondary" size="sm" onClick={() => addTic()} data-testid="tic-btn">+ add TIC</Button>
 
-        {/* XIC extractor: sum intensity over m/z ± tol across the run's spectra. */}
-        <span
-          style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
-          title="Extracted-ion chromatogram: intensity summed over m/z ± tolerance across every spectrum, plotted against retention time."
-        >
-          <label htmlFor="xic-mz-input" style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>XIC m/z</label>
-          <input
-            id="xic-mz-input"
-            data-testid="xic-mz-input"
-            type="number"
-            step="any"
-            placeholder="445.12"
-            value={xicMz}
-            onChange={(e) => setXicMz(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") extractXic(); }}
-            style={xicInputStyle(7)}
-          />
+        <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
+          title="Add an extracted-ion chromatogram: intensity summed over m/z ± tolerance across the run, vs retention time.">
+          <label htmlFor="xic-mz-input" style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>+ add XIC m/z</label>
+          <input id="xic-mz-input" data-testid="xic-mz-input" type="number" step="any" placeholder="445.12" value={xicMz}
+            onChange={(e) => setXicMz(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddXic(); }} style={xicInputStyle(7)} />
           <span style={{ color: "var(--text-muted)" }}>±</span>
-          <input
-            data-testid="xic-tol-input"
-            type="number"
-            step="any"
-            aria-label="XIC m/z tolerance in daltons"
-            value={xicTol}
-            onChange={(e) => setXicTol(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") extractXic(); }}
-            style={xicInputStyle(4.5)}
-          />
-          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>Da</span>
-          <Button variant="secondary" size="sm" onClick={extractXic} disabled={!xicValid || chromLoading} data-testid="xic-btn">
-            Extract XIC
-          </Button>
+          <input data-testid="xic-tol-input" type="number" step="any" aria-label="XIC m/z tolerance (Da)" value={xicTol}
+            onChange={(e) => setXicTol(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddXic(); }} style={xicInputStyle(4.5)} />
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>Da · RT</span>
+          <input data-testid="xic-rtmin-input" type="number" step="any" placeholder="min s" aria-label="XIC RT min (s)" value={xicRtMin}
+            onChange={(e) => setXicRtMin(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddXic(); }} style={xicInputStyle(4.5)} />
+          <span style={{ color: "var(--text-muted)" }}>–</span>
+          <input data-testid="xic-rtmax-input" type="number" step="any" placeholder="max s" aria-label="XIC RT max (s)" value={xicRtMax}
+            onChange={(e) => setXicRtMax(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddXic(); }} style={xicInputStyle(4.5)} />
+          <Button variant="secondary" size="sm" onClick={onAddXic} disabled={!xicValid} data-testid="xic-btn">Add XIC</Button>
+          {!xicRtValid && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-danger, #dc2626)" }}>RT: both min &lt; max, or both blank.</span>}
         </span>
 
-        {chrom && (
-          <span data-testid="chrom-loaded-label" style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
-            {chromLabel} · {chrom.time.length} points
-          </span>
+        {generatedCount > 0 && (
+          <Button variant="ghost" size="sm" onClick={clearGeneratedChroms} data-testid="chrom-clear-generated">Clear generated ({generatedCount})</Button>
         )}
       </div>
 
-      {/* Stored chromatograms list */}
+      {/* Stored chromatograms catalog — "+ Add" to plot, click a row for metadata. */}
       {list && list.length > 0 && (
         <div data-testid="chrom-stored-list">
           <h3 style={{ fontSize: "0.9rem", margin: "0 0 0.35rem" }}>
@@ -254,7 +166,8 @@ export function Chromatograms() {
           <table style={{ borderCollapse: "collapse", fontSize: "var(--text-sm, 0.82rem)", width: "100%" }}>
             <thead>
               <tr style={{ textAlign: "left", color: "var(--text-muted)", borderBottom: "1px solid var(--border-hairline, #eee)" }}>
-                <th style={{ padding: "0.2rem 0.6rem 0.2rem 0", fontWeight: 500 }}>id</th>
+                <th style={{ padding: "0.2rem 0.5rem 0.2rem 0", fontWeight: 500 }} />
+                <th style={{ padding: "0.2rem 0.6rem", fontWeight: 500 }}>id</th>
                 <th style={{ padding: "0.2rem 0.6rem", fontWeight: 500 }}>type</th>
                 <th style={{ padding: "0.2rem 0.6rem", fontWeight: 500 }}>pol.</th>
                 <th style={{ padding: "0.2rem 0.6rem", fontWeight: 500, textAlign: "right" }}>precursor m/z</th>
@@ -263,116 +176,194 @@ export function Chromatograms() {
               </tr>
             </thead>
             <tbody style={{ fontFamily: "var(--font-mono, monospace)" }}>
-              {list.map((c) => (
-                <tr
-                  key={c.id}
-                  data-testid={`chrom-row-${c.index}`}
-                  onClick={() => pickStored(c)}
-                  style={{
-                    cursor: "pointer",
-                    borderTop: "1px solid var(--border-hairline, #f0f0f0)",
-                    background: selectedId === c.id ? "var(--surface-panel, #f1f5f9)" : undefined,
-                  }}
-                >
-                  <td style={{ padding: "0.25rem 0.6rem 0.25rem 0", color: "var(--text-link, #2563eb)", wordBreak: "break-all" }}>{c.id}</td>
-                  <td style={{ padding: "0.25rem 0.6rem", fontFamily: "var(--font-sans)" }}>{typeLabel(c.typeAccession)}</td>
-                  <td style={{ padding: "0.25rem 0.6rem" }}>{c.polarity ?? "—"}</td>
-                  <td style={{ padding: "0.25rem 0.6rem", textAlign: "right" }}>{fmtMz(c.precursorMz)}</td>
-                  <td style={{ padding: "0.25rem 0.6rem", textAlign: "right" }}>{fmtMz(c.productMz)}</td>
-                  <td style={{ padding: "0.25rem 0 0.25rem 0.6rem", textAlign: "right" }}>{c.nPoints ?? "—"}</td>
-                </tr>
-              ))}
+              {list.map((c) => {
+                const added = chromList.some((it) => it.itemId === `stored:${c.index}`);
+                return (
+                  <tr key={c.id} data-testid={`chrom-row-${c.index}`}
+                    style={{ borderTop: "1px solid var(--border-hairline, #f0f0f0)", background: metaId === c.id ? "var(--surface-panel, #f1f5f9)" : undefined }}>
+                    <td style={{ padding: "0.2rem 0.5rem 0.2rem 0" }}>
+                      <Button variant="ghost" size="sm" disabled={added} data-testid={`chrom-add-${c.index}`}
+                        onClick={() => addStoredChrom(c.index, c.id)} title={added ? "Already added" : "Add to the chromatogram list"}>
+                        {added ? "✓" : "+ Add"}
+                      </Button>
+                    </td>
+                    <td style={{ padding: "0.25rem 0.6rem 0.25rem 0" }}>
+                      <button type="button" onClick={() => setMetaId(metaId === c.id ? null : c.id)}
+                        aria-expanded={metaId === c.id} aria-label={`Toggle metadata for ${c.id}`}
+                        style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "var(--text-link, #2563eb)", textAlign: "left", wordBreak: "break-all", cursor: "pointer" }}>
+                        {c.id}
+                      </button>
+                    </td>
+                    <td style={{ padding: "0.25rem 0.6rem", fontFamily: "var(--font-sans)" }}>{typeLabel(c.typeAccession)}</td>
+                    <td style={{ padding: "0.25rem 0.6rem" }}>{c.polarity ?? "—"}</td>
+                    <td style={{ padding: "0.25rem 0.6rem", textAlign: "right" }}>{fmtMz(c.precursorMz)}</td>
+                    <td style={{ padding: "0.25rem 0.6rem", textAlign: "right" }}>{fmtMz(c.productMz)}</td>
+                    <td style={{ padding: "0.25rem 0 0.25rem 0.6rem", textAlign: "right" }}>{c.nPoints ?? "—"}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+          {selectedMeta && (
+            <details data-testid="chrom-metadata-panel" open style={{ marginTop: "0.4rem" }}>
+              <summary style={{ cursor: "pointer", fontSize: "var(--text-sm)", color: "var(--text-muted)", userSelect: "none" }}>Chromatogram metadata — {selectedMeta.id}</summary>
+              <div style={{ marginTop: "0.5rem", maxWidth: 820 }}><TreeView label="chromatogram" value={selectedMeta.meta} defaultOpen={3} /></div>
+            </details>
+          )}
         </div>
       )}
       {list && list.length === 0 && (
         <p data-testid="chrom-no-stored" style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", margin: 0 }}>
-          This file has no stored chromatograms. Build the TIC from the per-spectrum retention-time index.
+          This file has no stored chromatograms. Add a TIC or XIC above.
         </p>
       )}
 
-      {chromLoading && (
-        <div style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>Computing chromatogram…</div>
+      {/* The managed card list. */}
+      {chromList.length === 0 ? (
+        <p data-testid="chrom-list-empty" style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", margin: 0 }}>
+          No chromatograms yet — add a TIC or XIC, or pick a stored one.
+        </p>
+      ) : (
+        <div data-testid="chrom-card-list" style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          {chromList.map((item) => <ChromCard key={item.itemId} item={item} />)}
+        </div>
       )}
 
-      {/* Plot of whatever chromatogram is loaded */}
-      {chrom && points.length > 0 && (
-        <>
-          <div data-testid="chrom-plot-host">
-            <ChromPlot points={points} onPick={chrom.kind === "stored" ? () => {} : handlePick} selectedTime={chrom.kind === "stored" ? null : selectedTime} />
-          </div>
-          <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
-            {chrom.kind === "stored"
-              ? "Stored chromatogram · scroll to zoom · double-click to reset"
-              : "Click a point to select the nearest spectrum · scroll to zoom · double-click to reset"}
-          </p>
-        </>
-      )}
-
-      {/* Full per-chromatogram metadata (CV-resolved) for the selected stored chromatogram */}
-      {selected && (
-        <details data-testid="chrom-metadata-panel" open style={{ marginTop: "0.1rem" }}>
-          <summary style={{ cursor: "pointer", fontSize: "var(--text-sm)", color: "var(--text-muted)", userSelect: "none" }}>
-            Chromatogram metadata — {selected.id}
-          </summary>
-          <div style={{ marginTop: "0.5rem", maxWidth: 820 }}>
-            <TreeView label="chromatogram" value={selected.meta} defaultOpen={3} />
-          </div>
-        </details>
-      )}
-
-      {/* ── DIA fragment extractor (Stage A) ───────────────────────────────────────
-          Enter a precursor m/z (picks the DIA isolation window) + a list of fragment
-          m/z transitions → one MS2 window-filtered XIC per fragment, overlaid. */}
+      {/* ── DIA fragment extractor (Stage A) — unchanged ──────────────────────── */}
       <details data-testid="dia-extractor" style={{ marginTop: "0.4rem", borderTop: "1px solid var(--border-hairline, #eee)", paddingTop: "0.6rem" }}>
-        <summary style={{ cursor: "pointer", fontSize: "0.9rem", fontWeight: 600, userSelect: "none" }}>
-          DIA fragment extractor
-        </summary>
+        <summary style={{ cursor: "pointer", fontSize: "0.9rem", fontWeight: 600, userSelect: "none" }}>DIA fragment extractor</summary>
         <p style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", margin: "0.4rem 0" }}>
-          Enter a precursor m/z (selects the DIA isolation window) and one or more fragment
-          m/z values; each is extracted over that window&apos;s MS2 spectra and overlaid by
-          retention time. Fragment m/z are entered directly here — peptide→fragment
-          calculation is a later stage.
+          Enter a precursor m/z (selects the DIA isolation window) and one or more fragment m/z values; each is extracted over that window&apos;s MS2 spectra and overlaid by retention time.
         </p>
         <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-end", flexWrap: "wrap", marginBottom: "0.5rem" }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
-            Precursor m/z
-            <input data-testid="dia-precursor-input" type="number" step="any" placeholder="620.83" value={diaPrecursor}
-              onChange={(e) => setDiaPrecursor(e.target.value)} style={xicInputStyle(7)} />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)", flex: "1 1 16rem", minWidth: "12rem" }}>
-            Fragment m/z (comma / space separated)
-            <input data-testid="dia-fragments-input" type="text" placeholder="545.30, 802.45, 917.48" value={diaFragments}
-              onChange={(e) => setDiaFragments(e.target.value)}
-              style={{ ...xicInputStyle(7), width: "100%", fontFamily: "var(--font-mono)" }} />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
-            ± Da
-            <input data-testid="dia-tol-input" type="number" step="any" value={diaTol}
-              onChange={(e) => setDiaTol(e.target.value)} style={xicInputStyle(4.5)} />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
-            RT center (s, optional)
-            <input data-testid="dia-rt-input" type="number" step="any" placeholder="full run" value={diaRtCenter}
-              onChange={(e) => setDiaRtCenter(e.target.value)} style={xicInputStyle(6)} />
-          </label>
-          <Button variant="secondary" size="sm" onClick={() => void extractDia()} disabled={!diaValid || diaBusy} data-testid="dia-extract-btn">
-            {diaBusy ? "Extracting…" : "Extract fragments"}
-          </Button>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>Precursor m/z
+            <input data-testid="dia-precursor-input" type="number" step="any" placeholder="620.83" value={diaPrecursor} onChange={(e) => setDiaPrecursor(e.target.value)} style={xicInputStyle(7)} /></label>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)", flex: "1 1 16rem", minWidth: "12rem" }}>Fragment m/z (comma / space separated)
+            <input data-testid="dia-fragments-input" type="text" placeholder="545.30, 802.45, 917.48" value={diaFragments} onChange={(e) => setDiaFragments(e.target.value)} style={{ ...xicInputStyle(7), width: "100%", fontFamily: "var(--font-mono)" }} /></label>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>± Da
+            <input data-testid="dia-tol-input" type="number" step="any" value={diaTol} onChange={(e) => setDiaTol(e.target.value)} style={xicInputStyle(4.5)} /></label>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>RT center (s, optional)
+            <input data-testid="dia-rt-input" type="number" step="any" placeholder="full run" value={diaRtCenter} onChange={(e) => setDiaRtCenter(e.target.value)} style={xicInputStyle(6)} /></label>
+          <Button variant="secondary" size="sm" onClick={() => void extractDia()} disabled={!diaValid || diaBusy} data-testid="dia-extract-btn">{diaBusy ? "Extracting…" : "Extract fragments"}</Button>
         </div>
-        {diaNote && (
-          <p data-testid="dia-note" style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", margin: "0.25rem 0" }}>{diaNote}</p>
-        )}
+        {diaNote && <p data-testid="dia-note" style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", margin: "0.25rem 0" }}>{diaNote}</p>}
         {diaTraces && diaTraces.some((t) => t.points.length > 0) && (
           <div data-testid="dia-plot-host">
             <MultiChromPlot traces={diaTraces} />
-            <p style={{ margin: "0.25rem 0 0", fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
-              {diaTraces.length} transition{diaTraces.length === 1 ? "" : "s"} · scroll to zoom · double-click to reset
-            </p>
+            <p style={{ margin: "0.25rem 0 0", fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{diaTraces.length} transition{diaTraces.length === 1 ? "" : "s"} · scroll to zoom · double-click to reset</p>
           </div>
         )}
       </details>
+    </div>
+  );
+}
+
+/** One chromatogram card: header (label · points · remove) + ChromPlot + drag-resize handle.
+ *  Stored traces don't RT-click-select (no reliable scan mapping); generated TIC/XIC do. */
+function ChromCard({ item }: { item: ChromItem }) {
+  const removeChrom = useStore((s) => s.removeChrom);
+  const setChromHeight = useStore((s) => s.setChromHeight);
+  const selectSpectrum = useStore((s) => s.selectSpectrum);
+  const browse = useStore((s) => s.browse);
+  const selector = useStore((s) => s.selector);
+
+  // Memoize by series so a selection / settings / sibling-resize re-render doesn't rebuild
+  // this plot (and lose its zoom) — only a new series rebuilds it.
+  const points = useMemo(() => (item.series ? seriesToPoints(item.series) : []), [item.series]);
+
+  // RT-click → nearest spectrum. Restrict to the trace's effective MS level so the click
+  // lands on a same-level scan: the XIC's own msLevel, or MS1 for a TIC (the engine TIC sums
+  // MS1 when present, so a DDA run must not pick an interleaved MS2 scan). (review)
+  const pickLevel =
+    item.req.mode === "xic" ? item.req.msLevel
+    : item.req.mode === "tic" && browse?.msLevel.some((l) => l === 1) ? 1
+    : undefined;
+  function pickNearestSpectrum(time: number) {
+    if (!browse || item.source === "stored") return;
+    let best = -1, bestD = Infinity;
+    for (let i = 0; i < browse.rt.length; i++) {
+      if (pickLevel != null && browse.msLevel[i] !== pickLevel) continue;
+      const rt = browse.rt[i] as number;
+      if (!Number.isFinite(rt)) continue;
+      const d = Math.abs(rt - time);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    if (best >= 0) void selectSpectrum(best);
+  }
+  // Only mark the selected spectrum on this trace if it belongs to the trace's level — a
+  // marker for a scan not summed into this card would be misleading (codex review).
+  let selectedTime: number | null = null;
+  if (item.source !== "stored" && selector && browse && (pickLevel == null || browse.msLevel[selector.index] === pickLevel)) {
+    const rt = browse.rt[selector.index] as number | undefined;
+    selectedTime = rt != null && Number.isFinite(rt) ? rt : null;
+  }
+
+  return (
+    <div data-testid={`chrom-card-${item.itemId}`} style={{ border: "1px solid var(--border-default, #e2e8f0)", borderRadius: 8, background: "var(--surface-card, #fff)", padding: "0.5rem 0.6rem" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.35rem" }}>
+        <span style={{ width: 8, height: 8, borderRadius: 2, flexShrink: 0, background: item.source === "stored" ? "var(--text-muted, #94a3b8)" : "var(--blue-600, #3b54da)" }} aria-hidden />
+        <strong style={{ fontSize: "var(--text-sm)", color: "var(--text-heading, #1e293b)" }}>{item.label}</strong>
+        <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
+          {item.loading ? "loading…" : item.error ? `error: ${item.error}` : item.series ? `${item.series.time.length} pts` : ""}
+        </span>
+        <Button variant="ghost" size="sm" data-testid={`chrom-remove-${item.itemId}`} onClick={() => removeChrom(item.itemId)} aria-label="Remove chromatogram" style={{ marginLeft: "auto" }}>×</Button>
+      </div>
+      {points.length > 0 ? (
+        <div data-testid="chrom-plot-host">
+          <ChromPlot points={points} height={item.height} onPick={pickNearestSpectrum} selectedTime={selectedTime} />
+        </div>
+      ) : (
+        !item.loading && <p style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", margin: "0.25rem 0" }}>{item.error ? "Could not load this chromatogram." : "No data points."}</p>
+      )}
+      <ResizeHandle height={item.height} onResize={(h) => setChromHeight(item.itemId, h)} />
+    </div>
+  );
+}
+
+/** Bottom drag handle — pointer-captured, clamped, with keyboard ↑/↓ nudge (a11y).
+ *  ponytail: commits height on pointer-UP only (one rebuild per resize, not per tick);
+ *  the plot snaps to the new size on release. Live setSize would need uPlot-instance
+ *  plumbing through useUplot — not worth it. */
+function ResizeHandle({ height, onResize }: { height: number; onResize: (h: number) => void }) {
+  const startY = useRef(0);
+  const startH = useRef(height);
+  const pending = useRef(height);
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    startY.current = e.clientY;
+    startH.current = height;
+    pending.current = height;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    pending.current = startH.current + (e.clientY - startY.current);
+  }
+  function onPointerUpOrCancel(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      onResize(pending.current);
+    }
+  }
+  return (
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize chromatogram"
+      aria-valuemin={CHROM_MIN_H}
+      aria-valuemax={CHROM_MAX_H}
+      aria-valuenow={height}
+      tabIndex={0}
+      data-testid="chrom-resize"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUpOrCancel}
+      onPointerCancel={onPointerUpOrCancel}
+      onLostPointerCapture={() => { /* released */ }}
+      onKeyDown={(e) => { if (e.key === "ArrowDown") { e.preventDefault(); onResize(height + 20); } else if (e.key === "ArrowUp") { e.preventDefault(); onResize(height - 20); } }}
+      style={{ height: 8, marginTop: 2, cursor: "ns-resize", touchAction: "none", display: "flex", justifyContent: "center", alignItems: "center" }}
+    >
+      <span aria-hidden style={{ width: 28, height: 3, borderRadius: 2, background: "var(--border-strong, #c5ccd3)" }} />
     </div>
   );
 }

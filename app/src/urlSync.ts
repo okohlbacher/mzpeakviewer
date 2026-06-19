@@ -113,12 +113,15 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
     // Guard the xic window: a malformed/round-tripped link can carry tolDa==0 (the
     // grammar's 4-decimal num() can quantize a sub-0.5-mDa tolerance to 0), which would
     // extract a degenerate empty trace. Fail safe — fall through rather than load it.
+    // Bridge a deep link to the managed list so it shows as a card (the view now renders
+    // chromList, not the single `chrom`). xic/tic add an item; a stored link resolves its
+    // id → index via the engine inventory (addStoredChromById) so it appears as a card too.
     if (v.chromMode === "xic" && v.xic && v.xic.mz > 0 && v.xic.tolDa > 0) {
-      await st.loadChrom({ mode: "xic", mz: v.xic.mz, tolDa: v.xic.tolDa, ...(rt ? { rt } : {}) }).catch(() => {});
+      st.addXic({ mz: v.xic.mz, tolDa: v.xic.tolDa, ...(rt ? { rt } : {}), ...(v.xic.msLevel != null ? { msLevel: v.xic.msLevel } : {}) });
     } else if (v.chromMode === "stored" && v.chromStoredId) {
-      await st.loadChrom({ mode: "stored", id: v.chromStoredId }).catch(() => {});
+      await st.addStoredChromById(v.chromStoredId).catch(() => {});
     } else if (v.chromMode === "tic") {
-      await st.loadChrom({ mode: "tic", ...(rt ? { rt } : {}) }).catch(() => {});
+      st.addTic(rt);
     }
   }
 
@@ -211,7 +214,7 @@ export function currentShareUrl(): string {
   let chromTimeRange = DEFAULT_VIEW_STATE.chromTimeRange;
   if (s.view === "chromatograms" && s.chromReq) {
     const r = s.chromReq;
-    if (r.mode === "xic") { chromMode = "xic"; chromXic = { mz: r.mz, tolDa: r.tolDa }; }
+    if (r.mode === "xic") { chromMode = "xic"; chromXic = { mz: r.mz, tolDa: r.tolDa, ...(r.msLevel != null ? { msLevel: r.msLevel } : {}) }; }
     else if (r.mode === "xicRange") { chromMode = "xic"; chromXic = { mz: (r.mzLo + r.mzHi) / 2, tolDa: (r.mzHi - r.mzLo) / 2 }; }
     else if (r.mode === "stored") { chromMode = "stored"; chromStoredId = r.id; }
     else chromMode = "tic";

@@ -36,10 +36,13 @@ export function ChromPlot({
   points,
   onPick,
   selectedTime,
+  height = HEIGHT,
 }: {
   points: ChromPoint[];
   onPick: (time: number) => void;
   selectedTime: number | null;
+  /** Plot height in px (the managed Chromatograms cards resize this). @default 200 */
+  height?: number;
 }) {
   const selRef = useRef<number | null>(selectedTime);
   selRef.current = selectedTime;
@@ -52,7 +55,7 @@ export function ChromPlot({
       if (data[0].length === 0) return null;
       const opts: uPlot.Options = {
         width,
-        height: HEIGHT,
+        height,
         scales: { x: { time: false, range: xRange } },
         // Left-drag stays a click (navigate); zoom via wheel, pan via middle-drag.
         cursor: { y: false, drag: { x: false, y: false } },
@@ -85,8 +88,8 @@ export function ChromPlot({
       };
       return new uPlot(opts, data, el);
     },
-    HEIGHT,
-    [points],
+    height,
+    [points], // height drives setSize (not rebuild) inside useUplot, preserving zoom on resize
     [selectedTime],
   );
 

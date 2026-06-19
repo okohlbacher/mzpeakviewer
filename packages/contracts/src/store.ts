@@ -73,7 +73,7 @@ export type ViewState = {
   spectrumZoom: [number, number] | null;
   // chromatogram sub-state
   chromMode: ChromMode;
-  xic: { mz: number; tolDa: number } | null;
+  xic: { mz: number; tolDa: number; msLevel?: number } | null;
   chromStoredId: string | null;
   chromTimeRange: [number, number] | null;
   // imaging sub-state

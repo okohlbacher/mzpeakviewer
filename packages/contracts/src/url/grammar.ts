@@ -174,15 +174,17 @@ function channelOf(s: string): { mz: number; tolDa: number; color: string } | nu
   return { mz, tolDa: tol, color: parts.slice(2).join(",") };
 }
 
-/** `xic=mz,delta` → {mz,tolDa}. delta is required (no default); empty/garbage → reject. */
-function xicOf(s: string | undefined): { mz: number; tolDa: number } | null {
+/** `xic=mz,delta[,msLevel]` → {mz,tolDa,msLevel?}. delta is required (no default);
+ *  empty/garbage → reject. The optional 3rd field limits the XIC to one MS level. */
+function xicOf(s: string | undefined): { mz: number; tolDa: number; msLevel?: number } | null {
   if (s == null) return null;
   const parts = s.split(",");
-  if (parts.length !== 2 || !parts[1]?.trim()) return null;
+  if ((parts.length !== 2 && parts.length !== 3) || !parts[1]?.trim()) return null;
   const mz = Number(parts[0]);
   const d = Number(parts[1]);
   if (!Number.isFinite(mz) || !Number.isFinite(d)) return null;
-  return { mz, tolDa: d };
+  const lvl = parts.length === 3 && parts[2]?.trim() ? Number(parts[2]) : NaN;
+  return { mz, tolDa: d, ...(Number.isInteger(lvl) && lvl >= 1 ? { msLevel: lvl } : {}) };
 }
 
 /** `chrom=tic | id:<id> | ix:<n> | <id>` → mode + id. */
@@ -363,7 +365,7 @@ export function serialize(v: ViewState, mode: FileMode): URLSearchParams {
   if (v.spectrumZoom) p.set("mz", `${num(v.spectrumZoom[0])},${num(v.spectrumZoom[1])}`);
 
   // LC
-  if (v.chromMode === "xic" && v.xic) p.set("xic", `${num(v.xic.mz)},${num(v.xic.tolDa)}`);
+  if (v.chromMode === "xic" && v.xic) p.set("xic", `${num(v.xic.mz)},${num(v.xic.tolDa)}${v.xic.msLevel != null ? `,${v.xic.msLevel}` : ""}`);
   else if (v.chromMode === "stored" && v.chromStoredId) p.set("chrom", canonicalChrom(v.chromStoredId));
   else if (v.chromMode === "tic" && v.view === "chromatograms") p.set("chrom", "tic");
   if (v.chromTimeRange && (p.has("xic") || p.get("chrom") === "tic")) {

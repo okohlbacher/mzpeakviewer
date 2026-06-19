@@ -124,6 +124,7 @@ describe("round-trip: serialize → parse → resolve is stable", () => {
   const cases: { mode: "imaging" | "lc"; v: ViewState }[] = [
     { mode: "lc", v: vs({ sourceUrl: "http://x/a.mzpeak", view: "spectra", selector: { by: "scan", scan: 1500, index: -1, id: null } }) },
     { mode: "lc", v: vs({ view: "chromatograms", chromMode: "xic", xic: { mz: 445, tolDa: 0.1 }, chromTimeRange: [10, 20] }) },
+    { mode: "lc", v: vs({ view: "chromatograms", chromMode: "xic", xic: { mz: 558.3, tolDa: 0.05, msLevel: 2 } }) }, // MS-level-limited XIC round-trips its level
     { mode: "imaging", v: vs({ view: "ion", ion: { mz: 200.05, tolDa: 0.1 } }) },
     { mode: "imaging", v: vs({ view: "overlay", opticalRef: "0" }) },
     { mode: "lc", v: vs({ view: "spectra", selector: { by: "spectrum", index: 12, id: null }, spectrumZoom: [100, 500], msLevelFilter: 2 }) },
@@ -185,5 +186,11 @@ describe("Wave-1 fixes: imaging views + empty-tol/color parsing", () => {
   it("xic= with an empty delta is rejected (delta is required)", () => {
     expect(resolve({ xic: "445.1," }, "lc").view.xic).toBeNull();
     expect(resolve({ xic: "445.1,0.5" }, "lc").view.xic).toEqual({ mz: 445.1, tolDa: 0.5 });
+  });
+
+  it("xic= optional 3rd field is the MS level; non-integer/<1 is dropped", () => {
+    expect(resolve({ xic: "445.1,0.5,2" }, "lc").view.xic).toEqual({ mz: 445.1, tolDa: 0.5, msLevel: 2 });
+    expect(resolve({ xic: "445.1,0.5,0" }, "lc").view.xic).toEqual({ mz: 445.1, tolDa: 0.5 });
+    expect(resolve({ xic: "445.1,0.5,x" }, "lc").view.xic).toEqual({ mz: 445.1, tolDa: 0.5 });
   });
 });

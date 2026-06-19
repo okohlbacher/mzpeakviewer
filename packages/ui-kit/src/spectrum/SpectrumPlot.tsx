@@ -65,6 +65,7 @@ export function SpectrumPlot({
   zoom,
   onZoomChange,
   onPeakClick,
+  onPeakContextMenu,
 }: {
   spectrum: SpectrumArrays | null;
   xicWindow: { mz: number; tolDa: number } | null;
@@ -76,6 +77,9 @@ export function SpectrumPlot({
   /** Optional: a click in the plot resolves the nearest peak m/z and reports it
    *  (used to prefill the ion image). Non-breaking — omitted by other callers. */
   onPeakClick?: (mz: number) => void;
+  /** Optional: a RIGHT-click resolves the nearest peak m/z + reports it with the cursor
+   *  position (the Spectra view opens a "create chromatogram" popover there). */
+  onPeakContextMenu?: (mz: number, clientX: number, clientY: number) => void;
 }) {
   const specRef = useRef<SpectrumArrays | null>(spectrum);
   specRef.current = spectrum;
@@ -87,6 +91,8 @@ export function SpectrumPlot({
   zoomRef.current = zoom;
   const onZoomRef = useRef(onZoomChange);
   onZoomRef.current = onZoomChange;
+  const onPeakCtxRef = useRef(onPeakContextMenu);
+  onPeakCtxRef.current = onPeakContextMenu;
   const onPeakClickRef = useRef(onPeakClick);
   onPeakClickRef.current = onPeakClick;
   const plotRef = useRef<uPlot | null>(null);
@@ -152,6 +158,20 @@ export function SpectrumPlot({
         const i = nearestPeakIndex(s, plot.posToVal(left, "x"));
         if (i == null) return;
         cb(s.mz[i]!);
+      });
+      // Right-click → resolve the nearest peak m/z + report with the cursor position.
+      plot.over.addEventListener("contextmenu", (e) => {
+        const cb = onPeakCtxRef.current;
+        const s = specRef.current;
+        if (!cb || !s) return;
+        e.preventDefault();
+        // Resolve from the actual click position, not plot.cursor.left — the latter is the
+        // last hover and can be stale/absent on a right-click without a prior mousemove (review).
+        const x = plot.posToVal((e as MouseEvent).offsetX, "x");
+        if (!Number.isFinite(x)) return;
+        const i = nearestPeakIndex(s, x);
+        if (i == null) return;
+        cb(s.mz[i]!, e.clientX, e.clientY);
       });
       return plot;
     },

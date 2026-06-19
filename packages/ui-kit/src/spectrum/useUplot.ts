@@ -27,6 +27,10 @@ export function useUplot(
   const plotRef = useRef<uPlot | null>(null);
   const constructRef = useRef(construct);
   constructRef.current = construct;
+  // Read height through a ref so a height change does NOT re-run the RO effect (which would
+  // destroy+rebuild the plot, resetting zoom). Height changes flow through setSize below.
+  const heightRef = useRef(height);
+  heightRef.current = height;
 
   const build = useCallback(() => {
     const el = hostRef.current;
@@ -43,7 +47,7 @@ export function useUplot(
     const ro = new ResizeObserver(() => {
       const w = el.clientWidth;
       if (w <= 0) return;
-      if (plotRef.current) plotRef.current.setSize({ width: w, height });
+      if (plotRef.current) plotRef.current.setSize({ width: w, height: heightRef.current });
       else build();
     });
     ro.observe(el);
@@ -52,7 +56,13 @@ export function useUplot(
       plotRef.current?.destroy();
       plotRef.current = null;
     };
-  }, [build, height]);
+  }, [build]);
+
+  // Height change → resize in place (preserve zoom/scales), never rebuild.
+  useEffect(() => {
+    const el = hostRef.current;
+    if (plotRef.current && el && el.clientWidth > 0) plotRef.current.setSize({ width: el.clientWidth, height });
+  }, [height]);
 
   // Recreate on data change (see note above).
   // eslint-disable-next-line react-hooks/exhaustive-deps

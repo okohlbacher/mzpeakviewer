@@ -39,6 +39,66 @@ let currentOpenSeq = 0;
 // the latest (codex review).
 let currentChromSeq = 0;
 
+// Monotonic id for chrom-LIST items + a global load token (re-adding a fixed-id item
+// while its first load is in flight must not let the stale load commit — codex review).
+let chromItemCounter = 0;
+let chromLoadToken = 0;
+
+// ── Browser-persisted settings (XIC defaults) ─────────────────────────────────
+export type AppSettings = {
+  /** Default XIC m/z half-window (Da) for peak→chromatogram + the add-XIC form. */
+  xicTolDa: number;
+  /** Default XIC retention-time half-window (minutes). */
+  xicRtHalfMin: number;
+};
+const DEFAULT_SETTINGS: AppSettings = { xicTolDa: 0.1, xicRtHalfMin: 2 };
+const SETTINGS_KEY = "mzpeak.settings";
+
+/** Load settings from localStorage, falling back to defaults (SSR / quota / parse-safe). */
+function loadSettings(): AppSettings {
+  try {
+    if (typeof localStorage === "undefined") return { ...DEFAULT_SETTINGS };
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_SETTINGS };
+    const p = JSON.parse(raw) as Partial<AppSettings>;
+    const tol = Number(p.xicTolDa);
+    const rt = Number(p.xicRtHalfMin);
+    return {
+      xicTolDa: Number.isFinite(tol) && tol > 0 ? tol : DEFAULT_SETTINGS.xicTolDa,
+      xicRtHalfMin: Number.isFinite(rt) && rt > 0 ? rt : DEFAULT_SETTINGS.xicRtHalfMin,
+    };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+function saveSettings(s: AppSettings): void {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+  } catch {
+    /* quota / disabled storage — non-fatal, settings stay in memory for the session */
+  }
+}
+
+/** One chromatogram in the managed list (the Chromatograms view). */
+export type ChromItem = {
+  itemId: string;
+  source: "stored" | "generated";
+  req: ChromRequest;
+  label: string;
+  series: ChromatogramSeries | null;
+  loading: boolean;
+  error: string | null;
+  /** Plot height in px (resize); clamped [CHROM_MIN_H, CHROM_MAX_H]. */
+  height: number;
+  /** Per-item monotonic load token — guards concurrent (re)extraction (codex review). */
+  loadSeq: number;
+};
+export const CHROM_MIN_H = 120;
+export const CHROM_MAX_H = 600;
+const CHROM_DEFAULT_H = 220;
+/** Cap the managed list to bound memory + the number of live uPlot instances. */
+export const CHROM_MAX_ITEMS = 12;
+
 // ---------------------------------------------------------------------------
 // Store shape
 // ---------------------------------------------------------------------------
@@ -143,6 +203,16 @@ export interface AppState {
   chromReq: ChromRequest | null;
   chromLoading: boolean;
 
+  // ── Managed chromatogram list (Chromatograms view) — stored + generated (in-mem) ──
+  /** The chromatograms shown as cards: file's stored ones + user-generated TIC/XIC.
+   *  In-memory only; reset on file open; never written to the file. */
+  chromList: ChromItem[];
+  /** The "active" item mirrored into chrom/chromReq for share-link round-trip. */
+  activeChromId: string | null;
+
+  // ── Browser-persisted settings ───────────────────────────────────────────────
+  settings: AppSettings;
+
   // notices
   notices: { id: string; severity: "info" | "warning" | "error"; message: string }[];
 
@@ -182,6 +252,23 @@ export interface AppState {
    *  if there's no grid or the pixel has no spectrum. (MG-01) */
   selectPixel: (x: number, y: number, route?: boolean) => Promise<void>;
   loadChrom: (req: ChromRequest) => Promise<void>;
+  /** Update a persisted setting (written through to localStorage). */
+  setSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
+  /** Add a computed TIC to the list (optional RT window in seconds). */
+  addTic: (rt?: [number, number]) => void;
+  /** Add an extracted-ion chromatogram (m/z ± tolDa, optional RT seconds, optional MS level). */
+  addXic: (opts: { mz: number; tolDa: number; rt?: [number, number]; msLevel?: number }) => void;
+  /** Add (or focus, if already present) the file's stored chromatogram by index. */
+  addStoredChrom: (index: number, id: string) => void;
+  /** Resolve a stored chromatogram id → index (via the engine inventory) and add it as a
+   *  card. Used by `?chrom=stored` deep links, which carry only the id. */
+  addStoredChromById: (id: string) => Promise<void>;
+  /** Remove a list item by id (drops its in-flight load via the per-item token). */
+  removeChrom: (itemId: string) => void;
+  /** Resize a card's plot height (clamped). */
+  setChromHeight: (itemId: string, height: number) => void;
+  /** Remove all generated (non-stored) items. */
+  clearGeneratedChroms: () => void;
   /** Load a wavelength spectrum by ZERO-BASED ARRAY POSITION. Lazily loads the wavelength
    *  browse index on first call if not already present. SEPARATE from selectSpectrum. */
   selectWavelengthSpectrum: (index: number) => Promise<void>;
@@ -252,6 +339,8 @@ const INITIAL_OPEN_STATE = {
   chrom: null,
   chromReq: null,
   chromLoading: false,
+  chromList: [],
+  activeChromId: null,
   notices: [],
 } satisfies Partial<AppState>;
 
@@ -370,6 +459,75 @@ async function ensureWavelengthLoaded(
   }
 }
 
+/**
+ * Append a chromatogram to the managed list and load its series with a PER-ITEM token
+ * guard: commit only if the file is unchanged (openSeq) and the item still exists with the
+ * same loadSeq — so concurrent generations / a mid-flight file switch / a removed item can't
+ * clobber state. Caps the list (notice when full). Mirrors the active item into
+ * chrom/chromReq so the existing Share-link round-trip keeps working.
+ */
+function startChromItem(
+  set: StoreApi<AppState>["setState"],
+  get: StoreApi<AppState>["getState"],
+  req: ChromRequest,
+  source: "stored" | "generated",
+  label: string,
+  fixedId?: string,
+): void {
+  // Dedup: an identical request just focuses the existing card (avoids filling the cap
+  // with duplicate right-click-Creates). reqKey is order-stable for our flat req shapes.
+  const reqKey = JSON.stringify(req);
+  const dupe = get().chromList.find((it) => JSON.stringify(it.req) === reqKey);
+  if (dupe) {
+    set((s) => ({ activeChromId: dupe.itemId, ...activeMirror(s.chromList, dupe.itemId) }));
+    return;
+  }
+  if (get().chromList.length >= CHROM_MAX_ITEMS) {
+    set((s) => ({
+      notices: [
+        ...s.notices.filter((n) => n.id !== "chrom-cap"),
+        { id: "chrom-cap", severity: "info" as const, message: `Chromatogram list is full (max ${CHROM_MAX_ITEMS}) — remove one to add another.` },
+      ],
+    }));
+    return;
+  }
+  const itemId = fixedId ?? `c${++chromItemCounter}`;
+  const loadSeq = ++chromLoadToken;
+  const item: ChromItem = { itemId, source, req, label, series: null, loading: true, error: null, height: CHROM_DEFAULT_H, loadSeq };
+  // New active item has no series yet → activeMirror nulls chrom/chromReq so the Share link
+  // doesn't keep serializing the previously-active trace while this one loads (review).
+  set((s) => { const chromList = [...s.chromList, item]; return { chromList, activeChromId: itemId, ...activeMirror(chromList, itemId) }; });
+  const openSeq = currentOpenSeq;
+  void (async () => {
+    try {
+      const series = await engine.extractChrom(req);
+      if (openSeq !== currentOpenSeq) return;
+      const cur = get().chromList.find((it) => it.itemId === itemId);
+      if (!cur || cur.loadSeq !== loadSeq) return; // removed, re-added, or superseded
+      set((s) => {
+        const chromList = s.chromList.map((it) => (it.itemId === itemId ? { ...it, series, loading: false, error: null } : it));
+        return { chromList, ...activeMirror(chromList, s.activeChromId) }; // mirror reads active-at-commit-time, not get()
+      });
+    } catch (err) {
+      if (openSeq !== currentOpenSeq) return;
+      const cur = get().chromList.find((it) => it.itemId === itemId);
+      if (!cur || cur.loadSeq !== loadSeq) return;
+      const message = err instanceof Error ? err.message : String(err);
+      set((s) => {
+        const chromList = s.chromList.map((it) => (it.itemId === itemId ? { ...it, loading: false, error: message } : it));
+        return { chromList, ...activeMirror(chromList, s.activeChromId) }; // errored active item → mirror nulls
+      });
+    }
+  })();
+}
+
+/** chrom/chromReq mirror of the active item (or nulls) — keeps the Share link valid when
+ *  the active card changes/removes. */
+function activeMirror(list: ChromItem[], activeId: string | null): { chrom: ChromatogramSeries | null; chromReq: ChromRequest | null } {
+  const a = activeId ? list.find((it) => it.itemId === activeId) : undefined;
+  return a && a.series ? { chrom: a.series, chromReq: a.req } : { chrom: null, chromReq: null };
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -436,6 +594,11 @@ export const useStore = create<AppState>((set, get) => ({
   chrom: null,
   chromReq: null,
   chromLoading: false,
+  chromList: [],
+  activeChromId: null,
+
+  // settings — loaded from localStorage once at store creation; NOT reset on file open.
+  settings: loadSettings(),
 
   // notices
   notices: [],
@@ -543,6 +706,8 @@ export const useStore = create<AppState>((set, get) => ({
       chrom: null,
       chromReq: null,
       chromLoading: false,
+      chromList: [],
+      activeChromId: null,
       notices: [],
     });
   },
@@ -656,6 +821,67 @@ export const useStore = create<AppState>((set, get) => ({
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  },
+
+  // ── Managed chromatogram list ────────────────────────────────────────────
+  setSetting: (key, value) => {
+    set((s) => {
+      const settings = { ...s.settings, [key]: value };
+      saveSettings(settings);
+      return { settings };
+    });
+  },
+
+  addTic: (rt) => { startChromItem(set, get, { mode: "tic", ...(rt ? { rt } : {}) }, "generated", "TIC"); },
+
+  addXic: ({ mz, tolDa, rt, msLevel }) => {
+    const label = `XIC ${mz.toFixed(4)} ± ${tolDa} Da${msLevel != null ? ` · MS${msLevel}` : ""}`;
+    const req: ChromRequest = { mode: "xic", mz, tolDa, ...(rt ? { rt } : {}), ...(msLevel != null ? { msLevel } : {}) };
+    startChromItem(set, get, req, "generated", label);
+  },
+
+  addStoredChrom: (index, id) => {
+    const fixedId = `stored:${index}`;
+    if (get().chromList.some((it) => it.itemId === fixedId)) { set((s) => ({ activeChromId: fixedId, ...activeMirror(s.chromList, fixedId) })); return; }
+    startChromItem(set, get, { mode: "stored", id }, "stored", id, fixedId);
+  },
+
+  addStoredChromById: async (id) => {
+    const seq = currentOpenSeq;
+    try {
+      const list = await engine.chromatogramList();
+      if (seq !== currentOpenSeq) return; // file changed under us
+      // The URL grammar keeps the legacy `ix:<n>` index form verbatim; resolve it by index.
+      const hit = id.startsWith("ix:")
+        ? (Number.isInteger(Number(id.slice(3))) ? list.find((c) => c.index === Number(id.slice(3))) : undefined)
+        : list.find((c) => c.id === id);
+      if (hit) get().addStoredChrom(hit.index, hit.id);
+    } catch { /* inventory unavailable — stored deep link silently no-ops */ }
+  },
+
+  removeChrom: (itemId) => {
+    set((s) => {
+      const chromList = s.chromList.filter((it) => it.itemId !== itemId);
+      const activeChromId = s.activeChromId === itemId ? (chromList[chromList.length - 1]?.itemId ?? null) : s.activeChromId;
+      return { chromList, activeChromId, ...activeMirror(chromList, activeChromId) };
+    });
+  },
+
+  setChromHeight: (itemId, height) => {
+    const h = Math.max(CHROM_MIN_H, Math.min(CHROM_MAX_H, Math.round(height)));
+    set((s) => {
+      const it = s.chromList.find((x) => x.itemId === itemId);
+      if (!it || it.height === h) return {}; // no-op: clamped at a bound, unchanged
+      return { chromList: s.chromList.map((x) => (x.itemId === itemId ? { ...x, height: h } : x)) };
+    });
+  },
+
+  clearGeneratedChroms: () => {
+    set((s) => {
+      const chromList = s.chromList.filter((it) => it.source === "stored");
+      const activeChromId = chromList.some((it) => it.itemId === s.activeChromId) ? s.activeChromId : (chromList[chromList.length - 1]?.itemId ?? null);
+      return { chromList, activeChromId, ...activeMirror(chromList, activeChromId) };
+    });
   },
 
   // -------------------------------------------------------------------------

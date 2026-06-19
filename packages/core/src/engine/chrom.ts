@@ -158,6 +158,24 @@ function pickUseProfile(ctx?: ChromContext): boolean {
   return (counts.profile ?? 0) >= (counts.centroid ?? 0);
 }
 
+/** Source pick for an MS-level-limited XIC: a mixed file (e.g. profile MS1 + centroid MS2)
+ *  must read the representation of the REQUESTED level, not the whole-file majority — else
+ *  a centroid-MS2 XIC reads spectra_data because the file is profile-majority and comes back
+ *  empty/wrong (codex review). Falls back to the file majority when the level has no
+ *  representation info. */
+export function pickUseProfileForLevel(ctx: ChromContext | undefined, msLevel: number | null): boolean {
+  const rows = ctx?.rows;
+  if (msLevel == null || !rows) return pickUseProfile(ctx);
+  let profile = 0, centroid = 0;
+  for (const r of rows) {
+    if (r.msLevel !== msLevel) continue;
+    if (r.representation === "profile") profile++;
+    else if (r.representation === "centroid") centroid++;
+  }
+  if (profile === 0 && centroid === 0) return pickUseProfile(ctx); // level's representation unknown
+  return profile >= centroid;
+}
+
 /** MS1 rows if any carry msLevel 1, else all rows (mirrors Explorer's `ticRows`). */
 function ticRows(rows: readonly SpectrumIndexRow[]): SpectrumIndexRow[] {
   const ms1 = rows.filter((r) => r.msLevel === 1);
@@ -281,12 +299,21 @@ export async function engineExtractChrom(
     tolDa = (req.mzHi - req.mzLo) / 2;
   }
 
-  const points = await extractChromatogram(reader, {
+  let points = await extractChromatogram(reader, {
     mz,
     tolDa,
     timeRange: rt,
-    useProfile: pickUseProfile(ctx),
+    // For an MS-level-limited XIC, choose the source from the requested level's representation.
+    useProfile: pickUseProfileForLevel(ctx, req.mode === "xic" ? (req.msLevel ?? null) : null),
   });
+  // MS-level limit (xic only): keep only points from spectra of the requested level — a
+  // peak picked in an MS2 spectrum yields an MS2-only XIC. ALWAYS filter when a level is
+  // requested (honest contract): if the scan rows are unavailable or the level is absent,
+  // the result is empty rather than a misleading all-levels trace.
+  if (req.mode === "xic" && req.msLevel != null) {
+    const keep = new Set((ctx?.rows ?? []).filter((r) => r.msLevel === req.msLevel).map((r) => r.index));
+    points = points.filter((p) => keep.has(p.index));
+  }
   const { time, intensity } = unpackPoints(points);
   return adaptChromatogram({ kind: "xic", id: null, time, intensity });
 }

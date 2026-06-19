@@ -1,5 +1,5 @@
 // Spectra view — browse list / index picker → selectSpectrum → SpectrumPlot.
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useStore } from "../store";
 import { buildLevelIndex, activeSet, rankOf, absoluteOf } from "../levelIndex";
 import { SpectrumPlot, Select, Button, TreeView, spectrumReporters, type SelectOption, type ReporterMarker, type ReporterPeak } from "@mzpeak/ui-kit";
@@ -34,6 +34,17 @@ export function Spectra() {
   const channels = useStore((s) => s.channels);
   const setIonRequest = useStore((s) => s.setIonRequest);
   const setView = useStore((s) => s.setView);
+  const addXic = useStore((s) => s.addXic);
+  const settings = useStore((s) => s.settings);
+
+  // Right-click-a-peak → "create chromatogram" popover (m/z resolved by SpectrumPlot,
+  // RT pre-filled to the shown spectrum's RT ± the Settings half-window, MS level limited
+  // to the shown spectrum). Anchored at the cursor.
+  // Snapshot mz + RT + MS level AT RIGHT-CLICK TIME — reading them live later would use a
+  // since-changed spectrum (codex review).
+  const [peakMenu, setPeakMenu] = useState<
+    { mz: number; x: number; y: number; msLevel: number | null; spectrumRtSec: number | null; rtBounds: [number, number] | null } | null
+  >(null);
 
   // BL-09: clicking a peak (in the plot or the centroid peak table) prefills the
   // ion view with that m/z (±0.05 Da) and navigates there. The user then clicks
@@ -49,6 +60,13 @@ export function Spectra() {
   const [selectedChannel, setSelectedChannel] = useState<number | null>(null);
   const spectrumIndex = spectrum?.index ?? null;
   useEffect(() => { setSelectedChannel(null); }, [spectrumIndex]);
+  // Dismiss any open peak→chrom popover when the file/spectrum changes — a stale popover
+  // would otherwise carry mz/RT/MS level from a since-replaced spectrum (review).
+  const closePeakMenu = useCallback(() => setPeakMenu(null), []);
+  // Clear on BOTH the displayed spectrum changing (spectrumIndex) AND a new selection being
+  // requested (selector.index) — the latter changes first, during the load, so without it the
+  // popover stays usable against a spectrum that's already being replaced (review).
+  useEffect(() => { closePeakMenu(); }, [spectrumIndex, selector?.index, phase, closePeakMenu]);
 
   // Per-MS-level relative↔absolute mapping, built once per file (rebuilds only when
   // `browse` changes — switching MS levels just selects a different prebuilt array).
@@ -101,6 +119,12 @@ export function Spectra() {
   const curLevel = browse ? (browse.msLevel[currentIndex] ?? null) : null;
   const levelSet = curLevel != null ? activeSet(levelIndex, curLevel) : null;
   const withinLevelRank = levelSet ? rankOf(levelSet, currentIndex) : null;
+
+  // Peak→chrom snapshot reads the DISPLAYED spectrum (spectrumIndex), not the requested
+  // selector — during a load the selector leads, so its RT/MS level wouldn't match the m/z
+  // the right-click resolves off the drawn spectrum (codex review).
+  const shownLevel = browse && spectrumIndex != null ? (browse.msLevel[spectrumIndex] ?? null) : null;
+  const shownRtSec = browse && spectrumIndex != null && Number.isFinite(browse.rt[spectrumIndex] ?? NaN) ? (browse.rt[spectrumIndex] as number) : null;
   const levelTotal = levelSet ? levelSet.length : null;
 
   // Isobaric reporter ions (TMT/iTRAQ): if the run carries SDRF channels and the
@@ -374,6 +398,12 @@ export function Spectra() {
           zoom={channelZoom}
           onZoomChange={(range) => { if (range == null) setSelectedChannel(null); }}
           onPeakClick={goToIonImage}
+          onPeakContextMenu={(mz, x, y) => setPeakMenu({
+            mz, x, y,
+            msLevel: shownLevel != null && shownLevel >= 1 ? shownLevel : null,
+            spectrumRtSec: shownRtSec,
+            rtBounds: stats.rtRange,
+          })}
         />
         {spectrumLoading && !spectrum && (
           <div
@@ -447,6 +477,26 @@ export function Spectra() {
           Clicking a row drives BL-09 (jump to ion image) via the shared handler. */}
       {spectrum && spectrum.representation === "centroid" && (
         <PeakTable spectrum={spectrum} onPeakClick={goToIonImage} />
+      )}
+
+      {peakMenu && (
+        <PeakChromMenu
+          key={`${peakMenu.mz}:${peakMenu.x}:${peakMenu.y}`}
+          mz={peakMenu.mz}
+          x={peakMenu.x}
+          y={peakMenu.y}
+          defaultTolDa={settings.xicTolDa}
+          rtHalfSec={settings.xicRtHalfMin * 60}
+          spectrumRtSec={peakMenu.spectrumRtSec}
+          rtBounds={peakMenu.rtBounds}
+          msLevel={peakMenu.msLevel}
+          onClose={closePeakMenu}
+          onCreate={(tolDa, rt) => {
+            addXic({ mz: peakMenu.mz, tolDa, ...(rt ? { rt } : {}), ...(peakMenu.msLevel != null ? { msLevel: peakMenu.msLevel } : {}) });
+            setPeakMenu(null);
+            setView("chromatograms");
+          }}
+        />
       )}
     </div>
   );
@@ -598,3 +648,91 @@ function ChannelPills({
   );
 }
 
+
+/** Cursor popover for "right-click a peak → create chromatogram": shows the resolved m/z,
+ *  an m/z tolerance (default from Settings), an RT range (default = the shown spectrum's RT
+ *  ± the Settings half-window, clamped to the run), and the MS level the XIC is limited to.
+ *  Dismisses on backdrop click or Esc. */
+function PeakChromMenu({
+  mz, x, y, defaultTolDa, rtHalfSec, spectrumRtSec, rtBounds, msLevel, onCreate, onClose,
+}: {
+  mz: number;
+  x: number;
+  y: number;
+  defaultTolDa: number;
+  rtHalfSec: number;
+  spectrumRtSec: number | null;
+  rtBounds: [number, number] | null;
+  msLevel: number | null;
+  onCreate: (tolDa: number, rt: [number, number] | undefined) => void;
+  onClose: () => void;
+}) {
+  const seedLo =
+    spectrumRtSec != null ? Math.max(spectrumRtSec - rtHalfSec, rtBounds ? rtBounds[0] : -Infinity) : null;
+  const seedHi =
+    spectrumRtSec != null ? Math.min(spectrumRtSec + rtHalfSec, rtBounds ? rtBounds[1] : Infinity) : null;
+  const [tol, setTol] = useState(String(defaultTolDa));
+  const [rtMin, setRtMin] = useState(seedLo != null && Number.isFinite(seedLo) ? seedLo.toFixed(1) : "");
+  const [rtMax, setRtMax] = useState(seedHi != null && Number.isFinite(seedHi) ? seedHi.toFixed(1) : "");
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const tolNum = Number(tol);
+  const tolValid = Number.isFinite(tolNum) && tolNum > 0;
+  const lo = Number(rtMin);
+  const hi = Number(rtMax);
+  const rtBlank = rtMin.trim() === "" && rtMax.trim() === "";
+  const rtFilled = rtMin.trim() !== "" && rtMax.trim() !== "" && Number.isFinite(lo) && Number.isFinite(hi) && lo < hi;
+  const rtValid = rtBlank || rtFilled; // partial / lo>=hi → invalid, don't silently fall back to full-range run
+  const valid = tolValid && rtValid;
+  function create() {
+    if (!valid) return;
+    onCreate(tolNum, rtFilled ? [lo, hi] : undefined);
+  }
+  const left = Math.max(8, Math.min(x, (typeof window !== "undefined" ? window.innerWidth : 1024) - 280));
+  const top = Math.max(8, Math.min(y, (typeof window !== "undefined" ? window.innerHeight : 768) - 220));
+  const inp: CSSProperties = { width: "5.5rem", padding: "0.25rem 0.4rem", border: "1px solid var(--border-default)", borderRadius: "var(--radius-sm)", fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", background: "var(--surface-input)", color: "var(--text-heading)" };
+
+  return (
+    <>
+      <div onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} style={{ position: "fixed", inset: 0, zIndex: 40 }} aria-hidden />
+      <div
+        data-testid="peak-chrom-menu"
+        role="dialog"
+        aria-label="Create chromatogram from peak"
+        style={{ position: "fixed", left, top, zIndex: 41, minWidth: 250, padding: "0.7rem 0.8rem", display: "flex", flexDirection: "column", gap: "0.5rem", background: "var(--surface-panel, #fff)", border: "1px solid var(--border-subtle, #e2e8f0)", borderRadius: "var(--radius-md, 8px)", boxShadow: "var(--shadow-md, 0 8px 24px rgba(15,23,42,0.16))" }}
+      >
+        <div style={{ fontWeight: 600, fontSize: "0.85rem", color: "var(--text-heading, #0f172a)" }}>
+          Chromatogram for m/z {mz.toFixed(4)}
+        </div>
+        <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
+          {msLevel != null ? `Limited to MS${msLevel} spectra` : "All spectra (MS level unknown)"}
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
+          m/z ±
+          <input data-testid="peak-chrom-tol" type="number" step="any" value={tol} onChange={(e) => setTol(e.target.value)} style={inp} />
+          Da
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "var(--text-sm)", color: "var(--text-muted)", flexWrap: "wrap" }}>
+          RT (s)
+          <input data-testid="peak-chrom-rtmin" type="number" step="any" placeholder="min" value={rtMin} onChange={(e) => setRtMin(e.target.value)} style={inp} />
+          –
+          <input data-testid="peak-chrom-rtmax" type="number" step="any" placeholder="max" value={rtMax} onChange={(e) => setRtMax(e.target.value)} style={inp} />
+        </label>
+        {!rtValid && (
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-danger, #dc2626)" }}>
+            Enter both min &lt; max, or leave both blank for full range.
+          </div>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.1rem" }}>
+          <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+          <Button variant="secondary" size="sm" onClick={create} disabled={!valid} data-testid="peak-chrom-create">Create</Button>
+        </div>
+      </div>
+    </>
+  );
+}

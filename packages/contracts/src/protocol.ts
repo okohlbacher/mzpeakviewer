@@ -63,7 +63,9 @@ export type OpenSource =
 /** Chromatogram extraction mode (Explorer parity). */
 export type ChromRequest =
   | { mode: "tic"; rt?: [number, number] }
-  | { mode: "xic"; mz: number; tolDa: number; rt?: [number, number] }
+  // xic: sum mz ± tolDa per spectrum vs RT. `msLevel` (optional) limits the sum to spectra
+  // of that MS level (e.g. a peak picked in an MS2 spectrum → MS2-only XIC); omitted = all.
+  | { mode: "xic"; mz: number; tolDa: number; rt?: [number, number]; msLevel?: number }
   | { mode: "xicRange"; mzLo: number; mzHi: number; rt?: [number, number] }
   // DIA fragment XIC: sum mz ± tolDa over the MS2 spectra whose isolation window contains
   // `precursorMz` (one transition per request; the view overlays several).
