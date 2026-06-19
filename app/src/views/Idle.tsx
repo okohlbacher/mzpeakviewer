@@ -143,7 +143,7 @@ export function Idle() {
   }
 
   return (
-    <div data-testid="idle-view" style={{ width: "100%", overflowY: "auto", display: "flex", justifyContent: "center" }}>
+    <div data-testid="idle-view" style={{ position: "relative", width: "100%", overflowY: "auto", display: "flex", justifyContent: "center" }}>
       <div style={{ maxWidth: 720, width: "100%", padding: "6vh 1.5rem 3rem", textAlign: "center" }}>
         {/* OpenMS + mzPeak logos: two equal-width columns (same horizontal extent),
             each logo centered + scaled to a shared max width, split by a hairline rule.
@@ -302,6 +302,27 @@ export function Idle() {
           </>
         )}
       </div>
+
+      {/* Build/version chip — glanceable in the start-page corner (the same info the
+          ⓘ About popover shows). Links to the releases page. */}
+      <a
+        href="https://github.com/okohlbacher/mzpeakviewer/releases"
+        target="_blank"
+        rel="noopener noreferrer"
+        data-testid="idle-version"
+        title={`mzPeakViewer ${__APP_VERSION__} · ${__BUILD_SHA__} · built ${__BUILD_DATE__}`}
+        style={{
+          position: "absolute",
+          right: "0.85rem",
+          bottom: "0.6rem",
+          fontFamily: "var(--font-mono, monospace)",
+          fontSize: "var(--text-xs, 0.7rem)",
+          color: "var(--text-muted, #94a3b8)",
+          textDecoration: "none",
+        }}
+      >
+        v{__APP_VERSION__} · {__BUILD_SHA__}
+      </a>
     </div>
   );
 }
