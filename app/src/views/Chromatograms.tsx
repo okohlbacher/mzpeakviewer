@@ -44,7 +44,8 @@ export function Chromatograms() {
   const [xicRtMin, setXicRtMin] = useState("");
   const [xicRtMax, setXicRtMax] = useState("");
 
-  // DIA fragment extractor — view-local + overlaid.
+  // DIA fragment extractor — view-local + overlaid. `diaOpen` shows the form below the toolbar.
+  const [diaOpen, setDiaOpen] = useState(false);
   const [diaPrecursor, setDiaPrecursor] = useState("");
   const [diaFragments, setDiaFragments] = useState("");
   const [diaTol, setDiaTol] = useState("0.02");
@@ -145,36 +146,41 @@ export function Chromatograms() {
           {!xicRtValid && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-danger, #dc2626)" }}>RT: both min &lt; max, or both blank.</span>}
         </span>
 
+        {/* Third generator, inline next to TIC / XIC — toggles the DIA form below. */}
+        <Button variant="secondary" size="sm" onClick={() => setDiaOpen((o) => !o)} aria-expanded={diaOpen} data-testid="dia-toggle-btn"
+          title="Extract DIA fragment chromatograms over a precursor isolation window">+ add DIA {diaOpen ? "▾" : "▸"}</Button>
+
         {generatedCount > 0 && (
           <Button variant="ghost" size="sm" onClick={clearGeneratedChroms} data-testid="chrom-clear-generated">Clear generated ({generatedCount})</Button>
         )}
       </div>
 
-      {/* DIA fragment extractor — third generator alongside TIC / XIC, collapsed by default. */}
-      <details data-testid="dia-extractor">
-        <summary style={{ cursor: "pointer", fontSize: "0.9rem", fontWeight: 600, userSelect: "none" }}>DIA fragment extractor</summary>
-        <p style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", margin: "0.4rem 0" }}>
-          Enter a precursor m/z (selects the DIA isolation window) and one or more fragment m/z values; each is extracted over that window&apos;s MS2 spectra and overlaid by retention time.
-        </p>
-        <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-end", flexWrap: "wrap", marginBottom: "0.5rem" }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>Precursor m/z
-            <input data-testid="dia-precursor-input" type="number" step="any" placeholder="620.83" value={diaPrecursor} onChange={(e) => setDiaPrecursor(e.target.value)} style={xicInputStyle(7)} /></label>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)", flex: "1 1 16rem", minWidth: "12rem" }}>Fragment m/z (comma / space separated)
-            <input data-testid="dia-fragments-input" type="text" placeholder="545.30, 802.45, 917.48" value={diaFragments} onChange={(e) => setDiaFragments(e.target.value)} style={{ ...xicInputStyle(7), width: "100%", fontFamily: "var(--font-mono)" }} /></label>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>± Da
-            <input data-testid="dia-tol-input" type="number" step="any" value={diaTol} onChange={(e) => setDiaTol(e.target.value)} style={xicInputStyle(4.5)} /></label>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>RT center (s, optional)
-            <input data-testid="dia-rt-input" type="number" step="any" placeholder="full run" value={diaRtCenter} onChange={(e) => setDiaRtCenter(e.target.value)} style={xicInputStyle(6)} /></label>
-          <Button variant="secondary" size="sm" onClick={() => void extractDia()} disabled={!diaValid || diaBusy} data-testid="dia-extract-btn">{diaBusy ? "Extracting…" : "Extract fragments"}</Button>
-        </div>
-        {diaNote && <p data-testid="dia-note" style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", margin: "0.25rem 0" }}>{diaNote}</p>}
-        {diaTraces && diaTraces.some((t) => t.points.length > 0) && (
-          <div data-testid="dia-plot-host">
-            <MultiChromPlot traces={diaTraces} />
-            <p style={{ margin: "0.25rem 0 0", fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{diaTraces.length} transition{diaTraces.length === 1 ? "" : "s"} · scroll to zoom · double-click to reset</p>
+      {/* DIA fragment extractor form — shown below the toolbar when "+ add DIA" is toggled on. */}
+      {diaOpen && (
+        <div data-testid="dia-extractor">
+          <p style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", margin: "0 0 0.4rem" }}>
+            Enter a precursor m/z (selects the DIA isolation window) and one or more fragment m/z values; each is extracted over that window&apos;s MS2 spectra and overlaid by retention time.
+          </p>
+          <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-end", flexWrap: "wrap", marginBottom: "0.5rem" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>Precursor m/z
+              <input data-testid="dia-precursor-input" type="number" step="any" placeholder="620.83" value={diaPrecursor} onChange={(e) => setDiaPrecursor(e.target.value)} style={xicInputStyle(7)} /></label>
+            <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)", flex: "1 1 16rem", minWidth: "12rem" }}>Fragment m/z (comma / space separated)
+              <input data-testid="dia-fragments-input" type="text" placeholder="545.30, 802.45, 917.48" value={diaFragments} onChange={(e) => setDiaFragments(e.target.value)} style={{ ...xicInputStyle(7), width: "100%", fontFamily: "var(--font-mono)" }} /></label>
+            <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>± Da
+              <input data-testid="dia-tol-input" type="number" step="any" value={diaTol} onChange={(e) => setDiaTol(e.target.value)} style={xicInputStyle(4.5)} /></label>
+            <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>RT center (s, optional)
+              <input data-testid="dia-rt-input" type="number" step="any" placeholder="full run" value={diaRtCenter} onChange={(e) => setDiaRtCenter(e.target.value)} style={xicInputStyle(6)} /></label>
+            <Button variant="secondary" size="sm" onClick={() => void extractDia()} disabled={!diaValid || diaBusy} data-testid="dia-extract-btn">{diaBusy ? "Extracting…" : "Extract fragments"}</Button>
           </div>
-        )}
-      </details>
+          {diaNote && <p data-testid="dia-note" style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", margin: "0.25rem 0" }}>{diaNote}</p>}
+          {diaTraces && diaTraces.some((t) => t.points.length > 0) && (
+            <div data-testid="dia-plot-host">
+              <MultiChromPlot traces={diaTraces} />
+              <p style={{ margin: "0.25rem 0 0", fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{diaTraces.length} transition{diaTraces.length === 1 ? "" : "s"} · scroll to zoom · double-click to reset</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Stored chromatograms catalog — "+ Add" to plot, click a row for metadata. */}
       {list && list.length > 0 && (
