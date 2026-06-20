@@ -57,8 +57,10 @@ export function ChromPlot({
         width,
         height,
         scales: { x: { time: false, range: xRange } },
-        // Left-drag stays a click (navigate); zoom via wheel, pan via middle-drag.
-        cursor: { y: false, drag: { x: false, y: false } },
+        // Match SpectrumPlot zoom: left-drag box-zooms x, double-click resets (uPlot
+        // built-ins), wheel zooms + middle-drag pans (plugin). A left-drag also ends in a
+        // click, so the click→navigate handler below ignores clicks that moved (>4px).
+        cursor: { y: false, drag: { x: true, y: false } },
         legend: { show: false },
         plugins: [wheelZoomPlugin({ factor: 0.8 })],
         series: [
@@ -67,7 +69,7 @@ export function ChromPlot({
             label: "intensity",
             stroke: STAGE.line,
             width: 1.25,
-            points: { show: true, size: 4, stroke: STAGE.line, fill: STAGE.pointFill },
+            points: { show: false },
           },
         ],
         axes: stageAxes("retention time (s)", "intensity"),
@@ -76,7 +78,12 @@ export function ChromPlot({
           ready: [
             (u) => {
               u.over.style.cursor = "crosshair";
-              u.over.addEventListener("click", () => {
+              // Distinguish a navigate-click from a box-zoom drag (which also fires a click):
+              // ignore clicks that moved more than a few px from the press (mirrors SpectrumPlot).
+              let downX = 0, downY = 0;
+              u.over.addEventListener("mousedown", (e) => { downX = e.clientX; downY = e.clientY; });
+              u.over.addEventListener("click", (e) => {
+                if (Math.abs(e.clientX - downX) > 4 || Math.abs(e.clientY - downY) > 4) return;
                 const left = u.cursor.left;
                 if (left == null || left < 0) return;
                 const t = u.posToVal(left, "x");
