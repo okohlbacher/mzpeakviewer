@@ -34,11 +34,15 @@ function toData(points: ChromPoint[]): uPlot.AlignedData {
 export function ChromPlot({
   points,
   onPick,
+  onNavigate,
   selectedTime,
   height = HEIGHT,
 }: {
   points: ChromPoint[];
+  /** Left-click a point: select the nearest spectrum (typically without leaving the view). */
   onPick: (time: number) => void;
+  /** Right-click a point: navigate to the corresponding spectrum. preventDefault is handled here. */
+  onNavigate?: (time: number) => void;
   selectedTime: number | null;
   /** Plot height in px (the managed Chromatograms cards resize this). @default 200 */
   height?: number;
@@ -47,6 +51,8 @@ export function ChromPlot({
   selRef.current = selectedTime;
   const onPickRef = useRef(onPick);
   onPickRef.current = onPick;
+  const onNavRef = useRef(onNavigate);
+  onNavRef.current = onNavigate;
 
   const hostRef = useUplot(
     (el, width) => {
@@ -87,6 +93,15 @@ export function ChromPlot({
                 if (left == null || left < 0) return;
                 const t = u.posToVal(left, "x");
                 if (Number.isFinite(t)) onPickRef.current(t);
+              });
+              // Right-click a point → navigate to the corresponding spectrum. Resolve from the
+              // click position (offsetX), not cursor.left, so a right-click without a prior
+              // mousemove still lands correctly.
+              u.over.addEventListener("contextmenu", (e) => {
+                if (!onNavRef.current) return;
+                e.preventDefault();
+                const t = u.posToVal((e as MouseEvent).offsetX, "x");
+                if (Number.isFinite(t)) onNavRef.current(t);
               });
             },
           ],

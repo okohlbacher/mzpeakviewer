@@ -201,8 +201,12 @@
   <p>The <strong>Chromatograms</strong> tab is a managed list of chromatogram <strong>cards</strong>,
   each plotting intensity over retention time. Every card zooms independently — drag-select a
   region, scroll to zoom, middle-drag to pan, double-click to reset — and has a bottom handle to
-  drag its height. Click a card to jump to the spectrum at the nearest retention time (restricted
-  to the trace's MS level).</p>
+  drag its height. <strong>Collapse</strong> a card with the <span aria-hidden>▾</span> chevron,
+  and <strong>reorder</strong> the list by dragging a card's <span aria-hidden>⠿</span> grip.</p>
+  <p><strong>Left-click</strong> a point to mark the spectrum at the nearest retention time (a
+  vertical marker shows it); <strong>right-click</strong> a point to open that spectrum in the
+  Spectra view. Both pick the right scan for the trace — MS1 for a TIC, the XIC's own MS level —
+  so a click never lands on an interleaved scan of the wrong level.</p>
   <p>Three ways to add a card:</p>
   <ul>
     <li><strong>Stored chromatograms</strong> — the file's own chromatograms (SRM/MRM transitions,

@@ -95,6 +95,7 @@ export function Chromatograms() {
   const typeLabel = (acc: string | null) => (acc ? (cvName(cv, acc) ?? acc) : "—");
   const selectedMeta = list?.find((c) => c.id === metaId) ?? null;
   const generatedCount = chromList.filter((it) => it.source === "generated").length;
+  const hasTic = chromList.some((it) => it.req.mode === "tic"); // gray out "+ add TIC" once one exists
 
   // DIA
   const diaPrecursorNum = Number(diaPrecursor);
@@ -123,7 +124,8 @@ export function Chromatograms() {
     <div data-testid="chromatograms-view" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
       {/* Toolbar: add generated traces */}
       <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
-        <Button variant="secondary" size="sm" onClick={() => addTic()} data-testid="tic-btn">+ add TIC</Button>
+        <Button variant="secondary" size="sm" onClick={() => addTic()} disabled={hasTic} data-testid="tic-btn"
+          title={hasTic ? "A TIC is already in the list" : "Add the total-ion chromatogram"}>+ add TIC</Button>
 
         <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
           title="Add an extracted-ion chromatogram: intensity summed over m/z ± tolerance across the run, vs retention time.">
@@ -147,6 +149,32 @@ export function Chromatograms() {
           <Button variant="ghost" size="sm" onClick={clearGeneratedChroms} data-testid="chrom-clear-generated">Clear generated ({generatedCount})</Button>
         )}
       </div>
+
+      {/* DIA fragment extractor — third generator alongside TIC / XIC, collapsed by default. */}
+      <details data-testid="dia-extractor">
+        <summary style={{ cursor: "pointer", fontSize: "0.9rem", fontWeight: 600, userSelect: "none" }}>DIA fragment extractor</summary>
+        <p style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", margin: "0.4rem 0" }}>
+          Enter a precursor m/z (selects the DIA isolation window) and one or more fragment m/z values; each is extracted over that window&apos;s MS2 spectra and overlaid by retention time.
+        </p>
+        <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-end", flexWrap: "wrap", marginBottom: "0.5rem" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>Precursor m/z
+            <input data-testid="dia-precursor-input" type="number" step="any" placeholder="620.83" value={diaPrecursor} onChange={(e) => setDiaPrecursor(e.target.value)} style={xicInputStyle(7)} /></label>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)", flex: "1 1 16rem", minWidth: "12rem" }}>Fragment m/z (comma / space separated)
+            <input data-testid="dia-fragments-input" type="text" placeholder="545.30, 802.45, 917.48" value={diaFragments} onChange={(e) => setDiaFragments(e.target.value)} style={{ ...xicInputStyle(7), width: "100%", fontFamily: "var(--font-mono)" }} /></label>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>± Da
+            <input data-testid="dia-tol-input" type="number" step="any" value={diaTol} onChange={(e) => setDiaTol(e.target.value)} style={xicInputStyle(4.5)} /></label>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>RT center (s, optional)
+            <input data-testid="dia-rt-input" type="number" step="any" placeholder="full run" value={diaRtCenter} onChange={(e) => setDiaRtCenter(e.target.value)} style={xicInputStyle(6)} /></label>
+          <Button variant="secondary" size="sm" onClick={() => void extractDia()} disabled={!diaValid || diaBusy} data-testid="dia-extract-btn">{diaBusy ? "Extracting…" : "Extract fragments"}</Button>
+        </div>
+        {diaNote && <p data-testid="dia-note" style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", margin: "0.25rem 0" }}>{diaNote}</p>}
+        {diaTraces && diaTraces.some((t) => t.points.length > 0) && (
+          <div data-testid="dia-plot-host">
+            <MultiChromPlot traces={diaTraces} />
+            <p style={{ margin: "0.25rem 0 0", fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{diaTraces.length} transition{diaTraces.length === 1 ? "" : "s"} · scroll to zoom · double-click to reset</p>
+          </div>
+        )}
+      </details>
 
       {/* Stored chromatograms catalog — "+ Add" to plot, click a row for metadata. */}
       {list && list.length > 0 && (
@@ -215,48 +243,32 @@ export function Chromatograms() {
           No chromatograms yet — add a TIC or XIC, or pick a stored one.
         </p>
       ) : (
-        <div data-testid="chrom-card-list" style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-          {chromList.map((item) => <ChromCard key={item.itemId} item={item} />)}
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+          <p style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", margin: 0 }}>
+            Click a point to mark its spectrum · right-click to open it · drag <span aria-hidden>⠿</span> to reorder · ▾ to collapse.
+          </p>
+          <div data-testid="chrom-card-list" style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+            {chromList.map((item) => <ChromCard key={item.itemId} item={item} />)}
+          </div>
         </div>
       )}
-
-      {/* ── DIA fragment extractor ────────────────────────────────────────────── */}
-      <details data-testid="dia-extractor" style={{ marginTop: "0.4rem", borderTop: "1px solid var(--border-hairline, #eee)", paddingTop: "0.6rem" }}>
-        <summary style={{ cursor: "pointer", fontSize: "0.9rem", fontWeight: 600, userSelect: "none" }}>DIA fragment extractor</summary>
-        <p style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", margin: "0.4rem 0" }}>
-          Enter a precursor m/z (selects the DIA isolation window) and one or more fragment m/z values; each is extracted over that window&apos;s MS2 spectra and overlaid by retention time.
-        </p>
-        <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-end", flexWrap: "wrap", marginBottom: "0.5rem" }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>Precursor m/z
-            <input data-testid="dia-precursor-input" type="number" step="any" placeholder="620.83" value={diaPrecursor} onChange={(e) => setDiaPrecursor(e.target.value)} style={xicInputStyle(7)} /></label>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)", flex: "1 1 16rem", minWidth: "12rem" }}>Fragment m/z (comma / space separated)
-            <input data-testid="dia-fragments-input" type="text" placeholder="545.30, 802.45, 917.48" value={diaFragments} onChange={(e) => setDiaFragments(e.target.value)} style={{ ...xicInputStyle(7), width: "100%", fontFamily: "var(--font-mono)" }} /></label>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>± Da
-            <input data-testid="dia-tol-input" type="number" step="any" value={diaTol} onChange={(e) => setDiaTol(e.target.value)} style={xicInputStyle(4.5)} /></label>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>RT center (s, optional)
-            <input data-testid="dia-rt-input" type="number" step="any" placeholder="full run" value={diaRtCenter} onChange={(e) => setDiaRtCenter(e.target.value)} style={xicInputStyle(6)} /></label>
-          <Button variant="secondary" size="sm" onClick={() => void extractDia()} disabled={!diaValid || diaBusy} data-testid="dia-extract-btn">{diaBusy ? "Extracting…" : "Extract fragments"}</Button>
-        </div>
-        {diaNote && <p data-testid="dia-note" style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", margin: "0.25rem 0" }}>{diaNote}</p>}
-        {diaTraces && diaTraces.some((t) => t.points.length > 0) && (
-          <div data-testid="dia-plot-host">
-            <MultiChromPlot traces={diaTraces} />
-            <p style={{ margin: "0.25rem 0 0", fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{diaTraces.length} transition{diaTraces.length === 1 ? "" : "s"} · scroll to zoom · double-click to reset</p>
-          </div>
-        )}
-      </details>
     </div>
   );
 }
 
-/** One chromatogram card: header (label · points · remove) + ChromPlot + drag-resize handle.
- *  Stored traces don't RT-click-select (no reliable scan mapping); generated TIC/XIC do. */
+/** One chromatogram card: a header (drag-grip · collapse · label · points · remove), then the
+ *  ChromPlot + drag-resize handle when expanded. Cards are collapsible and drag-reorderable.
+ *  Left-click a point selects the nearest spectrum (stays here); right-click navigates to it.
+ *  Stored traces have no reliable scan mapping, so they don't RT-click-select; generated do. */
 function ChromCard({ item }: { item: ChromItem }) {
   const removeChrom = useStore((s) => s.removeChrom);
   const setChromHeight = useStore((s) => s.setChromHeight);
+  const toggleChromCollapsed = useStore((s) => s.toggleChromCollapsed);
+  const moveChrom = useStore((s) => s.moveChrom);
   const selectSpectrum = useStore((s) => s.selectSpectrum);
   const browse = useStore((s) => s.browse);
   const selector = useStore((s) => s.selector);
+  const [dragOver, setDragOver] = useState(false);
 
   // Memoize by series so a selection / settings / sibling-resize re-render doesn't rebuild
   // this plot (and lose its zoom) — only a new series rebuilds it.
@@ -269,10 +281,11 @@ function ChromCard({ item }: { item: ChromItem }) {
     item.req.mode === "xic" ? item.req.msLevel
     : item.req.mode === "tic" && browse?.msLevel.some((l) => l === 1) ? 1
     : undefined;
-  function pickNearestSpectrum(time: number) {
+  // route=false: left-click marks the spectrum but stays here; route=true (right-click) navigates.
+  function pickNearestSpectrum(time: number, navigate: boolean) {
     if (!browse || item.source === "stored") return;
     const best = nearestSpectrumByTime(browse, time, pickLevel ?? undefined);
-    if (best >= 0) void selectSpectrum(best);
+    if (best >= 0) void selectSpectrum(best, navigate);
   }
   // Only mark the selected spectrum on this trace if it belongs to the trace's level — a
   // marker for a scan not summed into this card would be misleading.
@@ -282,9 +295,38 @@ function ChromCard({ item }: { item: ChromItem }) {
     selectedTime = rt != null && Number.isFinite(rt) ? rt : null;
   }
 
+  function onDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragOver(false);
+    const draggedId = e.dataTransfer.getData("text/plain");
+    if (draggedId) moveChrom(draggedId, item.itemId);
+  }
+
   return (
-    <div data-testid={`chrom-card-${item.itemId}`} style={{ border: "1px solid var(--border-default, #e2e8f0)", borderRadius: 8, background: "var(--surface-card, #fff)", padding: "0.5rem 0.6rem" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.35rem" }}>
+    <div
+      data-testid={`chrom-card-${item.itemId}`}
+      onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+      style={{ border: `1px solid ${dragOver ? "var(--blue-600, #3b54da)" : "var(--border-default, #e2e8f0)"}`, borderRadius: 8, background: "var(--surface-card, #fff)", padding: "0.5rem 0.6rem" }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: item.collapsed ? 0 : "0.35rem" }}>
+        <span
+          draggable
+          data-testid={`chrom-drag-${item.itemId}`}
+          onDragStart={(e) => { e.dataTransfer.setData("text/plain", item.itemId); e.dataTransfer.effectAllowed = "move"; }}
+          title="Drag to reorder"
+          aria-label="Drag to reorder"
+          style={{ cursor: "grab", color: "var(--text-faint, #94a3b8)", fontSize: "0.9rem", lineHeight: 1, userSelect: "none", flexShrink: 0 }}
+        >⠿</span>
+        <button
+          type="button"
+          data-testid={`chrom-collapse-${item.itemId}`}
+          onClick={() => toggleChromCollapsed(item.itemId)}
+          aria-expanded={!item.collapsed}
+          aria-label={item.collapsed ? "Expand chromatogram" : "Collapse chromatogram"}
+          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--text-muted, #64748b)", fontSize: "0.7rem", lineHeight: 1, width: "1rem", flexShrink: 0 }}
+        >{item.collapsed ? "▸" : "▾"}</button>
         <span style={{ width: 8, height: 8, borderRadius: 2, flexShrink: 0, background: item.source === "stored" ? "var(--text-muted, #94a3b8)" : "var(--blue-600, #3b54da)" }} aria-hidden />
         <strong style={{ fontSize: "var(--text-sm)", color: "var(--text-heading, #1e293b)" }}>{item.label}</strong>
         <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
@@ -292,14 +334,16 @@ function ChromCard({ item }: { item: ChromItem }) {
         </span>
         <Button variant="ghost" size="sm" data-testid={`chrom-remove-${item.itemId}`} onClick={() => removeChrom(item.itemId)} aria-label="Remove chromatogram" style={{ marginLeft: "auto" }}>×</Button>
       </div>
-      {points.length > 0 ? (
-        <div data-testid="chrom-plot-host">
-          <ChromPlot points={points} height={item.height} onPick={pickNearestSpectrum} selectedTime={selectedTime} />
-        </div>
+      {!item.collapsed && (points.length > 0 ? (
+        <>
+          <div data-testid="chrom-plot-host">
+            <ChromPlot points={points} height={item.height} onPick={(t) => pickNearestSpectrum(t, false)} onNavigate={(t) => pickNearestSpectrum(t, true)} selectedTime={selectedTime} />
+          </div>
+          <ResizeHandle height={item.height} onResize={(h) => setChromHeight(item.itemId, h)} />
+        </>
       ) : (
         !item.loading && <p style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", margin: "0.25rem 0" }}>{item.error ? "Could not load this chromatogram." : "No data points."}</p>
-      )}
-      <ResizeHandle height={item.height} onResize={(h) => setChromHeight(item.itemId, h)} />
+      ))}
     </div>
   );
 }

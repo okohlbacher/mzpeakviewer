@@ -85,6 +85,8 @@ export type ChromItem = {
   error: string | null;
   /** Plot height in px (resize); clamped [CHROM_MIN_H, CHROM_MAX_H]. */
   height: number;
+  /** Card collapsed (plot hidden, header only). */
+  collapsed: boolean;
   /** Per-item monotonic load token — guards concurrent (re)extraction. */
   loadSeq: number;
 };
@@ -260,6 +262,10 @@ export interface AppState {
   removeChrom: (itemId: string) => void;
   /** Resize a card's plot height (clamped). */
   setChromHeight: (itemId: string, height: number) => void;
+  /** Collapse/expand a card (toggles its plot visibility). */
+  toggleChromCollapsed: (itemId: string) => void;
+  /** Reorder the list: move `draggedId` to `targetId`'s position (drag-and-drop). */
+  moveChrom: (draggedId: string, targetId: string) => void;
   /** Remove all generated (non-stored) items. */
   clearGeneratedChroms: () => void;
   /** Load a wavelength spectrum by ZERO-BASED ARRAY POSITION. Lazily loads the wavelength
@@ -485,7 +491,7 @@ function startChromItem(
   }
   const itemId = fixedId ?? `c${++chromItemCounter}`;
   const loadSeq = ++chromLoadToken;
-  const item: ChromItem = { itemId, source, req, label, series: null, loading: true, error: null, height: CHROM_DEFAULT_H, loadSeq };
+  const item: ChromItem = { itemId, source, req, label, series: null, loading: true, error: null, height: CHROM_DEFAULT_H, collapsed: false, loadSeq };
   // New active item has no series yet → activeMirror nulls chrom/chromReq so the Share link
   // doesn't keep serializing the previously-active trace while this one loads.
   set((s) => { const chromList = [...s.chromList, item]; return { chromList, activeChromId: itemId, ...activeMirror(chromList, itemId) }; });
@@ -835,6 +841,22 @@ export const useStore = create<AppState>((set, get) => ({
       const it = s.chromList.find((x) => x.itemId === itemId);
       if (!it || it.height === h) return {}; // no-op: clamped at a bound, unchanged
       return { chromList: s.chromList.map((x) => (x.itemId === itemId ? { ...x, height: h } : x)) };
+    });
+  },
+
+  toggleChromCollapsed: (itemId) => {
+    set((s) => ({ chromList: s.chromList.map((x) => (x.itemId === itemId ? { ...x, collapsed: !x.collapsed } : x)) }));
+  },
+
+  moveChrom: (draggedId, targetId) => {
+    if (draggedId === targetId) return;
+    set((s) => {
+      const moved = s.chromList.find((x) => x.itemId === draggedId);
+      const next = s.chromList.filter((x) => x.itemId !== draggedId);
+      const to = next.findIndex((x) => x.itemId === targetId);
+      if (!moved || to < 0) return {};
+      next.splice(to, 0, moved); // insert before the target, regardless of drag direction
+      return { chromList: next }; // activeMirror is id-based, so reorder doesn't change the active trace
     });
   },
 
