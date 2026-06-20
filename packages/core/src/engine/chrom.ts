@@ -1,20 +1,16 @@
 // Engine: chromatogram extraction (TIC / XIC / XIC-range / stored). Dispatches on the
-// wire ChromRequest mode, drives the harvested Explorer read paths (extractChromatogram
-// for tic/xic, getStoredChromatogram for stored), unpacks the result into parallel
-// time/intensity sequences, and repacks via the pure adapt/chrom.ts adapter.
-//
-// Reader I/O harvested from mzPeakExplorer (src/reader/explorer/browse.ts). The wire
+// wire ChromRequest mode, drives the reader read paths (extractChromatogram for
+// tic/xic, getStoredChromatogram for stored), unpacks the result into parallel
+// time/intensity sequences, and repacks via the pure adapt/chrom.ts adapter. The wire
 // shaping is the pure adaptChromatogram adapter — this only chooses the read path and
 // flattens the point array.
 //
-// Source choice + TIC semantics mirror the two read-only references:
-//   - mzPeakExplorer/src/state/store.ts (runXic :475 useProfile, showTic/buildTic :507/:888)
-//   - mzPeakIV/src/worker/mzPeakWorker.ts (:1458 majority-source pick `profile >= centroid`)
-// Adversarial-review fixes:
-//   F1 — never hard-code `useProfile: true`; pick profile vs peaks by the MAJORITY
-//        representation so a centroid-only file reads spectra_peaks, not spectra_data.
-//   F2 — `tic` mode prefers the per-spectrum (promoted) TIC from the scan rows, is
-//        MS1-only, and only falls back to a whole-file extractXIC (also MS1-filtered).
+// Source choice + TIC semantics:
+//   - Never hard-code `useProfile: true`; pick profile vs peaks by the MAJORITY
+//     representation (`profile >= centroid`) so a centroid-only file reads
+//     spectra_peaks, not spectra_data.
+//   - `tic` mode prefers the per-spectrum (promoted) TIC from the scan rows, is
+//     MS1-only, and only falls back to a whole-file extractXIC (also MS1-filtered).
 import type { ChromRequest } from "@mzpeak/contracts";
 import type { ChromatogramSeries, ChromatogramInfo } from "@mzpeak/contracts";
 import { adaptChromatogram, type ChromInput } from "../adapt/chrom";
@@ -34,7 +30,7 @@ import { engineDiaXic } from "./dia";
  * the TIC path build straight from the promoted per-spectrum TIC column (no signal
  * I/O) and lets the source pick honor the file's actual representation mix without a
  * re-scan. All fields are optional so a caller without a cached scan still works
- * (the chrom path then reads conservatively as profile, matching Explorer's default).
+ * (the chrom path then reads conservatively as profile by default).
  */
 export type ChromContext = {
   /** Per-spectrum scan rows (index/msLevel/time/tic/representation). */
@@ -43,8 +39,7 @@ export type ChromContext = {
   representationCounts?: { profile: number; centroid: number; unknown?: number };
 };
 
-/** Spectra past this count are too expensive to sum in the browser for a TIC fallback
- *  (mirrors Explorer's AUTO_SCAN_LIMIT guard in buildTic). */
+/** Spectra past this count are too expensive to sum in the browser for a TIC fallback. */
 const AUTO_SCAN_LIMIT = 50_000;
 
 // CV accessions for the chromatogram summary fields (promoted columns).
@@ -147,10 +142,10 @@ function unpackPoints(points: ChromPoint[]): { time: number[]; intensity: number
 }
 
 /**
- * F1 — choose the signal source (profile → spectra_data, peaks → spectra_peaks) by the
- * MAJORITY representation, exactly as IV's render path does (mzPeakWorker.ts:1458
- * `useProfile = profile >= centroid`). With no counts available default to profile —
- * the conservative Explorer default — rather than silently mis-routing a centroid file.
+ * Choose the signal source (profile → spectra_data, peaks → spectra_peaks) by the
+ * MAJORITY representation (`useProfile = profile >= centroid`). With no counts
+ * available default to profile — the conservative choice — rather than silently
+ * mis-routing a centroid file.
  */
 function pickUseProfile(ctx?: ChromContext): boolean {
   const counts = ctx?.representationCounts;
@@ -161,7 +156,7 @@ function pickUseProfile(ctx?: ChromContext): boolean {
 /** Source pick for an MS-level-limited XIC: a mixed file (e.g. profile MS1 + centroid MS2)
  *  must read the representation of the REQUESTED level, not the whole-file majority — else
  *  a centroid-MS2 XIC reads spectra_data because the file is profile-majority and comes back
- *  empty/wrong (codex review). Falls back to the file majority when the level has no
+ *  empty/wrong. Falls back to the file majority when the level has no
  *  representation info. */
 export function pickUseProfileForLevel(ctx: ChromContext | undefined, msLevel: number | null): boolean {
   const rows = ctx?.rows;
@@ -176,17 +171,17 @@ export function pickUseProfileForLevel(ctx: ChromContext | undefined, msLevel: n
   return profile >= centroid;
 }
 
-/** MS1 rows if any carry msLevel 1, else all rows (mirrors Explorer's `ticRows`). */
+/** MS1 rows if any carry msLevel 1, else all rows. */
 function ticRows(rows: readonly SpectrumIndexRow[]): SpectrumIndexRow[] {
   const ms1 = rows.filter((r) => r.msLevel === 1);
   return ms1.length > 0 ? ms1 : [...rows];
 }
 
 /**
- * F2 (cheap path) — build the TIC from the promoted per-spectrum TIC column already in
- * the scan rows (MS:1000285), MS1-only, no signal I/O. Mirrors Explorer's `cheapTic`:
- * returns null when ANY contributing row lacks a finite TIC (a real TIC would then need
- * a whole-file read). Optional `timeRange` is a post-filter (the column is metadata).
+ * Cheap path — build the TIC from the promoted per-spectrum TIC column already in
+ * the scan rows (MS:1000285), MS1-only, no signal I/O. Returns null when ANY
+ * contributing row lacks a finite TIC (a real TIC would then need a whole-file read).
+ * Optional `timeRange` is a post-filter (the column is metadata).
  */
 function cheapTic(
   rows: readonly SpectrumIndexRow[],
@@ -208,11 +203,11 @@ function cheapTic(
 }
 
 /**
- * F2 (full path) — TIC for `tic` mode. Prefer the cheap promoted-TIC column from the
+ * Full path — TIC for `tic` mode. Prefer the cheap promoted-TIC column from the
  * scan rows; only fall back to a whole-file `extractXIC(null,null)` (then MS1-filtered)
- * when no promoted TIC exists, and refuse that fallback past AUTO_SCAN_LIMIT spectra
- * (mirrors Explorer's `buildTic`). The fallback's source is the majority representation
- * (F1). Returns null when the fallback is refused (caller surfaces the size guard).
+ * when no promoted TIC exists, and refuse that fallback past AUTO_SCAN_LIMIT spectra.
+ * The fallback's source is the majority representation. Returns null when the fallback
+ * is refused (caller surfaces the size guard).
  */
 async function buildTic(
   reader: Reader,

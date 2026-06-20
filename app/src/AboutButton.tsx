@@ -1,4 +1,4 @@
-// "About" button + popover (MG-09). Surfaces the running build's provenance —
+// "About" button + popover. Surfaces the running build's provenance —
 // app version, short git SHA, build date, and platform (web vs desktop) — so a
 // user can tell which build they're on at a glance (stale-deploy confusion).
 //

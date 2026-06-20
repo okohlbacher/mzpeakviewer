@@ -1,20 +1,17 @@
-// histogram.ts — BL-07: histogram equalization for Float32Array ion images.
+// histogram.ts — histogram equalization for Float32Array ion images.
 //
 // Pure compute module: no external dependencies, no side effects, no mutations of
 // the input array. Equalization operates over present pixels only (presenceMask[k]
 // === 1); absent pixels are always 0 in the output.
 //
-// Ported verbatim from mzPeakIV (src/compute/histogram.ts) for the unified viewer
-// (MG-04c). Operates on plain Float32Array + a presence mask; no app/engine
-// dependencies. Index guards added for the app's strict TS config
-// (noUncheckedIndexedAccess) — the algorithm is unchanged.
+// Operates on plain Float32Array + a presence mask; no app/engine dependencies.
 
 /**
  * Controls which intensity remapping mode is applied to an ion image.
  *
  * A "clahe" mode was previously exposed but only ever delegated to global
  * `"equalize"` — a control that silently did something other than its label.
- * It has been removed until real tile-based CLAHE is implemented (Review F9).
+ * It has been removed until real tile-based CLAHE is implemented.
  */
 export type HistogramMode = "none" | "equalize";
 
@@ -39,7 +36,7 @@ export type HistogramMode = "none" | "equalize";
  *
  *   (A future "clahe" / Contrast-Limited Adaptive Histogram Equalization mode
  *   would belong here once implemented for real; it is intentionally NOT exposed
- *   while unimplemented — see Review F9.)
+ *   while unimplemented.)
  *
  * ### Invariants
  * - Output maximum over present pixels equals input maximum over present pixels.

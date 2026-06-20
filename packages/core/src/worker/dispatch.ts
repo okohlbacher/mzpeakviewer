@@ -4,8 +4,8 @@
 // worker entry (engine.worker.ts) is a thin self.* wrapper that also SERIALIZES
 // dispatches (the WASM reader is single-threaded).
 //
-// Single open file per session. A load GENERATION guards open/close races (review
-// CRITICAL): open bumps the gen + clears active immediately, and only commits its
+// Single open file per session. A load GENERATION guards open/close races: open bumps
+// the gen + clears active immediately, and only commits its
 // result if the gen is still current — a slow older open can't clobber a newer one.
 // Cancellation is the stale-drop model (the client suppresses stale results by
 // requestId/selectId); `cancel` is acknowledged.
@@ -41,7 +41,7 @@ export type EngineContext = {
   /** ONE memory-sized byte budget shared by the ion cache + the spectrum LRU. */
   budget: CacheBudget;
   /** LRU of decoded per-spectrum (m/z, intensity, msLevel) — accelerates repeat
-   *  selectSpectrum + (Stage 2) the background prefetch. Shares `budget`. */
+   *  selectSpectrum + the background prefetch. Shares `budget`. */
   spectrumCache: SpectrumLruCache;
   /** LRU of decoded UV/VIS wavelength spectra (full wire object) — accelerates repeat
    *  selectWavelengthSpectrum. SEPARATE from spectrumCache; shares `budget`. */
@@ -65,8 +65,8 @@ export type EngineContext = {
   preloadEnabled: boolean;
   /** True when the open file was a remote URL (HTTP range reads). Background prefetch is
    *  SUPPRESSED for remote files: eagerly streaming the whole spectra_data/peaks saturates
-   *  the one connection and starves the foreground open/scan/navigation (mzPeakExplorer's
-   *  documented lesson). Local files prefetch freely (decode-only, no bandwidth contention). */
+   *  the one connection and starves the foreground open/scan/navigation. Local files
+   *  prefetch freely (decode-only, no bandwidth contention). */
   remote: boolean;
 };
 
@@ -90,7 +90,7 @@ export function createContext(): EngineContext {
 }
 
 // ---------------------------------------------------------------------------
-// Adaptive prefetch cooldown (MG-03a)
+// Adaptive prefetch cooldown
 //
 // The cooldown is the back-off window after user activity before the background
 // prefetch resumes a read. A fixed value is a guess: too short and the prefetch
@@ -101,7 +101,7 @@ export function createContext(): EngineContext {
 // ---------------------------------------------------------------------------
 
 /** Fallback / default cooldown when we don't yet have enough latency samples to be
- *  representative (Explorer's long-standing 350ms). */
+ *  representative (the long-standing 350ms). */
 const DEFAULT_PREFETCH_COOLDOWN_MS = 350;
 /** Min samples before we trust the percentile over the fixed default. */
 const MIN_LATENCY_SAMPLES = 5;
@@ -198,8 +198,8 @@ export function startIonPrefetch(ctx: EngineContext, respond?: Respond): void {
         // Background warming is best-effort; a failure just means the first render is cold.
       });
   };
-  // Remote: defer (bandwidth contention — the documented Explorer lesson) so it yields to the
-  // open/first-render; local: decode-only, start now. The interruptible prefetch (mutex +
+  // Remote: defer (bandwidth contention) so it yields to the open/first-render; local:
+  // decode-only, start now. The interruptible prefetch (mutex +
   // activity cooldown) keeps it from starving foreground reads once it does run.
   if (ctx.remote) setTimeout(launch, REMOTE_PREFETCH_DELAY_MS);
   else launch();
@@ -304,8 +304,8 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
       }
 
       case "setCacheConfig":
-        // Override the shared (ion + spectrum) byte ceiling. `preloadEnabled` is reserved
-        // for Stage 2's background prefetch. A positive limit overrides the memory-derived
+        // Override the shared (ion + spectrum) byte ceiling. `preloadEnabled` gates the
+        // background prefetch. A positive limit overrides the memory-derived
         // default; the spectrum LRU evicts immediately if it now exceeds the new ceiling.
         if (Number.isFinite(req.cacheLimitBytes) && req.cacheLimitBytes > 0) {
           ctx.budget.limitBytes = req.cacheLimitBytes;
@@ -323,8 +323,8 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         const reader = requireActive(ctx).reader;
         // Read-through the spectrum LRU: a repeat selection returns the cached arrays
         // (adaptSpectrum copies them for the transfer, so the cache stays intact).
-        // Time this representative user read to feed the adaptive prefetch cooldown
-        // (MG-03a). Cache hits and cold reads both count — that's the real latency the
+        // Time this representative user read to feed the adaptive prefetch cooldown.
+        // Cache hits and cold reads both count — that's the real latency the
         // prefetch back-off must accommodate. Reads are mutex-serialized, so the timing
         // is non-reentrant and needs no locking.
         const t0 = nowMs();

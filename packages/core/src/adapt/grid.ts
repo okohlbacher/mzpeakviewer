@@ -1,20 +1,18 @@
-// PURE adapter: IV's in-memory ImagingGrid → the contract ImagingGridWire.
+// PURE adapter: the in-memory ImagingGrid → the contract ImagingGridWire.
 //
 // Follows the capability.ts template: a pure function from plain, already-extracted
 // data (NO mzpeakts handle, NO reader internals) to a wire type. The reader-I/O that
 // reconstructs the grid lives in the handler; this file only RESHAPES.
 //
-// IV's ImagingGrid (mzPeakIV src/imaging/types.ts) carries a `Map<number,number>`
-// `coordToSpectrumIndex`. Its key encoding is `y0*width + x0` (row-major, 0-based,
-// after subtracting coordinateBase) — see mzPeakIV src/imaging/types.ts:44 and the
-// key write at src/imaging/grid.ts:116 (`const key = y0 * width + x0`). That is the
-// SAME encoding the wire's `coordKey` documents, so flattening is a 1:1 copy of the
-// Map entries into two parallel Int32Arrays — no re-derivation of x/y.
+// The ImagingGrid carries a `Map<number,number>` `coordToSpectrumIndex`. Its key
+// encoding is `y0*width + x0` (row-major, 0-based, after subtracting coordinateBase).
+// That is the SAME encoding the wire's `coordKey` documents, so flattening is a 1:1
+// copy of the Map entries into two parallel Int32Arrays — no re-derivation of x/y.
 
 import type { ImagingGridWire } from "@mzpeak/contracts";
 
 /**
- * Plain input mirroring IV's `ImagingGrid` (only the fields the wire needs). The
+ * Plain input mirroring the `ImagingGrid` (only the fields the wire needs). The
  * handler hands this over after grid reconstruction; the Map carries the sparse
  * coord→spectrum lookup, the mask is the dense presence raster.
  *
@@ -26,11 +24,11 @@ export type GridInput = {
   width: number;
   height: number;
   /**
-   * IV's `ImagingGrid.coordinateBase` (src/imaging/types.ts:41) — the absolute IMS
-   * position of local cell 0 (read from geometry, typically 1). The Map keys are
-   * already 0-based local (`y0*width+x0`, after subtracting coordinateBase), so the
-   * shell adds `coordinateBase` to recover absolute IMS coords. REQUIRED — defaulting
-   * it to 0 silently offset every pixel by one (review).
+   * `ImagingGrid.coordinateBase` — the absolute IMS position of local cell 0 (read
+   * from geometry, typically 1). The Map keys are already 0-based local
+   * (`y0*width+x0`, after subtracting coordinateBase), so the shell adds
+   * `coordinateBase` to recover absolute IMS coords. REQUIRED — defaulting it to 0
+   * would silently offset every pixel by one.
    */
   coordinateBase: number;
   /** Explicit per-axis min coords; default to `coordinateBase` when absent. */
@@ -43,7 +41,7 @@ export type GridInput = {
 };
 
 /**
- * Flatten IV's grid into the transfer-safe `ImagingGridWire`. The Map is unrolled
+ * Flatten the grid into the transfer-safe `ImagingGridWire`. The Map is unrolled
  * into two parallel Int32Arrays (`coordKey[i]` ↔ `spectrumIndex[i]`); the dense
  * `presenceMask` passes through unchanged. `originX`/`originY` carry `coordinateBase`
  * so the shell maps local cells back to absolute IMS positions.

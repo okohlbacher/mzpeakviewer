@@ -1,4 +1,4 @@
-// @mzpeak/contracts — the Phase-1 keystone surface.
+// @mzpeak/contracts — the shared contract surface.
 //
 // Everything the engine (@mzpeak/core) and shell are built against:
 //   - the superset worker protocol + per-message clone/transfer/cancellation policy

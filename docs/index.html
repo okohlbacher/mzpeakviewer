@@ -93,6 +93,7 @@
       <li><a href="#channels">TMT / reporter channels</a></li>
       <li><a href="#imaging">Imaging (MSI)</a></li>
       <li><a href="#chromatograms">Chromatograms</a></li>
+      <li><a href="#wavelength">UV/VIS (PDA / DAD)</a></li>
       <li><a href="#structure">Parquet inspection</a></li>
       <li><a href="#sharing">Sharing &amp; URL grammar</a></li>
       <li><a href="#desktop">Desktop apps</a></li>
@@ -135,9 +136,15 @@
   <!-- 3 -->
   <h2 id="spectra">3 · Spectra &amp; deep links</h2>
   <p>The <strong>Spectra</strong> tab plots m/z vs intensity for the selected spectrum. Pick a
-  spectrum by index, step with <kbd>‹ Prev</kbd> / <kbd>Next ›</kbd>, or filter by MS level. Scroll
-  to zoom the plot; double-click to reset. The header line shows the absolute index, MS level,
+  spectrum by index, step with <kbd>‹ Prev</kbd> / <kbd>Next ›</kbd>, or filter by MS level.
+  Drag-select a region to zoom, scroll to zoom under the cursor, drag with the middle button to
+  pan, and double-click to reset. The header line shows the absolute index, MS level,
   position within the level, native scan id, representation (profile/centroid), and point count.</p>
+  <p><strong>Peak actions:</strong> left-click a peak to open its single-ion image in the Imaging
+  view; <strong>right-click</strong> a peak to build an extracted-ion chromatogram from it. The
+  right-click menu pre-fills the m/z tolerance and a retention-time window (from your
+  <a href="#chromatograms">Settings</a> defaults) and limits the chromatogram to the displayed
+  spectrum's MS level, then switches to the Chromatograms view with the new trace.</p>
   <p><strong>Deep linking:</strong> a spectrum is addressable. Append <code>&amp;spectrum=120</code> to a
   file URL to open directly on that spectrum — the link below reproduces exactly this screenshot.
   The viewer infers the right tab from the parameters, so <code>view=spectra</code> is optional.</p>
@@ -191,13 +198,48 @@
 
   <!-- 6 -->
   <h2 id="chromatograms">6 · Chromatograms</h2>
-  <p>When a file carries chromatograms, the <strong>Chromatograms</strong> tab plots them over
-  retention time. Build the total-ion chromatogram (TIC), or extract an XIC for an m/z window;
-  click a point to jump to the nearest spectrum. Deep links: <code>&amp;chrom=tic</code>,
-  <code>&amp;xic=445.1,0.1</code>, and an optional <code>&amp;rt=300,600</code> time window.</p>
+  <p>The <strong>Chromatograms</strong> tab is a managed list of chromatogram <strong>cards</strong>,
+  each plotting intensity over retention time. Every card zooms independently — drag-select a
+  region, scroll to zoom, middle-drag to pan, double-click to reset — and has a bottom handle to
+  drag its height. Click a card to jump to the spectrum at the nearest retention time (restricted
+  to the trace's MS level).</p>
+  <p>Three ways to add a card:</p>
+  <ul>
+    <li><strong>Stored chromatograms</strong> — the file's own chromatograms (SRM/MRM transitions,
+      instrument traces) are listed with their metadata (type, polarity, precursor → product m/z,
+      point count). Click a row to inspect its full CV-resolved metadata; press <em>+ Add</em> to
+      put it on a card.</li>
+    <li><strong>+ add TIC</strong> — compute the total-ion chromatogram across the run.</li>
+    <li><strong>+ add XIC</strong> — extract an ion chromatogram for an m/z ± tolerance window,
+      with an optional retention-time range. Leave the range blank for the whole run.</li>
+  </ul>
+  <p>You can also create an XIC straight from a peak: <strong>right-click a peak</strong> in the
+  Spectra view (see <a href="#spectra">section 3</a>) and the new trace appears here, limited to
+  that spectrum's MS level. <em>Clear generated</em> removes the in-memory TIC/XIC cards while
+  leaving the stored ones.</p>
+  <p><strong>Settings:</strong> the gear in the top bar stores your default XIC m/z tolerance and
+  retention-time half-window in the browser, so the add-XIC form and the right-click menu start
+  from your preferred values.</p>
+  <p>Chromatograms are deep-linkable: <code>&amp;chrom=tic</code>,
+  <code>&amp;xic=445.1,0.1</code> (optionally <code>&amp;xic=445.1,0.1,2</code> to pin the MS
+  level), a stored trace by id, and an optional <code>&amp;rt=300,600</code> time window.</p>
 
   <!-- 7 -->
-  <h2 id="structure">7 · Deep Parquet inspection</h2>
+  <h2 id="wavelength">7 · UV/VIS (PDA / DAD)</h2>
+  <p>When a file carries <strong>wavelength spectra</strong> (photodiode-array or
+  diode-array optical detection), a <strong>UV/VIS</strong> entry appears in the sidebar with three
+  sub-views, chosen with the segmented control:</p>
+  <ul>
+    <li><strong>Spectrum</strong> — absorbance vs wavelength for one retention time.</li>
+    <li><strong>Chromatogram</strong> — a derived trace over time: the maximum absorbance across
+      wavelengths, or a single extracted wavelength.</li>
+    <li><strong>Heatmap</strong> — the full 2-D time × wavelength absorbance matrix.</li>
+  </ul>
+  <p>Click anywhere on the heatmap or the chromatogram to jump to the absorbance spectrum at that
+  retention time. Deep-link the view with <code>&amp;view=wavelength</code>.</p>
+
+  <!-- 8 -->
+  <h2 id="structure">8 · Deep Parquet inspection</h2>
   <p>An mzPeak file is a ZIP of <a href="https://parquet.apache.org/">Apache Parquet</a> tables, and
   the <strong>Structure</strong> tab (under <em>Advanced</em>) lets you look right inside. The left
   pane lists every archive member; click a Parquet table to read its footer without downloading the
@@ -214,7 +256,7 @@
   </figure>
 
   <!-- 8 -->
-  <h2 id="sharing">8 · Sharing &amp; the URL grammar</h2>
+  <h2 id="sharing">9 · Sharing &amp; the URL grammar</h2>
   <p>Click <strong>Share view</strong> (top-right) to copy a link that reopens exactly what you're
   looking at — the file, the selected spectrum or pixel, the ion image, the active tab. Links are
   kept as short as possible: anything the viewer can infer is omitted. (Sharing is available for
@@ -231,12 +273,13 @@
     <tr><td><code>ion</code></td><td>Ion image m/z[,tolerance]</td><td><code>ion=741.53,0.25</code></td></tr>
     <tr><td><code>ch</code></td><td>RGB channel (repeatable, ≤3)</td><td><code>ch=445,0.1,red</code></td></tr>
     <tr><td><code>px</code></td><td>Pixel coordinate (imaging)</td><td><code>px=10,20</code></td></tr>
-    <tr><td><code>chrom</code> / <code>xic</code></td><td>Chromatogram (TIC) / extracted-ion</td><td><code>chrom=tic</code> · <code>xic=445.1,0.1</code></td></tr>
+    <tr><td><code>chrom</code> / <code>xic</code></td><td>Chromatogram (TIC) / extracted-ion (optional MS level)</td><td><code>chrom=tic</code> · <code>xic=445.1,0.1</code> · <code>xic=445.1,0.1,2</code></td></tr>
     <tr><td><code>rt</code></td><td>Retention-time window (s)</td><td><code>rt=300,600</code></td></tr>
+    <tr><td><code>view</code></td><td>Explicit view (e.g. UV/VIS)</td><td><code>view=wavelength</code></td></tr>
   </table>
 
   <!-- 9 -->
-  <h2 id="desktop">9 · Desktop apps</h2>
+  <h2 id="desktop">10 · Desktop apps</h2>
   <p>Prefer a native application? The same viewer ships as a small desktop app for
   <strong>Windows, macOS and Linux</strong>, built with <a href="https://tauri.app/">Tauri</a>. The
   desktop build adds native file access — handy for very large local files — and works fully
@@ -253,7 +296,7 @@
   on Windows choose <em>More info → Run anyway</em>. Signed builds open without prompts.</div>
 
   <!-- 10 -->
-  <h2 id="web">10 · The web version</h2>
+  <h2 id="web">11 · The web version</h2>
   <p>No download needed — the viewer runs in any modern browser at
   <strong><a href="https://www.mzpeak.org/view/">www.mzpeak.org/view</a></strong>. It is a fully static
   app (a continuously updated mirror is also published to GitHub Pages), so there is no server, no

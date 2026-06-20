@@ -20,6 +20,6 @@ createRoot(rootEl).render(
   </StrictMode>,
 );
 
-// Phase 5: apply a deep link (?file=…&view=…&scan=…) once the app has mounted.
+// Apply a deep link (?file=…&view=…&scan=…) once the app has mounted.
 // Self-guarded + async (no-op when there's no `file` param).
 void hydrateFromLocation();

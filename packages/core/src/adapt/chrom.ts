@@ -5,16 +5,15 @@
 // column path and summing intensity per point) lives in the handler; this adapter only
 // repacks the result into the transfer-safe wire shape.
 //
-// Source semantics (Phase-3 map, mzPeakExplorer/src/reader/browse.ts:152
-// extractChromatogram + :199 getStoredChromatogram, and store.ts buildTic/cheapTic):
+// Source semantics:
 //   - "tic"    — total-ion chromatogram (both ranges null; or the cheap promoted-TIC
 //                column path). intensity = per-spectrum total ion current.
 //   - "xic"    — extracted-ion chromatogram over an m/z window; intensity = summed
 //                intensity inside the window per spectrum.
 //   - "stored" — a chromatogram the converter wrote (carries an id).
-// Explorer returns an ARRAY OF OBJECTS (`ChromPoint[]` = {index,time,intensity}); the
-// wire form is PARALLEL Float32Array time/intensity (transferable). The handler pulls
-// `time` and `intensity` out into plain arrays and hands them here.
+// The extractor produces an ARRAY OF OBJECTS ({index,time,intensity}); the wire form
+// is PARALLEL Float32Array time/intensity (transferable). The handler pulls `time` and
+// `intensity` out into plain arrays and hands them here.
 
 import type { ChromatogramSeries } from "@mzpeak/contracts";
 

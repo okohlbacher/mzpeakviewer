@@ -1,4 +1,4 @@
-// "Share view" button (MERGE-ROADMAP §3 Phase 5). Builds the shortest canonical
+// "Share view" button. Builds the shortest canonical
 // deep link for the current store state via currentShareUrl(), copies it to the
 // clipboard, mirrors it into the address bar (history.replaceState) so a manual
 // refresh round-trips, and flashes a transient "Copied" state.
@@ -48,7 +48,7 @@ export function ShareButton() {
   }, []);
 
   // Copy a USI (Universal Spectrum Identifier) for the current spectrum — a citeable,
-  // standard PSI identifier (MG-08). For PXD/MSV-hosted files it's resolvable by USI
+  // standard PSI identifier. For PXD/MSV-hosted files it's resolvable by USI
   // tools; for other files it uses the USI000000 placeholder collection.
   const onCopyUsi = useCallback(async () => {
     const id = currentUsi();

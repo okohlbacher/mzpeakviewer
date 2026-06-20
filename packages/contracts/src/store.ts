@@ -1,7 +1,6 @@
-// Unified store shape + view-state model — the single source of truth the merged
-// shell renders from. Phase-1 contract: TYPES only (no zustand runtime here). The
-// Phase-4 store implements this shape; the two source stores (IV ~761 LOC, Explorer
-// ~952 LOC) collapse into it.
+// Unified store shape + view-state model — the single source of truth the
+// shell renders from. TYPES only (no zustand runtime here); the store implements
+// this shape.
 //
 // The keystone idea: exactly one active `View` id, one selection model, and one
 // settings-policy object. The URL module (./url) parses into / serializes from
@@ -9,7 +8,7 @@
 
 import type { CapabilityModel } from "./capability";
 
-/** Every navigable view. The §2 rail maps 1:1 onto these ids. */
+/** Every navigable view. The navigation rail maps 1:1 onto these ids. */
 export type View =
   // always-on
   | "summary"
@@ -22,7 +21,7 @@ export type View =
   | "metadata"
   | "structure"
   // Imaging (MSI) accordion — gated on capabilities.imaging.isImaging.
-  // Mirrors mzPeakIV's imaging modes: overview(TIC) / ion / multi(RGB) / optical / overlay(blend).
+  // Imaging modes: overview(TIC) / ion / multi(RGB) / optical / overlay(blend).
   | "overview"
   | "ion"
   | "multi"
@@ -50,7 +49,7 @@ export const IMAGING_VIEWS: readonly View[] = ["overview", "ion", "multi", "opti
 /** Views that only make sense for LC/general files. */
 export const LC_VIEWS: readonly View[] = ["chromatograms", "wavelength"] as const;
 
-/** Chromatogram display mode (Explorer parity). */
+/** Chromatogram display mode. */
 export type ChromMode = "tic" | "xic" | "stored";
 
 /** How the active spectrum was chosen — drives canonical URL serialization. */
@@ -93,7 +92,7 @@ export type SettingsPolicy = {
 /** Load lifecycle the shell renders around. */
 export type LoadPhase = "idle" | "loading" | "ready" | "error";
 
-/** A non-blocking, dismissible notice (the §3.5 cross-mode info banner lives here). */
+/** A non-blocking, dismissible notice (the cross-mode info banner lives here). */
 export type Notice = {
   id: string;
   severity: "info" | "warning" | "error";
@@ -103,8 +102,8 @@ export type Notice = {
 
 /**
  * The unified store shape. Imaging fields are present but inert for non-imaging
- * files (gated by `capabilities.imaging.isImaging`). The Phase-4 store provides
- * actions; this contract pins the state surface.
+ * files (gated by `capabilities.imaging.isImaging`). The store provides actions;
+ * this contract pins the state surface.
  */
 export type UnifiedState = {
   phase: LoadPhase;

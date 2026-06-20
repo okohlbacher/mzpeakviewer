@@ -1,12 +1,10 @@
-// HARVESTED (trimmed) from mzPeakExplorer/src/reader/browse.ts (read-only source).
 // Signal access for the Browse tab: single-spectrum reconstruction, XIC extraction,
 // and stored-chromatogram access. All return plain typed arrays / POJOs — no Arrow,
 // no bigint upward.
 //
-// Trimmed vs. upstream: getSpectrumMetadata (plainify dep) is dropped. The
-// source-faithful `getSpectrumArrays` IS retained: it is the golden REFERENCE the
-// engine's reconstruction is asserted value-equal against (engine/imaging.golden.test)
-// — i.e. it is the "old reader" the unified engine must reproduce byte-for-byte.
+// `getSpectrumArrays` is the golden REFERENCE the engine's reconstruction is
+// asserted value-equal against (engine/imaging.golden.test) — the reference
+// reconstruction the engine must reproduce byte-for-byte.
 import type { Reader } from "./open";
 import { recRepresentation } from "./cv";
 import type { ChromPoint, SpectrumArrays, StoredChromatogram } from "./types";
@@ -62,10 +60,10 @@ type RawSpectrum = {
 };
 
 /**
- * Read + reconstruct spectrum `index` into plain typed arrays — the source-faithful
- * Explorer reconstruction, retained verbatim as the golden parity reference for the
- * unified engine. Prefers the profile data-array source, falls back to centroids
- * (spectra_peaks), then to data-arrays again, sanitizing the result.
+ * Read + reconstruct spectrum `index` into plain typed arrays — the golden parity
+ * reference reconstruction for the engine. Prefers the profile data-array source,
+ * falls back to centroids (spectra_peaks), then to data-arrays again, sanitizing
+ * the result.
  */
 export async function getSpectrumArrays(
   reader: Reader,

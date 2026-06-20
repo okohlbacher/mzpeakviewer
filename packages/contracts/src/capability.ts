@@ -1,20 +1,18 @@
 // Capability model — the single source of truth for what a loaded file can do,
 // and therefore which navigation surfaces the shell shows.
 //
-// Phase-1 contract (types only; no detection logic here — detection lives in the
-// engine in Phase 3 and MUST populate this exact shape). The roadmap's §2 rail is
-// gated on these capabilities, NOT on a single `isImaging` boolean.
+// Types only; no detection logic here — detection lives in the engine and must
+// populate this exact shape. The navigation rail is gated on these capabilities,
+// NOT on a single `isImaging` boolean.
 //
-// Adversarial-review fixes folded in:
-//   - vibe CRITICAL-2: imaging detection standardizes on IV's `probeIsImaging`
-//     3-signal semantics; Explorer's 1-signal `readImaging` is REPLACED, not kept.
-//     The three signals are enumerated below as `ImagingSignal` so detection
-//     parity is testable (NAV-07 / CTR-03).
-//   - vibe MAJOR-4: `hasChromatograms` is derived from an explicit source
-//     (`numChromatograms > 0` OR `hasTicColumn`), and `hasTicColumn` is a named
-//     capability rather than an implicit check buried in a tab component.
+// Design notes:
+//   - Imaging detection uses the 3-signal `probeIsImaging` semantics; the three
+//     signals are enumerated below as `ImagingSignal` so detection is testable.
+//   - `hasChromatograms` is derived from an explicit source (`numChromatograms > 0`
+//     OR `hasTicColumn`), and `hasTicColumn` is a named capability rather than an
+//     implicit check buried in a tab component.
 
-/** The three independent signals that can mark a file as imaging (IV semantics). */
+/** The three independent signals that can mark a file as imaging. */
 export type ImagingSignal =
   /** Promoted IMS position columns on scan records (IMS_1000050_position_x / _y). */
   | "ims-columns"
@@ -24,11 +22,11 @@ export type ImagingSignal =
   | "metadata-flag";
 
 /**
- * Detection runs in two phases (codex review #4): a cheap index-only HINT from
+ * Detection runs in two stages: a cheap index-only HINT from
  * `metadata.imaging.is_imaging` available immediately, then the full 3-signal
- * PROBE after metadata loads. The roadmap's "standardize on probeIsImaging" is
- * only true once `confidence === "probed"`; the hint alone is IV's current fast
- * path and can misclassify a file that has IMS columns but no metadata flag.
+ * PROBE after metadata loads. Detection is only authoritative once
+ * `confidence === "probed"`; the hint alone is a fast path that can misclassify a
+ * file that has IMS columns but no metadata flag.
  */
 export type DetectionConfidence = "hint" | "probed";
 
@@ -55,7 +53,7 @@ export type ImagingDetection = {
 };
 
 /**
- * Tri-state capability presence (codex review #7). Some capabilities are not
+ * Tri-state capability presence. Some capabilities are not
  * knowable from the cheap fast-summary and only resolve after the time-sliced
  * scan pass — modeling them as a boolean would either hide a valid view until
  * the scan finishes or force an expensive scan just to build navigation.
@@ -64,7 +62,7 @@ export type Presence = "unknown" | "present" | "absent";
 
 /**
  * Chromatogram capability — INDEPENDENT of imaging (an MSI file with stored
- * chromatograms still shows the Chromatograms entry). vibe MAJOR-4 / codex #7.
+ * chromatograms still shows the Chromatograms entry).
  */
 export type ChromatogramCapability = {
   /** Count of stored chromatograms — known immediately from `reader.numChromatograms`. */
@@ -98,7 +96,7 @@ export type WavelengthCapability = {
   /** Number of wavelength spectra (0 when `present` is false). */
   count: number;
   /** Observed wavelength range [minNm, maxNm] across the file's wavelength spectra, or
-   *  null when unknown. Drives the Summary UV / VIS / UV-VIS band pill (MG-11). */
+   *  null when unknown. Drives the Summary UV / VIS / UV-VIS band pill. */
   range: [number, number] | null;
 };
 
@@ -116,8 +114,8 @@ export type CapabilityModel = {
   optical: OpticalCapability;
   /** UV/VIS (wavelength) spectra — drives the UV/VIS navigation surface. */
   wavelength: WavelengthCapability;
-  /** Storage layout + encodings (diagnostics; carried from both readers). */
-  /** "unknown" when the reader can't classify the layout (review: Explorer emits it). */
+  /** Storage layout + encodings (diagnostics). */
+  /** "unknown" when the reader can't classify the layout. */
   layout: "point" | "chunked" | "mixed" | "unknown";
   encodings: string[];
   /** Findings the reader could not fully support (surfaced, never silently dropped). */

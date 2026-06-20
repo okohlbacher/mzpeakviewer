@@ -1,8 +1,8 @@
 /* ──────────────────────────────────────────────────────────────────────────
    mzPeak Design System — Color tokens
-   Derived from the mzPeakIV source: OpenMS electric-blue (#3b54da) accent, hairline
-   cool-neutral panels, semantic amber/red/green, and the scientific perceptual
-   colormaps (viridis / inferno) that are the product's signature visual.
+   OpenMS electric-blue (#3b54da) accent, hairline cool-neutral panels, semantic
+   amber/red/green, and the scientific perceptual colormaps (viridis / inferno) that
+   are the product's signature visual.
    ────────────────────────────────────────────────────────────────────────── */
 
 :root {
@@ -71,7 +71,7 @@
   --danger-bg:    #fce4ec;
   /* a11y: darkened from #2e9e5b (~3.4:1 small-text on white — failed WCAG AA) to ~4.9:1
      while staying a recognizable mass-spec green. Used as foreground (capability "yes"
-     text, success badges, the ion-cache-ready chip). [adversarial review 2026-06-15, F-08] */
+     text, success badges, the ion-cache-ready chip). */
   --success:      #1a8249;
   --success-soft: #43a047; /* soft fills/borders only — not text */
   --info:         var(--blue-600);
@@ -96,7 +96,7 @@
   /* a11y: faint text that conveys information (captions, hints, footnotes, axis labels)
      must meet WCAG AA 4.5:1. --gray-400 (#9aa4ad) is only ~2.5:1 on white, so --text-faint
      is pinned to --gray-500 (#6b757e, ~4.7:1). Use --gray-400 directly for purely decorative
-     non-text uses (borders, swatches). [adversarial review 2026-06-15, F-08] */
+     non-text uses (borders, swatches). */
   --text-faint:    var(--gray-500);
   --text-on-accent:#ffffff;
   --text-on-stage: #e7edf2;

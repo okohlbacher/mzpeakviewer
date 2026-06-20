@@ -2,28 +2,27 @@
 // Follows the package template (see ./capability.ts): a pure function from plain,
 // already-extracted data (NO mzpeakts/parquet-wasm/hyparquet handle) to a wire type,
 // with a unit test. The reader-I/O — range-reading the footer bytes and decoding the
-// Thrift FileMetaData — lives in the handler. The two decoders this mirrors:
+// Thrift FileMetaData — lives in the handler. Two decoder shapes feed this adapter:
 //
-//   - mzPeakIV/src/worker/parquetFooter.ts (hand-rolled Thrift compact decoder):
-//     per-column `ColInfo` carries parquetType (enum int), codec (enum int),
-//     numValues, compressedSize, uncompressedSize, dataPageOffset, encodings[].
-//     It exposes NO logical type, no null count, no min/max, no createdBy.
-//   - mzPeakExplorer/src/reader/parquetDeep.ts (hyparquet `deepColumn`):
-//     aggregates ACROSS row groups → physicalType (string), codec (string),
-//     numValues, nullCount, compressed, uncompressed, and STRINGIFIED min/max via
-//     `show()` (bigint→toString, number→trimmed, Uint8Array→hex). Explorer's footer
-//     read (`readParquetInfo`, archive.ts) also surfaces logicalType (Arrow-walked)
-//     and createdBy from the file metadata.
+//   - A hand-rolled Thrift compact decoder: per-column `ColInfo` carries parquetType
+//     (enum int), codec (enum int), numValues, compressedSize, uncompressedSize,
+//     dataPageOffset, encodings[]. It exposes NO logical type, no null count, no
+//     min/max, no createdBy.
+//   - A hyparquet `deepColumn` read: aggregates ACROSS row groups → physicalType
+//     (string), codec (string), numValues, nullCount, compressed, uncompressed, and
+//     STRINGIFIED min/max via `show()` (bigint→toString, number→trimmed, Uint8Array→hex).
+//     The full footer read also surfaces logicalType (Arrow-walked) and createdBy from
+//     the file metadata.
 //
 // This adapter accepts the SUPERSET of those raw per-column fields and normalizes them
 // to the wire `ParquetColumn`. Codec/physical-type ENUM ints are intentionally NOT
-// resolved here — the handler decodes IV's enum ints to names (it owns the parquet-wasm
-// enum order, archive.ts CODECS) before calling this. min/max are stringified for
-// display; everything else passes through, with `undefined` → `null`.
+// resolved here — the handler decodes the enum ints to names (it owns the parquet-wasm
+// enum order) before calling this. min/max are stringified for display; everything else
+// passes through, with `undefined` → `null`.
 
 import type { ParquetColumn, ParquetFooter, RowGroupSize } from "@mzpeak/contracts";
 
-/** One decoded column's raw footer fields (superset of IV ColInfo + Explorer deepColumn). */
+/** One decoded column's raw footer fields (superset of the Thrift + deepColumn shapes). */
 export type FooterColumnInput = {
   /** Leaf column path (dot-joined, e.g. "scan.IMS_1000050_position_x"). */
   name: string;
@@ -44,7 +43,7 @@ export type FooterColumnInput = {
   /** Raw min/max statistic (number | bigint | string | Uint8Array | null). Stringified here. */
   min?: unknown;
   max?: unknown;
-  /** Deep footer stats (Explorer parity) — passed through to the wire column. */
+  /** Deep footer stats — passed through to the wire column. */
   encodings?: string[] | null;
   dictionary?: boolean | null;
   dataPages?: number | null;
@@ -67,10 +66,10 @@ export type FooterInput = {
 };
 
 /**
- * Stringify a footer min/max statistic for display. Mirrors Explorer's `show()`
- * (parquetDeep.ts): null→null, bigint→decimal string, integer number→plain, fractional
- * number→6-sig-fig trimmed, byte arrays→short hex, everything else→String(). Keeps the
- * wire type a plain string and matches what the Structure tab already renders.
+ * Stringify a footer min/max statistic for display: null→null, bigint→decimal string,
+ * integer number→plain, fractional number→6-sig-fig trimmed, byte arrays→short hex,
+ * everything else→String(). Keeps the wire type a plain string and matches what the
+ * Structure tab already renders.
  */
 export function showStat(v: unknown): string | null {
   if (v == null) return null;

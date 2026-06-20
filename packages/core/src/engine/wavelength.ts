@@ -1,6 +1,6 @@
 // Engine wavelength (UV/VIS / PDA / DAD optical) spectrum read + browse.
 //
-// SEPARATE from the MS spectrum path on purpose (adversarial review, P0): wavelength
+// SEPARATE from the MS spectrum path on purpose: wavelength
 // is in nanometers (not m/z), intensity may be SIGNED (baseline-subtracted) and is NOT
 // absorbance unless the unit CURIE says so. This module never touches `spectrum.ts` /
 // `SpectrumArrays`; the MS code paths are left byte-for-byte unchanged.
@@ -344,7 +344,7 @@ export function buildWavelengthBrowse(reader: Reader): WavelengthBrowseIndex {
 
 /**
  * Dataset-level observed wavelength range [minNm, maxNm] across the file's wavelength
- * spectra, or null when unknown (MG-11 — drives the Summary UV / VIS / UV-VIS pill).
+ * spectra, or null when unknown. Drives the Summary UV / VIS / UV-VIS pill.
  * Metadata only (NO signal I/O): reads the per-spectrum lowest (MS:1000619) / highest
  * (MS:1000618) observed-wavelength CV terms from the in-memory wavelength metadata and
  * takes the min of the lows / max of the highs. Returns null when neither term is
@@ -353,7 +353,7 @@ export function buildWavelengthBrowse(reader: Reader): WavelengthBrowseIndex {
 export async function wavelengthRange(reader: Reader): Promise<[number, number] | null> {
   const n = reader.wavelengthMetadata?.length ?? reader.numWavelengthSpectra ?? 0;
   if (!n) return null;
-  // The FIRST wavelength spectrum only (review): PDA/DAD scans share one common
+  // The FIRST wavelength spectrum only: PDA/DAD scans share one common
   // wavelength grid, so spectrum 0's observed range is the dataset range — no need to
   // read every spectrum. Materialized once onto capability.wavelength.range at open.
   let spec: WavelengthSpectrumArrays;

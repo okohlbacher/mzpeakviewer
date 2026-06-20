@@ -1,6 +1,7 @@
 // Spectra view — browse list / index picker → selectSpectrum → SpectrumPlot.
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useStore } from "../store";
+import { parseRtRange } from "../rtRange";
 import { buildLevelIndex, activeSet, rankOf, absoluteOf } from "../levelIndex";
 import { SpectrumPlot, Select, Button, TreeView, spectrumReporters, type SelectOption, type ReporterMarker, type ReporterPeak } from "@mzpeak/ui-kit";
 
@@ -41,12 +42,12 @@ export function Spectra() {
   // RT pre-filled to the shown spectrum's RT ± the Settings half-window, MS level limited
   // to the shown spectrum). Anchored at the cursor.
   // Snapshot mz + RT + MS level AT RIGHT-CLICK TIME — reading them live later would use a
-  // since-changed spectrum (codex review).
+  // since-changed spectrum.
   const [peakMenu, setPeakMenu] = useState<
     { mz: number; x: number; y: number; msLevel: number | null; spectrumRtSec: number | null; rtBounds: [number, number] | null } | null
   >(null);
 
-  // BL-09: clicking a peak (in the plot or the centroid peak table) prefills the
+  // Clicking a peak (in the plot or the centroid peak table) prefills the
   // ion view with that m/z (±0.05 Da) and navigates there. The user then clicks
   // "Render" on the ion view — auto-render is a deferred follow-up.
   const goToIonImage = (mz: number) => {
@@ -61,11 +62,11 @@ export function Spectra() {
   const spectrumIndex = spectrum?.index ?? null;
   useEffect(() => { setSelectedChannel(null); }, [spectrumIndex]);
   // Dismiss any open peak→chrom popover when the file/spectrum changes — a stale popover
-  // would otherwise carry mz/RT/MS level from a since-replaced spectrum (review).
+  // would otherwise carry mz/RT/MS level from a since-replaced spectrum.
   const closePeakMenu = useCallback(() => setPeakMenu(null), []);
   // Clear on BOTH the displayed spectrum changing (spectrumIndex) AND a new selection being
   // requested (selector.index) — the latter changes first, during the load, so without it the
-  // popover stays usable against a spectrum that's already being replaced (review).
+  // popover stays usable against a spectrum that's already being replaced.
   useEffect(() => { closePeakMenu(); }, [spectrumIndex, selector?.index, phase, closePeakMenu]);
 
   // Per-MS-level relative↔absolute mapping, built once per file (rebuilds only when
@@ -122,7 +123,7 @@ export function Spectra() {
 
   // Peak→chrom snapshot reads the DISPLAYED spectrum (spectrumIndex), not the requested
   // selector — during a load the selector leads, so its RT/MS level wouldn't match the m/z
-  // the right-click resolves off the drawn spectrum (codex review).
+  // the right-click resolves off the drawn spectrum.
   const shownLevel = browse && spectrumIndex != null ? (browse.msLevel[spectrumIndex] ?? null) : null;
   const shownRtSec = browse && spectrumIndex != null && Number.isFinite(browse.rt[spectrumIndex] ?? NaN) ? (browse.rt[spectrumIndex] as number) : null;
   const levelTotal = levelSet ? levelSet.length : null;
@@ -450,9 +451,9 @@ export function Spectra() {
       )}
 
       {/* Per-spectrum metadata tree (scan time, polarity, base peak, TIC, m/z range,
-          precursor / selected-ion, promoted CV columns). Restored from mzPeakExplorer's
-          collapsible "Spectrum metadata" panel (dropped in the engine harvest). The
-          CV-aware TreeView resolves accession-named keys to human labels. */}
+          precursor / selected-ion, promoted CV columns), in a collapsible
+          "Spectrum metadata" panel. The CV-aware TreeView resolves accession-named
+          keys to human labels. */}
       {spectrum && spectrum.meta != null && (
         <details data-testid="spectrum-metadata-panel" style={{ marginTop: "0.1rem" }}>
           <summary
@@ -471,10 +472,10 @@ export function Spectra() {
         </details>
       )}
 
-      {/* BL-08: centroid peak table. Only for centroid (stick) spectra — profile
+      {/* Centroid peak table. Only for centroid (stick) spectra — profile
           spectra are continuous traces and have no discrete peak list. Rows are
           sorted by descending intensity and capped (the cap is noted in the UI).
-          Clicking a row drives BL-09 (jump to ion image) via the shared handler. */}
+          Clicking a row jumps to the ion image via the shared handler. */}
       {spectrum && spectrum.representation === "centroid" && (
         <PeakTable spectrum={spectrum} onPeakClick={goToIonImage} />
       )}
@@ -502,9 +503,9 @@ export function Spectra() {
   );
 }
 
-/** Collapsible centroid peak table (BL-08): m/z + intensity rows, sorted by
+/** Collapsible centroid peak table: m/z + intensity rows, sorted by
  *  descending intensity, capped at the top PEAK_TABLE_CAP. Collapsed by default to
- *  match the metadata panel. A row click jumps to the ion image (BL-09). */
+ *  match the metadata panel. A row click jumps to the ion image. */
 const PEAK_TABLE_CAP = 200;
 function PeakTable({
   spectrum,
@@ -683,15 +684,12 @@ function PeakChromMenu({
 
   const tolNum = Number(tol);
   const tolValid = Number.isFinite(tolNum) && tolNum > 0;
-  const lo = Number(rtMin);
-  const hi = Number(rtMax);
-  const rtBlank = rtMin.trim() === "" && rtMax.trim() === "";
-  const rtFilled = rtMin.trim() !== "" && rtMax.trim() !== "" && Number.isFinite(lo) && Number.isFinite(hi) && lo < hi;
-  const rtValid = rtBlank || rtFilled; // partial / lo>=hi → invalid, don't silently fall back to full-range run
+  const rt = parseRtRange(rtMin, rtMax);
+  const rtValid = rt.valid;
   const valid = tolValid && rtValid;
   function create() {
     if (!valid) return;
-    onCreate(tolNum, rtFilled ? [lo, hi] : undefined);
+    onCreate(tolNum, rt.range);
   }
   const left = Math.max(8, Math.min(x, (typeof window !== "undefined" ? window.innerWidth : 1024) - 280));
   const top = Math.max(8, Math.min(y, (typeof window !== "undefined" ? window.innerHeight : 768) - 220));

@@ -1,11 +1,11 @@
 // Engine: scan breakdown — the Browse index + aggregate FileStats for an LC/general
-// (non-imaging) mzPeak file. Drives Explorer's time-sliced per-spectrum scan to get
-// the SpectrumIndexRow[] plus aggregates in one sweep, columnarizes the rows into the
+// (non-imaging) mzPeak file. Runs a time-sliced per-spectrum scan to get the
+// SpectrumIndexRow[] plus aggregates in one sweep, columnarizes the rows into the
 // wire BrowseIndex via the pure adapter, and assembles FileStats from the fast summary
 // (counts + instrument) merged with the scan aggregates (ranges + level/repr counts).
 //
-// Reader I/O is harvested from mzPeakExplorer (src/reader/explorer/{open,summary}.ts);
-// the columnar mapping is the pure adapt/browse.ts adapter. No signal arrays are read.
+// Reader I/O lives in src/reader/explorer/{open,summary}.ts; the columnar mapping is
+// the pure adapt/browse.ts adapter. No signal arrays are read.
 import type { FileStats, BrowseIndex, Presence } from "@mzpeak/contracts";
 import { buildBrowseIndex, type BrowseRow } from "../adapt/browse";
 import type { Reader } from "../reader/openUrl";
@@ -13,7 +13,7 @@ import { computeFastSummary, scanSpectra } from "../reader/explorer/summary";
 import type { SpectrumIndexRow } from "../reader/explorer/types";
 
 /** Number of `mzpeak_index.json` entities — the `numEntities` stat. Minimal,
- *  plainify-free read of the already-parsed index (mirrors Explorer meta.ts). */
+ *  plainify-free read of the already-parsed index. */
 function countEntities(reader: Reader): number {
   const files = (
     reader as unknown as {
@@ -23,15 +23,15 @@ function countEntities(reader: Reader): number {
   return Array.isArray(files) ? files.length : 0;
 }
 
-/** Map an Explorer SpectrumIndexRow to the adapter's BrowseRow (drops index/representation). */
+/** Map a SpectrumIndexRow to the adapter's BrowseRow (drops index/representation). */
 function toBrowseRow(r: SpectrumIndexRow): BrowseRow {
   return { id: r.id, msLevel: r.msLevel, time: r.time, tic: r.tic };
 }
 
 /**
- * F3 — does the file carry a usable promoted per-spectrum TIC column (MS:1000285)?
+ * Does the file carry a usable promoted per-spectrum TIC column (MS:1000285)?
  * `present` exactly when the cheap-TIC path in chrom.ts would succeed: the MS1 rows
- * (or all rows, when none are MS1 — mirrors Explorer's `ticRows`) every carry a
+ * (or all rows, when none are MS1 — same rule as the `ticRows` path) every carry a
  * finite, non-NaN TIC. `absent` otherwise (any contributing TIC missing/NaN), and
  * `absent` when there are no rows at all (an exotic reader that exposes no columns).
  * This lets the shell flip CapabilityModel.chromatograms.ticColumn from "unknown".
@@ -50,8 +50,8 @@ function detectTicColumn(rows: readonly SpectrumIndexRow[]): Presence {
  * Run the per-spectrum scan and assemble the wire stats + browse index.
  *
  * @returns `stats` (FileStats aggregates), `browse` (per-spectrum BrowseIndex,
- *   parallel typed arrays of length `stats.numSpectra`), `ticColumn` (F3:
- *   present/absent so the shell can set CapabilityModel.chromatograms.ticColumn),
+ *   parallel typed arrays of length `stats.numSpectra`), `ticColumn`
+ *   (present/absent so the shell can set CapabilityModel.chromatograms.ticColumn),
  *   and `rows` (the raw scan rows so the dispatcher can thread them into
  *   engineExtractChrom's ChromContext for the cheap-TIC path + source pick).
  */

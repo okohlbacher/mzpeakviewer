@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import uPlot from "uplot";
 // uPlot's base CSS ships via @mzpeak/ui-kit/styles.css (not a JS side-effect import,
-// so importing a primitive from the package root doesn't pull plot CSS — codex Phase-2 #8).
+// so importing a primitive from the package root doesn't pull plot CSS).
 import type { SpectrumArrays } from "./peaks";
 import { wheelZoomPlugin } from "./uplotZoom";
 import { STAGE, stageAxes, xRange, finiteExtent } from "./chartTheme";
@@ -166,7 +166,7 @@ export function SpectrumPlot({
         if (!cb || !s) return;
         e.preventDefault();
         // Resolve from the actual click position, not plot.cursor.left — the latter is the
-        // last hover and can be stale/absent on a right-click without a prior mousemove (review).
+        // last hover and can be stale/absent on a right-click without a prior mousemove.
         const x = plot.posToVal((e as MouseEvent).offsetX, "x");
         if (!Number.isFinite(x)) return;
         const i = nearestPeakIndex(s, x);

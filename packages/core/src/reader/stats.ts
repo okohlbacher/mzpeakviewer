@@ -12,13 +12,13 @@ import type {
 
 // ── CV accession constants ────────────────────────────────────────────────────
 
-// NOTE (I-05 perf): the per-spectrum aggregates that used MS-level / representation
+// NOTE (perf): the per-spectrum aggregates that used MS-level / representation
 // CV accessions (ms level, spectrum representation) moved OUT of the blocking open
 // path into the async engineScanBreakdown (scanBreakdown.ts), which derives the SAME
 // mzRange / msLevels / representationCounts via the faster columnar `scanSpectra`.
 // computeStats below is now O(1).
 
-// IMS:1000050 = position x; IMS:1000051 = position y (imaging-mzpeak-spec v0.3)
+// IMS:1000050 = position x; IMS:1000051 = position y (imaging-mzpeak-spec v0.3).
 // Promoted column names in the scan table (authoritative path).
 const IMS_POS_X_COL = "IMS_1000050_position_x";
 const IMS_POS_Y_COL = "IMS_1000051_position_y";
@@ -49,9 +49,9 @@ function metaValue(meta: unknown, colName: string): unknown {
  *
  * - `numSpectra` / `numEntities` — from the manifest + spectrumMetadata.
  * - `mzRange` — derived from per-spectrum scan-window CV params if available;
- *   returns `null` when not derivable (explicit "not available" path, R-02d).
+ *   returns `null` when not derivable (explicit "not available" path).
  * - `msLevels` — unique sorted MS levels read from the spectrum metadata table.
- * - `representationCounts` — profile vs centroid counts (R-02b).
+ * - `representationCounts` — profile vs centroid counts.
  */
 /**
  * Read a spectrum-metadata record, tolerating reader exceptions on unusual vendor
@@ -73,7 +73,7 @@ function safeRecord<T>(sm: { get(i: number): T }, i: number): T | null {
 /**
  * Compute the O(1) per-file stats available at open WITHOUT a per-spectrum scan.
  *
- * I-05 PERF: this used to iterate `sm.get(i)` for EVERY spectrum (materializing a full
+ * PERF: this used to iterate `sm.get(i)` for EVERY spectrum (materializing a full
  * record per row) to derive mzRange / msLevels / representationCounts — minutes on a
  * 30k-spectrum file, and it BLOCKED the open ("ready"). That work is entirely redundant
  * with `engineScanBreakdown`, which derives the same aggregates (plus rtRange +
@@ -103,14 +103,14 @@ export function computeStats(
  *
  * - `layout` — inferred from the spectrum array index buffer formats.
  * - `encodings` — unique CURIE strings from `arrayTypeCURIE` in the array index.
- * - `isImaging` — BOOLEAN probe only (NO coordinate reconstruction here, that is P2).
+ * - `isImaging` — BOOLEAN probe only (NO coordinate reconstruction here).
  *   TRUE when:
  *     (a) the spectra scan table has promoted `IMS_1000050_position_x` /
- *         `IMS_1000051_position_y` columns (authoritative per imaging-mzpeak-spec v0.3
- *         C1/C2), OR
+ *         `IMS_1000051_position_y` columns (authoritative per imaging-mzpeak-spec
+ *         v0.3), OR
  *     (b) any spectrum's scans expose IMS:1000050 / IMS:1000051 as CV params, OR
  *     (c) the mzpeak_index.json `metadata.imaging.is_imaging` flag is set.
- * - `unsupported` — left empty here; populated by plan 01-03's capability.ts.
+ * - `unsupported` — left empty here; populated by capability.ts.
  */
 export function computeCapabilities(
   reader: Reader,
@@ -161,14 +161,14 @@ export function computeCapabilities(
     else layout = "point";
   }
 
-  // ── Imaging detection (boolean probe, R-02c) ──────────────────────────────
+  // ── Imaging detection (boolean probe) ─────────────────────────────────────
   const isImaging = probeIsImaging(reader);
 
   return {
     layout,
     encodings: Array.from(encodingCuries).sort(),
     isImaging,
-    unsupported: [], // populated by plan 01-03
+    unsupported: [], // populated by capability.ts
   };
 }
 
@@ -182,8 +182,7 @@ export function computeCapabilities(
  *
  * Returns `true` as soon as any source confirms imaging; `false` otherwise.
  *
- * Accession-keyed, not column-name-grepped, per imaging-mzpeak-spec v0.3 C1/C2
- * and Codex binding R-02c.
+ * Accession-keyed, not column-name-grepped, per imaging-mzpeak-spec v0.3.
  */
 export function probeIsImaging(reader: Reader): boolean {
   // Source 3: mzpeak_index.json metadata.imaging.is_imaging discovery block.

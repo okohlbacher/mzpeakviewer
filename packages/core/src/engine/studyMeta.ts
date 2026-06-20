@@ -1,8 +1,8 @@
 // Engine: resolve isobaric (TMT/iTRAQ) channel assignments for the open run from the
-// mzpeak index `metadata` block. Harvested from mzPeakExplorer's sampleMeta projection
-// (sample_list ⋈ run_sample_binding, joined on the MS:1002602 "sample label" parameter)
-// + reagents reporter-ion table. Projection path only (the producer-encoded channels);
-// the SDRF/ISA-blob fallback is a later slice — label-free files just return no channels.
+// mzpeak index `metadata` block. Projects sample_list ⋈ run_sample_binding, joined on
+// the MS:1002602 "sample label" parameter, plus the reagents reporter-ion table.
+// Projection path only (the producer-encoded channels); there is no SDRF/ISA-blob
+// fallback yet — label-free files just return no channels.
 import type { Reader } from "../reader/openUrl";
 import { plainify } from "../reader/fileMeta";
 import type { StudyMeta, ChannelAssignment } from "@mzpeak/contracts";
@@ -101,8 +101,8 @@ export async function engineStudyMeta(reader: Reader): Promise<StudyMeta> {
     });
   }
 
-  // MG-05: surface the structured `study` block + the per-sample list (plainified) for
-  // the Summary ▸ Study panel, plus the archive member path of the embedded SDRF file
+  // Surface the structured `study` block + the per-sample list (plainified) for the
+  // Summary ▸ Study panel, plus the archive member path of the embedded SDRF file
   // (referenced by `metadata.sample_metadata.member`) so the full characteristics table
   // can be fetched on demand in the Study panel.
   const sampleMetadata = obj(meta.sample_metadata);

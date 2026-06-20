@@ -9,7 +9,7 @@
 //   │  gated nav)  │                                 │
 //   └──────────────┴─────────────────────────────────┘
 //
-// NAV-06 a11y: sidebar is a real tablist (role=tablist/tab/tabpanel) with
+// Accessibility: sidebar is a real tablist (role=tablist/tab/tabpanel) with
 // aria-selected, roving tabindex, Enter/Space/Arrow key handling.
 // Accordions are button[aria-expanded] per ARIA disclosure pattern.
 

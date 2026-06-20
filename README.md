@@ -25,20 +25,30 @@ datasets.
   full embedded SDRF table).
 - **Spectra** — interactive m/z–intensity plots with zoom, an MS-level filter, navigation by
   **native scan number**, a profile/centroid type label, reporter-ion (TMT/iTRAQ) highlighting,
-  a **peak table** for centroid spectra, a full **per-spectrum metadata** panel, and
-  **click-a-peak → ion image**.
+  a **peak table** for centroid spectra, a full **per-spectrum metadata** panel,
+  **click-a-peak → ion image**, and **right-click-a-peak → extracted-ion chromatogram** (limited
+  to the spectrum's MS level).
 - **Imaging (MSI)** — per-pixel TIC heatmaps, single-ion images, RGB composites, embedded
   optical microscopy, and optical/ion overlays; plus TIC normalization, Gaussian smoothing,
   histogram contrast, a whole-image **mean spectrum**, **ROI → mean spectrum** (drag a
   rectangle), and **TIFF export**. Click any pixel to inspect its spectrum.
-- **Chromatograms** — the file's **stored chromatograms** listed with full metadata (type,
-  polarity, SRM/MRM precursor→product, CV detail), plus a computed total-ion chromatogram.
+- **Chromatograms** — a managed list of chromatogram cards, each independently zoomable
+  (drag-select a region, wheel-zoom, double-click to reset) and resizable. List the file's
+  **stored chromatograms** with full metadata (type, polarity, SRM/MRM precursor→product, CV
+  detail) and add any to a card, or generate in-memory **total-ion** and **extracted-ion** (XIC,
+  m/z ± tolerance over an optional retention-time window) traces. Click a card to jump to the
+  nearest spectrum.
+- **UV/VIS (PDA / DAD)** — for files with wavelength spectra, a dedicated view with a per-time
+  absorbance **spectrum**, a derived **chromatogram** (max-absorbance trace or a single extracted
+  wavelength), and a 2-D time × wavelength **heatmap**. Click the heatmap or chromatogram to jump
+  to the spectrum at that retention time.
 - **Structure** — deep Parquet inspection: archive members, per-column footers,
   encodings, row-group layout, page-index status, and on-demand value distributions.
 - **Deep links, sharing & USI** — every view is a shareable URL (file, spectrum, scan, pixel,
-  ROI, ion image, RGB channels), with an optional live address-bar sync. **Copy USI** emits a
-  PSI Universal Spectrum Identifier for the current spectrum. An **About** button reports the
-  running version/build.
+  ROI, ion image, RGB channels, chromatogram), with an optional live address-bar sync. **Copy
+  USI** emits a PSI Universal Spectrum Identifier for the current spectrum. A **Settings** gear
+  stores your default XIC m/z tolerance and retention-time window in the browser; an **About**
+  button reports the running version/build.
 
 A full walkthrough with screenshots is in the **[user manual](docs/index.html)**.
 

@@ -1,13 +1,13 @@
-// Legacy `/IV/` → unified `/view/` deep-link translation (MERGE-ROADMAP §3.4).
-// Pure functions; the Phase-5 redirect shim (committed index.html for GitHub
+// Legacy `/IV/` → unified `/view/` deep-link translation.
+// Pure functions; the redirect shim (committed index.html for GitHub
 // Pages, server redirect for mzpeak.org) calls translateLegacyIvSearch and then
 // location.replace()s to the unified path.
 //
 // The two REAL translations (everything else passes through unchanged):
-//   1. IV `scan=N` is a 1-BASED DISPLAYED INDEX, not a native scan number → it
-//      becomes `spectrum=N-1` (unified `scan` keeps Explorer's native-number
-//      meaning). vibe CRITICAL-4 / codex #8.
-//   2. IV `ion=mz` + separate `&tol=Da` folds into `ion=mz,Da`.
+//   1. Legacy `scan=N` is a 1-BASED DISPLAYED INDEX, not a native scan number → it
+//      becomes `spectrum=N-1` (the unified `scan` param keeps its native-number
+//      meaning).
+//   2. Legacy `ion=mz` + separate `&tol=Da` folds into `ion=mz,Da`.
 //
 // Pass-through (names preserved): file/url, optical, preload, cache/cacheMB, mz.
 // Dropped: nothing silently — anything unrecognized is carried verbatim so a
@@ -24,7 +24,7 @@ export type LegacyTranslation = {
 /**
  * Translate a legacy IV query string to the unified grammar.
  *
- * IV selection precedence was scan > ion > optical; we preserve all params and
+ * Legacy selection precedence was scan > ion > optical; we preserve all params and
  * let the unified resolver apply precedence, except the two value rewrites above.
  */
 export function translateLegacyIvSearch(search: string): LegacyTranslation {
@@ -70,14 +70,13 @@ export function translateLegacyIvSearch(search: string): LegacyTranslation {
 }
 
 /**
- * Map a legacy IV path to its unified counterpart. Two deploy targets differ
- * (codex review #9):
+ * Map a legacy IV path to its unified counterpart. Two deploy targets differ:
  *   - mzpeak.org:    `/IV/`  → `/view/`
  *   - GitHub Pages:  `/mzPeakIV/` (project-page root) → the unified project page
  *     (`/mzpeakviewer/`). A `/IV/` segment under Pages does not exist, so the
  *     shim must live at the project-page root the old links actually used.
  * The shim is published per-target with the right `basePath`; this helper records
- * the mapping the Phase-5 redirect tests assert against.
+ * the mapping the redirect tests assert against.
  */
 export const LEGACY_PATH_MAP: { from: string; to: string; target: "mzpeak.org" | "github-pages" }[] = [
   { from: "/IV/", to: "/view/", target: "mzpeak.org" },

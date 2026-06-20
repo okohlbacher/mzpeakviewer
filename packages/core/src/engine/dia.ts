@@ -4,7 +4,7 @@
 // a fragment chromatogram for a peptide precursor we must (a) find the isolation window
 // that contains the precursor m/z and (b) sum the fragment m/z over ONLY the MS2 spectra
 // of that window (summing across all MS2 would fold in fragments co-produced in other
-// windows). This is the engine half of "Stage A": manual fragment-transition extraction.
+// windows). This is the engine half of manual fragment-transition extraction.
 //
 // Window membership comes from the per-MS2-spectrum precursor isolation window
 // (MS:1000827 target / MS:1000828 lower offset / MS:1000829 upper offset), read from the

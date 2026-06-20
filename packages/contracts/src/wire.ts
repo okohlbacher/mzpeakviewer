@@ -1,7 +1,7 @@
 // Wire payload types — the plain, structured-clone/transfer-safe shapes that cross
-// the worker boundary. Deliberately NOT imported from mzpeakts or either reader:
-// the contract is the wire format, decoupled from reader internals (Phase 0 may
-// still be reshaping `DataArrays`). The engine maps reader output INTO these.
+// the worker boundary. Deliberately NOT imported from mzpeakts or the reader:
+// the contract is the wire format, decoupled from reader internals. The engine
+// maps reader output INTO these.
 //
 // Rule of thumb: every type here must survive `structuredClone` or be a transfer-
 // able typed array. No Arrow vectors, no Maps-of-objects, no class instances with
@@ -26,7 +26,7 @@ export type FileMeta = {
   samples: unknown[];
 };
 
-/** Aggregate statistics computed by the engine (Explorer scanBreakdown + IV stats). */
+/** Aggregate statistics computed by the engine (scan breakdown + file stats). */
 export type FileStats = {
   numSpectra: number;
   numEntities: number;
@@ -46,8 +46,8 @@ export type FileStats = {
 /**
  * Per-spectrum browse index — columnar + transferable. The whole Browse list, the
  * MS-level filter, the cheap per-spectrum TIC, and `scan`/`spectrum` deep-link
- * resolution all read this (Phase-3 map, HIGH: it has no other wire carrier; it is
- * NOT derivable from `FileStats` aggregates). Parallel arrays, length = numSpectra;
+ * resolution all read this: it has no other wire carrier and is NOT derivable from
+ * `FileStats` aggregates. Parallel arrays, length = numSpectra;
  * the typed arrays transfer (a 10⁵-spectrum file is ~MBs, never structured-cloned).
  */
 export type BrowseIndex = {
@@ -72,7 +72,7 @@ export type SpectrumArrays = {
   intensity: Float32Array;
   /**
    * Profile/centroid — the spectrum plot renders centroid as needles + picks top
-   * peaks, profile as a filled trace. REQUIRED and nullable (re-review): the engine
+   * peaks, profile as a filled trace. REQUIRED and nullable: the engine
    * MUST always set it (`null` = genuinely unknown → plot falls back to profile), so
    * a wire spectrum is structurally assignable to ui-kit's plot input.
    */
@@ -89,7 +89,7 @@ export type SpectrumArrays = {
 
 /**
  * One wavelength (UV/PDA/DAD optical) spectrum's arrays. SEPARATE from `SpectrumArrays`
- * on purpose (adversarial review, P0): wavelength is in **nm** (not m/z), and intensity
+ * on purpose: wavelength is in **nm** (not m/z), and intensity
  * may be **signed** (baseline-subtracted counts) and is NOT absorbance unless the unit
  * says so. The spectrum plot adapts both MS and wavelength spectra to a domain-neutral
  * input at its boundary; MS code paths never touch this type. Transfer both buffers.
@@ -172,7 +172,7 @@ export type WavelengthMatrix = {
 export type IonImageStats = { nonzeroCount: number; min: number; max: number };
 
 /**
- * Imaging grid in transfer-safe form. IV's ImagingGrid carries a
+ * Imaging grid in transfer-safe form. The in-memory ImagingGrid carries a
  * `Map<number,number>` (coordToSpectrumIndex) which clones but is not zero-copy;
  * on the wire we flatten it to parallel typed arrays the worker can transfer and
  * the shell can rebuild a lookup from. presenceMask transfers as a Uint8Array.
@@ -249,7 +249,7 @@ export type ParquetColumn = {
   /** Stringified footer min/max, when present. */
   min?: string | null;
   max?: string | null;
-  // ── Deep footer stats (Explorer parity), aggregated across row groups ──────
+  // ── Deep footer stats, aggregated across row groups ───────────────────────
   /** Page encodings used (e.g. ["PLAIN","RLE_DICTIONARY"]). */
   encodings?: string[] | null;
   /** Dictionary-encoded (has a dictionary page)? */
@@ -272,7 +272,7 @@ export type RowGroupSize = {
   bytes: number;
 };
 
-/** Parquet footer summary for the Structure tab (Phase-3 map: enriched per-column). */
+/** Parquet footer summary for the Structure tab (enriched per-column). */
 export type ParquetFooter = {
   archivePath: string;
   numRows: number;
@@ -293,11 +293,9 @@ export type ParquetFooter = {
 /**
  * A page of a deeply-read parquet column — actual VALUES for the Structure preview.
  *
- * SPIKE (Phase-3 / review CRITICAL): Explorer today overloads "deepColumn" to return
- * footer STATISTICS and "sampleColumn" to return a numeric HISTOGRAM — neither lines
- * up with paged values here. The Structure/Parquet workerization spike must reconcile
- * the three operations (footer stats → ParquetFooter columns above; paged values →
- * ColumnPage; histogram → ColumnSample.histogram) before the engine implements them.
+ * The three column operations are split by result shape: footer stats →
+ * ParquetFooter columns above; paged values → ColumnPage; histogram →
+ * ColumnSample.histogram.
  */
 export type ColumnPage = {
   archivePath: string;
@@ -332,7 +330,7 @@ export type ColumnSample = {
   column: string;
   preview: string[];
   totalRows: number;
-  /** Optional numeric histogram bins (Explorer's sampleColumn output). */
+  /** Optional numeric histogram bins. */
   histogram?: number[] | null;
   /** Min/max of the histogram domain (so the UI can label bin edges). */
   histRange?: [number, number] | null;
@@ -369,7 +367,7 @@ export type ChannelAssignment = {
   boundToThisRun: boolean;
 };
 
-/** SDRF/ISA study metadata (Explorer Summary ▸ Study) + resolved isobaric channels. */
+/** SDRF/ISA study metadata (Summary ▸ Study) + resolved isobaric channels. */
 export type StudyMeta = {
   sdrf?: unknown;
   isa?: unknown;
@@ -377,14 +375,14 @@ export type StudyMeta = {
   /** Resolved isobaric channels for this run (empty for label-free files). */
   channels: ChannelAssignment[];
   /** The index `study` block (plainified): dataset accession, title, run_sample_binding,
-   *  sample_metadata_ref. Drives the Summary ▸ Study panel (MG-05). Null when absent. */
+   *  sample_metadata_ref. Drives the Summary ▸ Study panel. Null when absent. */
   study?: unknown;
   /** Per-sample list (plainified `sample_list`): each sample's id/name + CV parameters,
-   *  for the Study panel's characteristics matrix (MG-05). */
+   *  for the Study panel's characteristics matrix. */
   samples?: unknown[];
   /** Archive member path of the embedded SDRF file (e.g. "sample_metadata/sdrf.tsv"),
    *  from the index `metadata.sample_metadata.member`. The full SDRF characteristics
-   *  table is fetched ON DEMAND from this member (MG-05 remainder). Null when absent. */
+   *  table is fetched ON DEMAND from this member. Null when absent. */
   sdrfMember?: string | null;
 };
 

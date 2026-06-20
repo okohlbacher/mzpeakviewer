@@ -1,16 +1,15 @@
 // Per-spectrum coordinate extraction + run-level grid geometry for the imaging
-// grid (IMG-01 / IMG-02). The productionized, bulk-read generalization of
-// stats.ts::probeIsImaging: instead of returning `true` on first hit, this
-// returns ALL per-spectrum {x,y} coordinates plus the run-level geometry,
-// behind a swappable CoordSource strategy chain (D-16).
+// grid. The bulk-read generalization of stats.ts::probeIsImaging: instead of
+// returning `true` on first hit, this returns ALL per-spectrum {x,y} coordinates
+// plus the run-level geometry, behind a swappable CoordSource strategy chain.
 //
 // BOUNDARY: this file lives in src/reader/ — the ONLY place that may touch
 // Apache Arrow, mzpeakts internals, or `bigint`. Every coordinate is converted
-// with `Number()` INSIDE this file so only plain `number` crosses upward
-// (D-08 / Pitfall 3). Imports only the opaque Reader type from this folder.
+// with `Number()` INSIDE this file so only plain `number` crosses upward.
+// Imports only the opaque Reader type from this folder.
 import type { Reader } from "./openUrl";
 
-// ── CV accession constants (byte-identical to stats.ts) ───────────────────────
+// ── CV accession constants ────────────────────────────────────────────────────
 
 // IMS:1000050 = position x; IMS:1000051 = position y (imaging-mzpeak-spec v0.3).
 // Promoted column names in the scan table (authoritative path).
@@ -44,7 +43,7 @@ export type CoordResult = {
 export type GridGeometry = {
   pixelCount: { x: number; y: number } | null;
   pixelSizeUm: { x: number; y: number } | null;
-  /** 1-based by spec default; read from the discovery block when present (D-10). */
+  /** 1-based by spec default; read from the discovery block when present. */
   coordinateBase: number;
   geometrySource: "discovery-block" | "run-params";
 };
@@ -53,8 +52,8 @@ export type GridGeometry = {
 
 /**
  * Convert an Arrow coordinate cell to a plain finite number, or null.
- * Handles Int64 (`bigint`) AND UInt32 (`number`) columns uniformly (D-15):
- * `Number(bigint)` is exact for pixel-scale values (≪ 2^53, Pitfall 3) and a
+ * Handles Int64 (`bigint`) AND UInt32 (`number`) columns uniformly:
+ * `Number(bigint)` is exact for pixel-scale values (≪ 2^53) and a
  * no-op for plain numbers.
  */
 function toCoordNumber(value: unknown): number | null {
@@ -91,11 +90,11 @@ function getScans(reader: Reader): ScanStruct | null {
 /**
  * Bulk read the promoted `IMS_1000050_position_x` / `..._y` columns plus the
  * `source_index` child from the `scans` Arrow Struct vector. One column object
- * per axis, then a tight numeric loop (Pitfall 5 — no per-record get(i)).
+ * per axis, then a tight numeric loop (no per-record get(i)).
  *
- * Scan rows join to spectra on `source_index`, NOT row order (Pattern 1 note):
- * each row's joined spectrum index is read from the `source_index` column and
- * defaults to the row index only when that column is absent.
+ * Scan rows join to spectra on `source_index`, NOT row order: each row's joined
+ * spectrum index is read from the `source_index` column and defaults to the row
+ * index only when that column is absent.
  */
 function fromPromotedColumns(reader: Reader): CoordResult | null {
   const scans = getScans(reader);
@@ -105,7 +104,7 @@ function fromPromotedColumns(reader: Reader): CoordResult | null {
   const yCol = scans.getChild(IMS_POS_Y_COL);
   if (!xCol || !yCol) return null;
 
-  // source_index maps each scan row to its spectrum.index (the join key, Pattern 1).
+  // source_index maps each scan row to its spectrum.index (the join key).
   // When absent (non-conformant file), fall back to row order and warn — this is
   // plausible but WRONG for files where scan-row order diverges from spectrum order.
   const srcCol = scans.getChild("source_index");
@@ -201,7 +200,7 @@ function fromCvParams(reader: Reader): CoordResult | null {
 
 // ── Strategy 3: id-parse (LAST RESORT) ────────────────────────────────────────
 
-// Bounded, non-backtracking patterns (T-02-01-RD / V5 ReDoS guard). The `{1,9}`
+// Bounded, non-backtracking patterns (ReDoS guard). The `{1,9}`
 // digit bound caps the match length so an adversarial id cannot cause runaway
 // backtracking; an unparseable id simply yields no match and is skipped.
 const ID_X_RE = /x=(\d{1,9})/i;
@@ -247,7 +246,7 @@ function fromIdParse(reader: Reader): CoordResult | null {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Extract per-spectrum {x,y} coordinates via the CoordSource chain (D-16):
+ * Extract per-spectrum {x,y} coordinates via the CoordSource chain:
  * promoted-columns → cv-params → id-parse, tagging the winning strategy.
  * Returns `null` when no source yields coordinates (non-imaging file).
  */
@@ -282,7 +281,7 @@ function fromDiscoveryBlock(reader: Reader): GridGeometry | null {
   const pixelSizeUm = readXYPair(block["pixel_size_um"]);
   const baseRaw = toCoordNumber(block["coordinate_base"]);
   // Return a partial geometry even when only coordinate_base is present — the
-  // base value is authoritative (C3) and must not be silently discarded.
+  // base value is authoritative and must not be silently discarded.
   if (pixelCount === null && pixelSizeUm === null && baseRaw === null) return null;
 
   return {
@@ -294,9 +293,9 @@ function fromDiscoveryBlock(reader: Reader): GridGeometry | null {
 }
 
 /**
- * Geometry from the raw `run` keyValueMetadata JSON `parameters` (Pitfall 1:
- * the vendored MSRun.fromJSON drops `parameters`, so we read the raw JSON
- * ourselves). Pulls IMS:1000042/43 (extent) + IMS:1000046/47 (pixel size) by
+ * Geometry from the raw `run` keyValueMetadata JSON `parameters` (the vendored
+ * MSRun.fromJSON drops `parameters`, so we read the raw JSON ourselves). Pulls
+ * IMS:1000042/43 (extent) + IMS:1000046/47 (pixel size) by
  * accession. coordinate_base is not carried here → defaults to 1.
  */
 function fromRunParams(reader: Reader): GridGeometry | null {
@@ -359,7 +358,7 @@ function fromRunParams(reader: Reader): GridGeometry | null {
 }
 
 /**
- * Read run-level grid geometry, source order (Pitfall 1 / C4):
+ * Read run-level grid geometry, source order:
  *   (a) metadata.imaging discovery block (the only run-level source the vendored
  *       reader reliably surfaces) — WINS when present;
  *   (b) raw `run` JSON `parameters` by accession;

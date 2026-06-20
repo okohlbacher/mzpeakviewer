@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import uPlot from "uplot";
 // uPlot base CSS ships via @mzpeak/ui-kit/styles.css — no JS side-effect import here
-// (matches SpectrumPlot/ChromPlot; codex Phase-2 #8).
+// (matches SpectrumPlot/ChromPlot).
 import type { WavelengthSpectrumArrays } from "@mzpeak/contracts";
 import { wheelZoomPlugin } from "./uplotZoom";
 import { STAGE, stageAxes, xRange, compactIntensity } from "./chartTheme";

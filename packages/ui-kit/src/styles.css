@@ -1,11 +1,10 @@
 /* @mzpeak/ui-kit — the design-system stylesheet entry. Import once in the app:
    `import "@mzpeak/ui-kit/styles.css"`.
 
-   Tokens (the value-equal palette + Explorer semantic aliases + IV imaging
-   colormaps), the base reset, the .mz-* component classes, the uPlot base CSS,
-   and the Explorer-harvested component selectors (tree + chart). The app SHELL
-   layout (shell.css) is NOT here — that belongs to the app, not the design
-   system. */
+   Tokens (palette + semantic aliases + imaging colormaps), the base reset, the
+   .mz-* component classes, the uPlot base CSS, and the chart/tree component
+   selectors. The app SHELL layout (shell.css) is NOT here — that belongs to the
+   app, not the design system. */
 @import "./styles/tokens/colors.css";
 @import "./styles/tokens/colormaps.css";
 @import "./styles/tokens/typography.css";
@@ -14,4 +13,4 @@
 @import "./styles/tokens/base.css";
 @import "uplot/dist/uPlot.min.css";
 @import "./styles/components.css";
-@import "./styles/explorer-components.css";
+@import "./styles/chart-components.css";

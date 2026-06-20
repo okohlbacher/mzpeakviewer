@@ -1,5 +1,5 @@
 // mzPeak Design System — React primitives (token-driven .mz-* classes).
-// Harvested verbatim from mzPeakIV src/ui/ds (the source of truth for the DS).
+// The source of truth for the design system.
 export { Button, type ButtonProps } from "./Button";
 export {
   SegmentedControl,

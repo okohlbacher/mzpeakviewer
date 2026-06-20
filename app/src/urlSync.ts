@@ -1,4 +1,4 @@
-// URL ↔ store synchronization (MERGE-ROADMAP §3, Phase 5).
+// URL ↔ store synchronization.
 //
 // This module is the thin imperative bridge between the PURE grammar/legacy
 // modules in @mzpeak/contracts and the app's zustand store. It does no parsing
@@ -55,8 +55,8 @@ function modeFromCapabilities(): FileMode {
  *                     index only when ids don't carry scans / nothing resolves.
  *   - by:"pixel"    → not directly indexable from the URL alone; the view is
  *                     set so the user lands on the right panel, selection no-op.
- * Chromatogram modes tic / xic / stored all route to loadChrom() (the app store
- * tracks the request in chromReq for the reverse round-trip).
+ * Chromatogram modes tic / xic / stored each add a card to the managed list; the
+ * active card is mirrored into chromReq for the reverse share-link round-trip.
  */
 async function applyViewState(v: ViewState, notices: { code: string; message: string }[]) {
   const st = useStore.getState();
@@ -71,7 +71,7 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
   // 2. Selection (spectrum/scan → selectSpectrum). Defensive: only when numeric.
   // selectSpectrum routes to the Spectra view by default; suppress that when the deep
   // link targets a non-Spectra view (chromatograms/imaging) — otherwise the selection
-  // would overwrite the view set above (codex review). The pixel path already does this.
+  // would overwrite the view set above. The pixel path already does this.
   const sel: SpectrumSelector = v.selector;
   const routeToSpectra = v.view === "spectra";
   if (sel) {
@@ -92,14 +92,14 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
         // Fallback ONLY when ids don't carry scans (or browse absent): treat the scan
         // as an absolute index (correct when scan==index). Range-guarded. When ids DO
         // carry scans but the scan wasn't found, we no-op rather than select a
-        // misaligned index (review P2) — a non-existent scan shouldn't land elsewhere.
+        // misaligned index — a non-existent scan shouldn't land elsewhere.
         const n = browse?.id.length ?? null;
         if (n == null || sel.scan < n) {
           await st.selectSpectrum(sel.scan, routeToSpectra).catch(() => {});
         }
       }
     } else if (sel.by === "pixel" && Number.isInteger(sel.x) && Number.isInteger(sel.y)) {
-      // Imaging pixel deep link (MG-01): resolve (x,y) → spectrum via the loaded grid.
+      // Imaging pixel deep link: resolve (x,y) → spectrum via the loaded grid.
       // route=false keeps the imaging view (already set above) and fills the dock.
       await st.selectPixel(sel.x, sel.y, false).catch(() => {});
     }
@@ -125,14 +125,14 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
     }
   }
 
-  // 3b. Imaging deep-link controls (MG-01): prefill the Ion-image m/z+tol and the
+  // 3b. Imaging deep-link controls: prefill the Ion-image m/z+tol and the
   // RGB channel list so a ?ion=/?ch= link lands on populated controls.
   if (v.ion) st.setIonRequest(v.ion);
   if (v.channels.length) st.setRgbChannels(v.channels);
-  // 3c. Imaging ROI (MG-01): a ?roi= link sets the rect; the Imaging view renders its
+  // 3c. Imaging ROI: a ?roi= link sets the rect; the Imaging view renders its
   // region-mean spectrum (resolves the rect → enclosed pixels → engine.roiSpectrum). The
   // ROI render only runs while an imaging view is mounted, but the grammar infers a bare
-  // ?roi= link to "spectra" — so for an imaging file, land on an imaging view (review P2).
+  // ?roi= link to "spectra" — so for an imaging file, land on an imaging view.
   if (v.roi) {
     st.setRoiRect(v.roi);
     const IMAGING_VIEWS = ["overview", "ion", "multi", "optical", "overlay"];
@@ -197,7 +197,7 @@ export function currentShareUrl(): string {
   const pathname = isTauri ? "/view/" : (typeof window !== "undefined" ? window.location.pathname : "/");
 
   // Map the app store's selector → grammar selector. A pixel pick emits `px=x,y`
-  // (MG-01, imaging provenance preserved); any other selection emits `spectrum=index`.
+  // (imaging provenance preserved); any other selection emits `spectrum=index`.
   let selector: SpectrumSelector = null;
   if (s.selector?.by === "pixel" && Number.isInteger(s.selector.x) && Number.isInteger(s.selector.y)) {
     selector = { by: "pixel", x: s.selector.x, y: s.selector.y, index: s.selector.index, id: null };
@@ -205,9 +205,9 @@ export function currentShareUrl(): string {
     selector = { by: "spectrum", index: s.selector.index, id: null };
   }
 
-  // chrom: round-trip the exact loaded trace (tic / xic / stored) from the last
-  // loadChrom request. xicRange collapses to center ± half-width (the grammar's xic
-  // form). Only meaningful on the chromatograms view; elsewhere fall back to default.
+  // chrom: round-trip the exact active trace (tic / xic / stored) from chromReq.
+  // xicRange collapses to center ± half-width (the grammar's xic form). Only
+  // meaningful on the chromatograms view; elsewhere fall back to default.
   let chromMode = DEFAULT_VIEW_STATE.chromMode;
   let chromXic = DEFAULT_VIEW_STATE.xic;
   let chromStoredId = DEFAULT_VIEW_STATE.chromStoredId;
@@ -234,11 +234,11 @@ export function currentShareUrl(): string {
     xic: chromXic,
     chromStoredId,
     chromTimeRange,
-    // imaging (MG-01): emit the last Ion-image request + RGB channels so ?ion=/?ch=
+    // imaging: emit the last Ion-image request + RGB channels so ?ion=/?ch=
     // round-trip. DEFAULT_VIEW_STATE has ion:null / channels:[] — only set when present.
     ion: s.ionRequest ?? DEFAULT_VIEW_STATE.ion,
     channels: s.rgbChannels.length ? s.rgbChannels : DEFAULT_VIEW_STATE.channels,
-    // imaging ROI (MG-01): emit roi=x0,y0,x1,y1 (absolute IMS corners) so a region-mean
+    // imaging ROI: emit roi=x0,y0,x1,y1 (absolute IMS corners) so a region-mean
     // selection round-trips.
     roi: s.roiRect ?? DEFAULT_VIEW_STATE.roi,
   };
@@ -264,7 +264,7 @@ function msRunFromUrl(url: string): string {
 }
 
 /**
- * Build a Universal Spectrum Identifier for the current file + selected spectrum (MG-08),
+ * Build a Universal Spectrum Identifier for the current file + selected spectrum,
  * or null when no remote file / no selection exists. `collection` is the dataset accession
  * when the source URL carries one (PXD/MSV — a citeable, resolvable USI), else the PSI
  * placeholder `USI000000` (valid for local/unsubmitted data). The selector prefers the

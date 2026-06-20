@@ -7,6 +7,8 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useStore, seriesToPoints, CHROM_MIN_H, CHROM_MAX_H, type ChromItem } from "../store";
 import { engine } from "../engine";
+import { nearestSpectrumByTime } from "../nearestSpectrum";
+import { parseRtRange } from "../rtRange";
 import { ChromPlot, MultiChromPlot, Button, TreeView, useCvTerms, cvName, type ChromTrace } from "@mzpeak/ui-kit";
 import type { ChromatogramInfo } from "@mzpeak/contracts";
 
@@ -22,15 +24,6 @@ const xicInputStyle = (widthRem: number): CSSProperties => ({
   background: "var(--surface-input)",
   color: "var(--text-heading)",
 });
-
-/** Parse an optional RT min/max (seconds) pair; returns undefined when blank/invalid. */
-function parseRt(minS: string, maxS: string): [number, number] | undefined {
-  if (minS.trim() === "" && maxS.trim() === "") return undefined;
-  const lo = Number(minS);
-  const hi = Number(maxS);
-  if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo >= hi) return undefined;
-  return [lo, hi];
-}
 
 export function Chromatograms() {
   const phase = useStore((s) => s.phase);
@@ -51,7 +44,7 @@ export function Chromatograms() {
   const [xicRtMin, setXicRtMin] = useState("");
   const [xicRtMax, setXicRtMax] = useState("");
 
-  // DIA fragment extractor (Stage A) — unchanged, view-local + overlaid.
+  // DIA fragment extractor — view-local + overlaid.
   const [diaPrecursor, setDiaPrecursor] = useState("");
   const [diaFragments, setDiaFragments] = useState("");
   const [diaTol, setDiaTol] = useState("0.02");
@@ -61,7 +54,7 @@ export function Chromatograms() {
   const [diaNote, setDiaNote] = useState<string | null>(null);
 
   // Bumped on every file/phase change; the DIA extractor captures it before its await and
-  // drops a stale commit (an extraction from a since-closed file) (review).
+  // drops a stale commit (an extraction from a since-closed file).
   const diaRunRef = useRef(0);
   useEffect(() => {
     diaRunRef.current++;
@@ -73,11 +66,11 @@ export function Chromatograms() {
     return () => { live = false; };
   }, [phase]);
   // Invalidate any in-flight DIA extraction on unmount so its async tail can't setState on the
-  // gone component (the run-token guard then drops the commit) (review).
+  // gone component (the run-token guard then drops the commit).
   useEffect(() => () => { diaRunRef.current++; }, []);
 
   // Keep the add-XIC ± field in sync with the Settings default when it changes while this
-  // view is mounted (the field is seeded from settings only at mount otherwise) (review).
+  // view is mounted (the field is seeded from settings only at mount otherwise).
   useEffect(() => { setXicTol(String(settings.xicTolDa)); }, [settings.xicTolDa]);
 
   if (phase !== "ready") {
@@ -90,14 +83,12 @@ export function Chromatograms() {
 
   const xicMzNum = Number(xicMz);
   const xicTolNum = Number(xicTol);
-  // RT is valid iff BOTH blank (full range) or BOTH a finite lo<hi. Partial/lo>=hi must block,
-  // not silently run a full-range XIC (review — mirrors the peak→chrom popover).
-  const xicRtBlank = xicRtMin.trim() === "" && xicRtMax.trim() === "";
-  const xicRtValid = xicRtBlank || parseRt(xicRtMin, xicRtMax) !== undefined;
+  const xicRt = parseRtRange(xicRtMin, xicRtMax);
+  const xicRtValid = xicRt.valid;
   const xicValid = xicMz.trim() !== "" && Number.isFinite(xicMzNum) && xicMzNum > 0 && Number.isFinite(xicTolNum) && xicTolNum > 0 && xicRtValid;
   function onAddXic() {
     if (!xicValid) return;
-    addXic({ mz: xicMzNum, tolDa: xicTolNum, rt: parseRt(xicRtMin, xicRtMax) });
+    addXic({ mz: xicMzNum, tolDa: xicTolNum, rt: xicRt.range });
   }
 
   const fmtMz = (m: number | null) => (m == null ? "—" : m.toFixed(4));
@@ -105,7 +96,7 @@ export function Chromatograms() {
   const selectedMeta = list?.find((c) => c.id === metaId) ?? null;
   const generatedCount = chromList.filter((it) => it.source === "generated").length;
 
-  // DIA (unchanged)
+  // DIA
   const diaPrecursorNum = Number(diaPrecursor);
   const diaTolNum = Number(diaTol);
   const diaFragmentMzs = diaFragments.split(/[\s,;]+/).map((s) => Number(s)).filter((v) => Number.isFinite(v) && v > 0);
@@ -229,7 +220,7 @@ export function Chromatograms() {
         </div>
       )}
 
-      {/* ── DIA fragment extractor (Stage A) — unchanged ──────────────────────── */}
+      {/* ── DIA fragment extractor ────────────────────────────────────────────── */}
       <details data-testid="dia-extractor" style={{ marginTop: "0.4rem", borderTop: "1px solid var(--border-hairline, #eee)", paddingTop: "0.6rem" }}>
         <summary style={{ cursor: "pointer", fontSize: "0.9rem", fontWeight: 600, userSelect: "none" }}>DIA fragment extractor</summary>
         <p style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", margin: "0.4rem 0" }}>
@@ -273,25 +264,18 @@ function ChromCard({ item }: { item: ChromItem }) {
 
   // RT-click → nearest spectrum. Restrict to the trace's effective MS level so the click
   // lands on a same-level scan: the XIC's own msLevel, or MS1 for a TIC (the engine TIC sums
-  // MS1 when present, so a DDA run must not pick an interleaved MS2 scan). (review)
+  // MS1 when present, so a DDA run must not pick an interleaved MS2 scan).
   const pickLevel =
     item.req.mode === "xic" ? item.req.msLevel
     : item.req.mode === "tic" && browse?.msLevel.some((l) => l === 1) ? 1
     : undefined;
   function pickNearestSpectrum(time: number) {
     if (!browse || item.source === "stored") return;
-    let best = -1, bestD = Infinity;
-    for (let i = 0; i < browse.rt.length; i++) {
-      if (pickLevel != null && browse.msLevel[i] !== pickLevel) continue;
-      const rt = browse.rt[i] as number;
-      if (!Number.isFinite(rt)) continue;
-      const d = Math.abs(rt - time);
-      if (d < bestD) { bestD = d; best = i; }
-    }
+    const best = nearestSpectrumByTime(browse, time, pickLevel ?? undefined);
     if (best >= 0) void selectSpectrum(best);
   }
   // Only mark the selected spectrum on this trace if it belongs to the trace's level — a
-  // marker for a scan not summed into this card would be misleading (codex review).
+  // marker for a scan not summed into this card would be misleading.
   let selectedTime: number | null = null;
   if (item.source !== "stored" && selector && browse && (pickLevel == null || browse.msLevel[selector.index] === pickLevel)) {
     const rt = browse.rt[selector.index] as number | undefined;
@@ -321,7 +305,7 @@ function ChromCard({ item }: { item: ChromItem }) {
 }
 
 /** Bottom drag handle — pointer-captured, clamped, with keyboard ↑/↓ nudge (a11y).
- *  ponytail: commits height on pointer-UP only (one rebuild per resize, not per tick);
+ *  Commits height on pointer-UP only (one rebuild per resize, not per tick);
  *  the plot snaps to the new size on release. Live setSize would need uPlot-instance
  *  plumbing through useUplot — not worth it. */
 function ResizeHandle({ height, onResize }: { height: number; onResize: (h: number) => void }) {

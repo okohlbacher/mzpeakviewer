@@ -5,22 +5,20 @@
 // wire type. No mzpeakts, no reader, no grid handle — the stats line is computed
 // straight off the ion image the renderer produced.
 //
-// Mirrors mzPeakIV's `computeIonImageStats` (src/compute/ionImage.ts): nonzeroCount
-// counts cells with value !== 0; min/max are taken over the finite, nonzero cells;
-// an all-zero (or all-absent) image returns {0,0,0} rather than ±Infinity, so the UI
-// never has to escape sentinel values.
+// Stats semantics: nonzeroCount counts cells with value !== 0; min/max are taken over
+// the finite, nonzero cells; an all-zero (or all-absent) image returns {0,0,0} rather
+// than ±Infinity, so the UI never has to escape sentinel values.
 
 import type { IonImageStats } from "@mzpeak/contracts";
 
 /**
  * Compute the {nonzeroCount, min, max} summary over an ion-image raster.
  *
- * When a `presenceMask` is given this EXACTLY mirrors IV's `computeIonImageStats`
- * (src/compute/ionImage.ts:134): cells with `presenceMask[k] === 0` are ABSENT and
+ * When a `presenceMask` is given, cells with `presenceMask[k] === 0` are ABSENT and
  * skipped, so a *present* pixel with a legitimate 0 intensity still counts toward
- * min/max (review: dropping the mask was a real semantic bug — a present-with-zero
- * pixel was wrongly treated as absent). `nonzeroCount` counts present finite cells
- * with value !== 0.
+ * min/max (dropping the mask would be a real semantic bug — a present-with-zero pixel
+ * would be wrongly treated as absent). `nonzeroCount` counts present finite cells with
+ * value !== 0.
  *
  * Without a mask (no grid context) it falls back to treating 0 as absent/background
  * and excludes it from min/max. All-absent / empty input → {0, 0, 0} (no ±Infinity).

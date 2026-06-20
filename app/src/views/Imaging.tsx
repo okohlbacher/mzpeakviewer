@@ -1,4 +1,4 @@
-// Imaging.tsx — the unified MSI imaging panel, harvested from mzPeakIV's ImagingPanel.
+// Imaging.tsx — the unified MSI imaging panel.
 //
 // One component drives all five imaging modes, selected by the store's active view:
 //   overview — per-pixel TIC heatmap (store.ticColumn)
@@ -79,7 +79,7 @@ function opticalToGrid(decoded: DecodedOptical, w: number, h: number): Uint8Clam
   return new Uint8ClampedArray(dctx.getImageData(0, 0, w, h).data);
 }
 
-// mzPeakIV's false-colour channel tokens (--channel-r/g/b).
+// False-colour channel tokens (--channel-r/g/b).
 const CHANNEL_COLORS = ["#e53935", "#43a047", "#1e88e5"] as const; // R / G / B
 const CHANNEL_LABELS = ["Red", "Green", "Blue"] as const;
 
@@ -119,7 +119,7 @@ export function Imaging({ mode }: { mode: ImagingMode }) {
       tic={tic}
       opticalImages={opticalImages}
       // route=false: fill the in-place spectrum dock without leaving the imaging view.
-      // Pass the pixel coords so the pick round-trips as `px=x,y` in the share URL (MG-01).
+      // Pass the pixel coords so the pick round-trips as `px=x,y` in the share URL.
       onPickSpectrum={(idx, pixel) => void selectSpectrum(idx, false, pixel)}
     />
   );
@@ -154,18 +154,18 @@ function ImagingInner({
   // ── Shared display controls ───────────────────────────────────────────────
   const [colormap, setColormap] = useState<Colormap>("viridis");
   const [logScale, setLogScale] = useState(false);
-  // BL-01 — TIC normalization of the ion layer (divide each pixel by its TIC).
+  // TIC normalization of the ion layer (divide each pixel by its TIC).
   // Only meaningful when a per-pixel TIC column exists (`tic`).
   const [ticNorm, setTicNorm] = useState(false);
-  // BL-04 — Gaussian smoothing σ (pixels) applied to the ion image before raster.
+  // Gaussian smoothing σ (pixels) applied to the ion image before raster.
   // 0 = off. Main-thread, presence-mask-aware (see ../compute/smooth).
   const [smoothSigma, setSmoothSigma] = useState(0);
-  // BL-07 — histogram equalization of the ion image before raster (../compute/histogram).
+  // Histogram equalization of the ion image before raster (../compute/histogram).
   const [contrast, setContrast] = useState<HistogramMode>("none");
-  // Used to name the exported TIFF (BL-05).
+  // Used to name the exported TIFF.
   const fileName = useStore((s) => s.fileName);
 
-  // ── Aux spectrum (BL-03 mean / BL-06 ROI) ─────────────────────────────────
+  // ── Aux spectrum (whole-image mean / ROI mean) ────────────────────────────
   // A derived spectrum (whole-image mean or ROI mean) shown in a panel below the
   // canvas. Local state — never routed to the store. `count` = pixels averaged.
   const [auxSpectrum, setAuxSpectrum] = useState<
@@ -176,13 +176,13 @@ function ImagingInner({
   // ── Ion-image state ───────────────────────────────────────────────────────
   // The rendered ion image + RGB composite live in the store (not local state) so
   // they persist across tab switches and the Overlay view can composite them.
-  // The m/z+tol inputs are mirrored into store.ionRequest (MG-01) so a ?ion= deep
+  // The m/z+tol inputs are mirrored into store.ionRequest so a ?ion= deep
   // link round-trips; on mount we prefill from store.ionRequest when present.
   const ionRequest = useStore((s) => s.ionRequest);
   const setIonRequestStore = useStore((s) => s.setIonRequest);
   const setRgbChannelsStore = useStore((s) => s.setRgbChannels);
   const storeRgbChannels = useStore((s) => s.rgbChannels);
-  // MG-01: ROI rectangle round-trip (absolute IMS corners) for the ?roi= deep link.
+  // ROI rectangle round-trip (absolute IMS corners) for the ?roi= deep link.
   const storeRoiRect = useStore((s) => s.roiRect);
   const setRoiRectStore = useStore((s) => s.setRoiRect);
   // The last ROI rect (absolute, "x0,y0,x1,y1") we ran — guards the deep-link effect
@@ -197,7 +197,7 @@ function ImagingInner({
   const ionCacheReady = useStore((s) => s.ionCacheReady);
 
   // ── Multi-channel (RGB) state ─────────────────────────────────────────────
-  // Mirrored into store.rgbChannels (MG-01) so a ?ch= deep link round-trips; on
+  // Mirrored into store.rgbChannels so a ?ch= deep link round-trips; on
   // mount we prefill the three R/G/B rows from store.rgbChannels when present.
   const [channels, setChannels] = useState<{ mz: string; tol: string }[]>(() => {
     const base = [
@@ -218,8 +218,7 @@ function ImagingInner({
   const setMultiChannelStore = useStore((s) => s.setMultiChannel);
 
   // ── Overlay layer ordering (top→bottom) + per-layer visibility/opacity ─────
-  // mzPeakIV blends a *fixed* optical→TIC→RGB→ion stack; here the order is
-  // user-controllable. Default mirrors mzPeakIV (ion on top, optical at the back).
+  // The order is user-controllable. Default is ion on top, optical at the back.
   const [layerOrder, setLayerOrder] = useState<LayerKey[]>(["ion", "rgb", "tic", "optical"]);
   const [layerCfg, setLayerCfg] = useState<Record<LayerKey, { visible: boolean; opacity: number }>>({
     ion: { visible: true, opacity: 0.8 },
@@ -242,7 +241,7 @@ function ImagingInner({
   const [renderProgress, setRenderProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [readout, setReadout] = useState<{ x: number; y: number; key: number } | null>(null);
-  // BL-06 — rectangle-drag ROI selection (local 0-based cells). `start` is the
+  // Rectangle-drag ROI selection (local 0-based cells). `start` is the
   // mousedown cell; `current` tracks the pointer. A move of >0 cells in x or y
   // promotes the gesture from a single-pixel click to an ROI mean.
   const [roiDrag, setRoiDrag] = useState<{
@@ -301,7 +300,7 @@ function ImagingInner({
 
   async function renderIon() {
     if (!ionInputsValid || busy) return;
-    // Mirror the request into the store so a ?ion= deep link round-trips (MG-01).
+    // Mirror the request into the store so a ?ion= deep link round-trips.
     setIonRequestStore({ mz: mzNum, tolDa: tolNum });
     setBusy(true);
     setError(null);
@@ -337,7 +336,7 @@ function ImagingInner({
       return;
     }
     // Mirror the valid channels (with their R/G/B color) into the store so a ?ch=
-    // deep link round-trips (MG-01).
+    // deep link round-trips.
     setRgbChannelsStore(
       reqs.flatMap((r, i) => (r ? [{ mz: r.mz, tolDa: r.tolDa, color: CHANNEL_COLORS[i]! }] : [])),
     );
@@ -357,7 +356,7 @@ function ImagingInner({
     }
   }
 
-  // BL-03 — whole-image mean / reference spectrum. The engine aggregates across
+  // Whole-image mean / reference spectrum. The engine aggregates across
   // all (or sampled) pixels; we stash the result in `auxSpectrum` for the panel.
   async function runMeanSpectrum() {
     if (auxBusy) return;
@@ -373,7 +372,7 @@ function ImagingInner({
     }
   }
 
-  // BL-06 — collect the spectrum indices enclosed by an ROI rectangle (local
+  // Collect the spectrum indices enclosed by an ROI rectangle (local
   // 0-based cells, inclusive), skipping absent cells, then mean them via the engine.
   async function runRoiSpectrum(a: { x: number; y: number }, b: { x: number; y: number }) {
     if (auxBusy) return;
@@ -411,7 +410,7 @@ function ImagingInner({
     }
   }
 
-  // MG-01: render the region-mean for a ?roi= deep link. When store.roiRect is set by
+  // Render the region-mean for a ?roi= deep link. When store.roiRect is set by
   // urlSync (not by our own draw — guarded via lastRoiRunRef) convert the absolute
   // corners → local cells and run the ROI mean, reflecting the shared link.
   useEffect(() => {
@@ -428,7 +427,7 @@ function ImagingInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeRoiRect, auxBusy]);
 
-  // ── BL-04 smooth + BL-07 contrast — applied on the MAIN THREAD to the ion
+  // ── Smooth + contrast — applied on the MAIN THREAD to the ion
   // image BEFORE rasterizing. Both are pure, presence-mask-aware transforms over
   // a Float32Array (see ../compute/smooth, ../compute/histogram). The displayed
   // array feeds both the ion-mode paint and the overlay ion layer, plus the
@@ -441,7 +440,7 @@ function ImagingInner({
     return a;
   }, [ionImage, smoothSigma, contrast, width, height, presenceMask]);
 
-  // ── BL-05 — Export the rendered image as a TIFF ───────────────────────────
+  // ── Export the rendered image as a TIFF ───────────────────────────────────
   // ion → single-channel 32-bit float of the DISPLAYED ion array (post smooth +
   // contrast) at grid resolution. multi → the composited RGB read back from the
   // canvas (encodeRgba8Tiff drops alpha → encodeRgbTiff). Filename derives from
@@ -467,7 +466,7 @@ function ImagingInner({
     }
   }
 
-  // BL-05 — the Export TIFF button only applies to single-channel ion and RGB
+  // The Export TIFF button only applies to single-channel ion and RGB
   // multi modes, and only once an image has actually rendered.
   const canExportTiff =
     (mode === "ion" && !!displayIonImage) || (mode === "multi" && !!multi);
@@ -503,8 +502,8 @@ function ImagingInner({
       blit(ctx, decodedOptical.rgba, decodedOptical.width, decodedOptical.height);
     } else if (mode === "overlay") {
       // Composite all available layers in the user-defined stacking order. Each
-      // layer is alpha-over'd (premultiplied) bottom→top onto the dark stage —
-      // the same blend mzPeakIV uses, but with a reorderable stack.
+      // layer is alpha-over'd (premultiplied) bottom→top onto the dark stage,
+      // with a reorderable stack.
       canvas.width = width;
       canvas.height = height;
       const n = width * height;
@@ -608,7 +607,7 @@ function ImagingInner({
     if (!pickable) return;
     const hit = toGridCoord(e, e.currentTarget, width, height);
     setReadout(hit);
-    // BL-06 — while dragging, extend the ROI rectangle to the current cell.
+    // While dragging, extend the ROI rectangle to the current cell.
     if (roiDrag && hit) {
       setRoiDrag((d) => (d ? { ...d, current: { x: hit.x, y: hit.y } } : d));
     }
@@ -817,7 +816,7 @@ function ImagingInner({
           </>
         )}
 
-        {/* TIC norm (BL-01) — ion + overlay only; needs a per-pixel TIC column. */}
+        {/* TIC norm — ion + overlay only; needs a per-pixel TIC column. */}
         {(mode === "ion" || mode === "overlay") && (
           <Field label="Normalize">
             <label
@@ -837,7 +836,7 @@ function ImagingInner({
           </Field>
         )}
 
-        {/* Smooth σ (BL-04) + Contrast (BL-07) — ion + overlay; applied to the
+        {/* Smooth σ + Contrast — ion + overlay; applied to the
             ion image on the main thread before rasterizing. */}
         {(mode === "ion" || mode === "overlay") && (
           <>
@@ -874,7 +873,7 @@ function ImagingInner({
           </>
         )}
 
-        {/* Export TIFF (BL-05) — ion (single-channel float) + multi (RGB). */}
+        {/* Export TIFF — ion (single-channel float) + multi (RGB). */}
         {(mode === "ion" || mode === "multi") && (
           <button
             type="button"
@@ -887,7 +886,7 @@ function ImagingInner({
           </button>
         )}
 
-        {/* Mean / reference spectrum (BL-03) — grid (pickable) modes only. */}
+        {/* Mean / reference spectrum — grid (pickable) modes only. */}
         {pickable && (
           <button
             type="button"
@@ -965,7 +964,7 @@ function ImagingInner({
                   display: "block",
                 }}
               />
-              {/* BL-06 — translucent ROI rectangle while dragging. Positioned by
+              {/* Translucent ROI rectangle while dragging. Positioned by
                   percentage of the grid (cells are local 0-based, inclusive). */}
               {pickable && roiDrag && (() => {
                 const x0 = Math.min(roiDrag.start.x, roiDrag.current.x);
@@ -1112,7 +1111,7 @@ function ImagingInner({
         </div>
       )}
 
-      {/* ── Aux spectrum panel (BL-03 mean / BL-06 ROI) ───────────────────────
+      {/* ── Aux spectrum panel (whole-image mean / ROI mean) ──────────────────
           A derived spectrum (whole-image mean or ROI mean) shown below the canvas.
           Local state only; cleared with the close (×) button. */}
       {auxSpectrum && (
@@ -1214,7 +1213,7 @@ function EmptyState({ mode, hasOptical, opticalErr }: { mode: ImagingMode; hasOp
   }
   return (
     // On the dark --ink stage: --text-muted (#6b757e) is only ~4.0:1; use the on-stage
-    // token (~13:1) so the empty-state message meets WCAG AA. [adversarial review F-08]
+    // token (~13:1) so the empty-state message meets WCAG AA.
     <p data-testid="imaging-empty" style={{ color: "var(--text-on-stage, #e7edf2)", fontSize: "0.85rem", textAlign: "center", maxWidth: 360 }}>
       {msg}
     </p>
@@ -1228,10 +1227,10 @@ function layerSwatch(key: LayerKey, colormap: Colormap): string {
   return colormapGradientCss(colormap, "90deg"); // tic / ion → active colormap
 }
 
-/** Reorderable layer-stack widget for the Overlay view. Mirrors mzPeakIV's blend
- *  controls but adds drag-free up/down reordering, per-layer visibility, and a
- *  data-availability state. Layers are listed top→bottom (front of the stack
- *  first), matching the painting order on the canvas. */
+/** Reorderable layer-stack widget for the Overlay view. Provides drag-free
+ *  up/down reordering, per-layer visibility, and a data-availability state.
+ *  Layers are listed top→bottom (front of the stack first), matching the
+ *  painting order on the canvas. */
 function LayersPanel({
   order,
   setOrder,

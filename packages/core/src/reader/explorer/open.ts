@@ -1,4 +1,3 @@
-// HARVESTED from mzPeakExplorer/src/reader/open.ts (read-only source; do not edit there).
 // The ONE module that imports `mzpeakts`. Everything else depends on the opaque
 // `Reader` handle re-exported here.
 import { MzPeakReader, ZipStorage } from "mzpeakts";

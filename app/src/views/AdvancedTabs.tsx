@@ -1,8 +1,7 @@
 // Shared sub-tab strip for the Advanced area — presents Metadata + Structure as
-// sibling sub-tabs (req: "Structure and Metadata should be subtabs in Advanced").
-// They remain real sidebar tabs too (keeps deep-links + roving-tabindex a11y intact,
-// per the adversarial review's Navigation R1 finding); this strip is an additive,
-// in-content way to switch between the two without leaving the Advanced context.
+// sibling sub-tabs. They remain real sidebar tabs too (keeps deep-links +
+// roving-tabindex a11y intact); this strip is an additive, in-content way to
+// switch between the two without leaving the Advanced context.
 import { useStore } from "../store";
 import type { View } from "@mzpeak/contracts";
 

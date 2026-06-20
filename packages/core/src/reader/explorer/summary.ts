@@ -1,11 +1,9 @@
-// HARVESTED (trimmed) from mzPeakExplorer/src/reader/summary.ts (read-only source).
 // File overview + the single async per-spectrum pass. Produces BOTH the summary
 // aggregates and the Browse navigation index in one sweep. No signal arrays are
 // ever read.
 //
-// Trimmed vs. upstream: the imaging discovery block (readImaging) and the
-// storage-layout/encoding detection (detectLayout) are NOT needed by the LC
-// engine slice's FileStats, so they were dropped to keep the harvest minimal.
+// The imaging discovery block and storage-layout/encoding detection are not part
+// of this FileStats path and are intentionally omitted here.
 import type { Reader } from "./open";
 import { COL, numOrNull, toRepresentation } from "./cv";
 import type { FileSummary, ManifestEntry, SpectrumIndexRow } from "./types";

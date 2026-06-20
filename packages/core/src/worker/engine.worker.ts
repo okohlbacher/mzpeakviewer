@@ -3,7 +3,7 @@
 // routes to dispatch(), and posts {type:"ready"} once (the client buffers requests
 // until it sees this, past the WASM top-level-await init). All the logic is in
 // dispatch.ts (node-testable); this file is the only browser-Worker-bound piece and is
-// verified end-to-end in the app (Phase 4).
+// verified end-to-end in the app.
 import type { WorkerRequest } from "@mzpeak/contracts";
 import { dispatch, createContext, startIonPrefetch, startSpectrumPrefetch } from "./dispatch";
 import { makeRespond } from "./respond";

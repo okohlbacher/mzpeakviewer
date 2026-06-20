@@ -33,14 +33,9 @@ import { engine } from "./engine";
 
 let currentOpenSeq = 0;
 
-// Monotonic chromatogram-request counter. Overlapping loadChrom() calls (e.g. clicking
-// a stored row then hitting Enter in the XIC inputs) must not let a slower older request
-// overwrite a newer one's trace — each call captures its seq and commits only if still
-// the latest (codex review).
-let currentChromSeq = 0;
 
 // Monotonic id for chrom-LIST items + a global load token (re-adding a fixed-id item
-// while its first load is in flight must not let the stale load commit — codex review).
+// while its first load is in flight must not let the stale load commit).
 let chromItemCounter = 0;
 let chromLoadToken = 0;
 
@@ -90,7 +85,7 @@ export type ChromItem = {
   error: string | null;
   /** Plot height in px (resize); clamped [CHROM_MIN_H, CHROM_MAX_H]. */
   height: number;
-  /** Per-item monotonic load token — guards concurrent (re)extraction (codex review). */
+  /** Per-item monotonic load token — guards concurrent (re)extraction. */
   loadSeq: number;
 };
 export const CHROM_MIN_H = 120;
@@ -140,22 +135,22 @@ export interface AppState {
 
   // SDRF/ISA isobaric channel assignments for the open run (empty for label-free).
   channels: ChannelAssignment[];
-  /** MG-05: the index `study` block (dataset accession, title, run_sample_binding) +
+  /** The index `study` block (dataset accession, title, run_sample_binding) +
    *  the per-sample list, for the Summary ▸ Study panel. Null until studyMeta resolves. */
   study: unknown;
   studySamples: unknown[] | null;
-  /** MG-05 remainder: archive member path of the embedded SDRF file (e.g.
+  /** Archive member path of the embedded SDRF file (e.g.
    *  "sample_metadata/sdrf.tsv"), so the Study panel can fetch the full
    *  characteristics table on demand. Null when absent. */
   sdrfMember: string | null;
 
-  // Imaging deep-link round-trip (MG-01): the m/z+tolerance last entered in the
+  // Imaging deep-link round-trip: the m/z+tolerance last entered in the
   // Ion-image view, and the RGB channel list from the multi-channel view. Mirrored
   // from the Imaging view's local state so currentShareUrl() can emit ?ion=/?ch=.
   // (Distinct from `channels` above, which is SDRF isobaric labels.)
   ionRequest: { mz: number; tolDa: number } | null;
   rgbChannels: { mz: number; tolDa: number; color: string }[];
-  /** MG-01: the last imaging ROI rectangle (ABSOLUTE IMS corners x0,y0,x1,y1) so a
+  /** The last imaging ROI rectangle (ABSOLUTE IMS corners x0,y0,x1,y1) so a
    *  region-mean selection round-trips as `roi=x0,y0,x1,y1` in the share URL. */
   roiRect: [number, number, number, number] | null;
 
@@ -165,7 +160,7 @@ export interface AppState {
   // spectrum selection
   /** How the active spectrum was chosen. `pixel` carries the imaging (x,y) provenance
    *  (ABSOLUTE IMS coords) so a pixel-pick round-trips as `px=x,y` in the share URL
-   *  instead of losing the coordinate to a bare `spectrum=index` (MG-01). */
+   *  instead of losing the coordinate to a bare `spectrum=index`. */
   selector:
     | { by: "index"; index: number }
     | { by: "pixel"; x: number; y: number; index: number }
@@ -196,12 +191,11 @@ export interface AppState {
   wavelengthMatrix: WavelengthMatrix | null;
   wavelengthMatrixLoading: boolean;
 
-  // chromatogram
+  // chromatogram — a mirror of the active list item, kept so the Share link can
+  // round-trip the exact active trace (xic m/z window, stored id) without reaching
+  // into chromList. Written only by the list actions (see activeMirror).
   chrom: ChromatogramSeries | null;
-  /** The request that produced `chrom` (tic / xic / xicRange / stored) — kept so the
-   *  Share link can round-trip the exact trace (xic m/z window, stored id). */
   chromReq: ChromRequest | null;
-  chromLoading: boolean;
 
   // ── Managed chromatogram list (Chromatograms view) — stored + generated (in-mem) ──
   /** The chromatograms shown as cards: file's stored ones + user-generated TIC/XIC.
@@ -236,11 +230,11 @@ export interface AppState {
   setIonImage: (image: Float32Array | null, stats: IonImageStats | null) => void;
   /** Store the latest RGB multi-channel images (rendered in the RGB view). */
   setMultiChannel: (images: (Float32Array | null)[] | null) => void;
-  /** MG-01: mirror the Ion-image view's m/z+tolerance so ?ion= can round-trip. */
+  /** Mirror the Ion-image view's m/z+tolerance so ?ion= can round-trip. */
   setIonRequest: (req: { mz: number; tolDa: number } | null) => void;
-  /** MG-01: set/clear the imaging ROI rectangle (absolute IMS corners). */
+  /** Set/clear the imaging ROI rectangle (absolute IMS corners). */
   setRoiRect: (rect: [number, number, number, number] | null) => void;
-  /** MG-01: mirror the RGB channels list so ?ch= can round-trip. */
+  /** Mirror the RGB channels list so ?ch= can round-trip. */
   setRgbChannels: (channels: { mz: number; tolDa: number; color: string }[]) => void;
   /** Load a spectrum by index. `route` (default true) switches to the Spectra view
    *  on success; pass false to load the spectrum without leaving the current view
@@ -249,9 +243,8 @@ export interface AppState {
   /** Select the spectrum at imaging pixel (x,y) (ABSOLUTE IMS coords). Resolves the
    *  pixel → spectrum index via the loaded grid, records `px` provenance, and loads
    *  in-place (route=false). Used by an imaging pick and by a `?px=` deep link. No-op
-   *  if there's no grid or the pixel has no spectrum. (MG-01) */
+   *  if there's no grid or the pixel has no spectrum. */
   selectPixel: (x: number, y: number, route?: boolean) => Promise<void>;
-  loadChrom: (req: ChromRequest) => Promise<void>;
   /** Update a persisted setting (written through to localStorage). */
   setSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
   /** Add a computed TIC to the list (optional RT window in seconds). */
@@ -299,7 +292,7 @@ export function seriesToPoints(s: ChromatogramSeries): { time: number; intensity
 // ---------------------------------------------------------------------------
 
 /** Cleared payload + loading phase for a new open. `fileName`/`sourceUrl` are per-open and
- *  spread on top. Includes the loading flags both open paths previously omitted (A7). */
+ *  spread on top. Includes the loading flags both open paths previously omitted. */
 const INITIAL_OPEN_STATE = {
   phase: "loading",
   error: null,
@@ -338,7 +331,6 @@ const INITIAL_OPEN_STATE = {
   wavelengthMatrixLoading: false,
   chrom: null,
   chromReq: null,
-  chromLoading: false,
   chromList: [],
   activeChromId: null,
   notices: [],
@@ -495,7 +487,7 @@ function startChromItem(
   const loadSeq = ++chromLoadToken;
   const item: ChromItem = { itemId, source, req, label, series: null, loading: true, error: null, height: CHROM_DEFAULT_H, loadSeq };
   // New active item has no series yet → activeMirror nulls chrom/chromReq so the Share link
-  // doesn't keep serializing the previously-active trace while this one loads (review).
+  // doesn't keep serializing the previously-active trace while this one loads.
   set((s) => { const chromList = [...s.chromList, item]; return { chromList, activeChromId: itemId, ...activeMirror(chromList, itemId) }; });
   const openSeq = currentOpenSeq;
   void (async () => {
@@ -563,7 +555,7 @@ export const useStore = create<AppState>((set, get) => ({
   studySamples: null,
   sdrfMember: null,
 
-  // imaging deep-link round-trip (MG-01)
+  // imaging deep-link round-trip
   ionRequest: null,
   rgbChannels: [],
   roiRect: null,
@@ -593,7 +585,6 @@ export const useStore = create<AppState>((set, get) => ({
   // chrom
   chrom: null,
   chromReq: null,
-  chromLoading: false,
   chromList: [],
   activeChromId: null,
 
@@ -705,7 +696,6 @@ export const useStore = create<AppState>((set, get) => ({
       wavelengthMatrixLoading: false,
       chrom: null,
       chromReq: null,
-      chromLoading: false,
       chromList: [],
       activeChromId: null,
       notices: [],
@@ -793,34 +783,6 @@ export const useStore = create<AppState>((set, get) => ({
     const idx = rebuildCoordMap(grid).get(ly * grid.width + lx);
     if (idx == null) return; // no spectrum at this pixel
     await get().selectSpectrum(idx, route, { x, y });
-  },
-
-  // -------------------------------------------------------------------------
-  // loadChrom — extract a chromatogram: the computed TIC, an extracted-ion
-  // chromatogram (xic over m/z ± tol, or xicRange over [mzLo, mzHi]), or a STORED
-  // chromatogram (SRM/MRM transition etc.) looked up by its native id. The request
-  // is retained in `chromReq` so the Share link can reproduce the exact trace.
-  // Stale-async guard: drop result if a newer openFile started.
-  // -------------------------------------------------------------------------
-  loadChrom: async (req: ChromRequest) => {
-    const seq = currentOpenSeq;
-    const chromSeq = ++currentChromSeq;
-    set({ chromLoading: true });
-    // Stale if a newer file opened OR a newer chromatogram request was issued. A stale
-    // result must NOT touch chrom/chromReq/chromLoading — the newer in-flight request
-    // owns them (and will clear chromLoading on its own completion).
-    const stale = () => seq !== currentOpenSeq || chromSeq !== currentChromSeq;
-    try {
-      const series = await engine.extractChrom(req);
-      if (stale()) return;
-      set({ chrom: series, chromReq: req, chromLoading: false });
-    } catch (err) {
-      if (stale()) return;
-      set({
-        chromLoading: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
   },
 
   // ── Managed chromatogram list ────────────────────────────────────────────

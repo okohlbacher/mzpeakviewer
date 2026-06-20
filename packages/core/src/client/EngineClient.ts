@@ -6,7 +6,7 @@
 // callbacks. It knows NOTHING about mzpeakts, Arrow, parquet, or the DOM beyond
 // the Worker/MessagePort shape — so a fake worker drives it in tests.
 //
-// Correlation model (mirrors mzPeakIV's store.ts):
+// Correlation model:
 //   - Request types that carry a `requestId` resolve a Promise when the matching
 //     `*Result` response (same requestId) lands, and reject on `{type:"error",
 //     requestId}`.
@@ -292,7 +292,7 @@ export class EngineClient {
    * Open a file (a Blob, read lazily) or URL. Resolves with the opened payload. The
    * engine is single-open: a new open SUPERSEDES any in-flight open (its Promise
    * rejects with SupersededError, and a buffered-but-unsent open is removed from the
-   * outbox so two opens can't both run on the worker — review M6).
+   * outbox so two opens can't both run on the worker).
    */
   open(source: OpenSource): Promise<OpenedResult> {
     if (this.openRequestId !== 0) this.supersedeRequest(this.openRequestId);
@@ -311,7 +311,7 @@ export class EngineClient {
   /**
    * Close the active reader. Rejects every pending request/select Promise with
    * EngineClosedError — after close the worker drops in-flight work, so awaiting
-   * callers must not hang (review C2).
+   * callers must not hang.
    */
   close(): void {
     this.send({ type: "close" });
@@ -326,7 +326,7 @@ export class EngineClient {
   /**
    * Select a spectrum by index. Correlated by a monotonic selectId; latest-wins. A
    * new select SUPERSEDES any pending select (its Promise rejects with
-   * SupersededError) so no awaiting caller hangs and no resolver leaks (review C1/C5).
+   * SupersededError) so no awaiting caller hangs and no resolver leaks.
    */
   selectSpectrum(index: number): Promise<SpectrumArrays> {
     // Supersede any pending select(s) — there should be at most one, but clear all.
@@ -411,7 +411,7 @@ export class EngineClient {
     return this.request<ChromatogramInfo[]>((requestId) => ({ type: "chromatogramList", requestId }));
   }
 
-  /** List archive members (Explorer Structure tab). */
+  /** List archive members (Structure tab). */
   archiveList(): Promise<ArchiveMemberList> {
     return this.request<ArchiveMemberList>((requestId) => ({ type: "archiveList", requestId }));
   }
@@ -456,7 +456,7 @@ export class EngineClient {
     }));
   }
 
-  /** Study metadata (Explorer SDRF/ISA). */
+  /** Study metadata (SDRF/ISA). */
   studyMeta(): Promise<StudyMeta> {
     return this.request<StudyMeta>((requestId) => ({ type: "studyMeta", requestId }));
   }
@@ -651,8 +651,8 @@ export class EngineClient {
         return;
       }
     }
-    // selectId-correlated failure (selects aren't requestId-keyed — review C1). A select
-    // error carries only a selectId; it could be an MS or a UV select. selectIds are drawn
+    // selectId-correlated failure (selects aren't requestId-keyed). A select error
+    // carries only a selectId; it could be an MS or a UV select. selectIds are drawn
     // from ONE shared counter (globally unique across MS+UV), so at most one map matches.
     if (msg.selectId !== undefined) {
       const pending = this.pendingBySelectId.get(msg.selectId);
@@ -669,7 +669,7 @@ export class EngineClient {
       }
     }
     // Unattributed → a global engine error (e.g. WASM init). Surface it on the
-    // `error` event channel rather than silently dropping it (review).
+    // `error` event channel rather than silently dropping it.
     this.emit("error", msg);
   }
 
@@ -678,7 +678,7 @@ export class EngineClient {
   ): void {
     const pending = this.pendingBySelectId.get(msg.selectId);
     // Stale-drop: a spectrumResult older than the latest select. Reject (not silently
-    // drop) its resolver so the awaiting caller unblocks and nothing leaks (review C1).
+    // drop) its resolver so the awaiting caller unblocks and nothing leaks.
     if (MESSAGE_POLICY.selectSpectrum.cancellation === "stale-drop" && msg.selectId < this.latestSelectId) {
       if (pending) {
         this.pendingBySelectId.delete(msg.selectId);

@@ -6,8 +6,8 @@
 // would double-count memory on a large imaging file. A single `CacheBudget` tracks
 // total bytes held; each cache accounts its own entries against it.
 //
-// What is stored (design requirement): the heavy signal arrays (m/z f64 + intensity
-// f32) plus the spectrum's MS level ONLY. The light metadata (id, representation,
+// What is stored: the heavy signal arrays (m/z f64 + intensity f32) plus the
+// spectrum's MS level ONLY. The light metadata (id, representation,
 // retention time) stays in the in-memory metadata table and is re-read on demand —
 // never cached. msLevel is kept so a future MS0/1-only prefetch can build its
 // worklist without materializing per-spectrum records.
@@ -25,7 +25,7 @@ export function spectrumBytes(s: CachedSpectrum): number {
 }
 
 /**
- * Memory-derived default cache ceiling. Mirrors mzPeakExplorer's `defaultCacheMB`:
+ * Memory-derived default cache ceiling:
  * `clamp(round(deviceMemory_GB * 96), 192, 768)` MB. `navigator.deviceMemory` is
  * exposed in DedicatedWorkerGlobalScope; absent (node tests / older engines) → 4 GB.
  */
@@ -72,8 +72,7 @@ export class CacheBudget {
  * cache evicts ITS OWN oldest entries until the shared budget fits (it never evicts
  * another cache's entries), always keeping at least the just-inserted spectrum.
  *
- * Port of mzPeakExplorer's `specCache` (store.ts), adapted to the worker + the shared
- * budget. Stores m/z + intensity + msLevel only (no id/time/representation).
+ * Stores m/z + intensity + msLevel only (no id/time/representation).
  */
 export class SpectrumLruCache {
   private readonly map = new Map<number, CachedSpectrum>();
@@ -142,8 +141,8 @@ export class SpectrumLruCache {
 
 // ── Wavelength (UV/VIS) LRU ───────────────────────────────────────────────────
 //
-// SEPARATE from the MS SpectrumLruCache (adversarial review, P0): a wavelength
-// spectrum's payload is the full wire WavelengthSpectrumArrays (wavelength f32 +
+// SEPARATE from the MS SpectrumLruCache: a wavelength spectrum's payload is the full
+// wire WavelengthSpectrumArrays (wavelength f32 +
 // intensity f32 + resolved unit / λmax / observedRange / time / id / meta), not the
 // MS (m/z f64, intensity f32, msLevel) shape. Stored whole so a repeat select is an
 // instant hit; the wire copy is made at the transfer boundary (the cached object is
@@ -235,7 +234,7 @@ export class WavelengthLruCache {
  * precision is ~1.2e-4 Da at m/z 1000 — far finer than any practical window tolerance — so it
  * never changes which points fall in an ion-image window, while halving the m/z footprint.
  * Intensity is already f32. NOT a spectrum-display structure: id / representation / RT and full
- * f64 m/z are re-read on demand (cheap), per the "metadata refetched quickly" design note.
+ * f64 m/z are re-read on demand (cheap).
  */
 export type CompactSpectrum = { mz: Float32Array; intensity: Float32Array };
 

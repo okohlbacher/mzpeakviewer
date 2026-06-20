@@ -1,5 +1,4 @@
-// Plain, UI-facing types for the reader boundary — HARVESTED from mzPeakIV
-// (src/reader/types.ts), the proven node-open path. Nothing here references
+// Plain, UI-facing types for the reader boundary. Nothing here references
 // apache-arrow, mzpeakts internals, or `bigint`: the reader/ folder is the ONLY
 // place that touches the unstable format.
 

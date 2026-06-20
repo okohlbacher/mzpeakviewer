@@ -10,10 +10,7 @@
  * No external dependencies. All values are written little-endian per the 'II'
  * byte-order mark.
  *
- * Ported verbatim from mzPeakIV (src/export/tiff.ts) for the unified viewer
- * (MG-04c). Operates on plain typed arrays; no app/engine dependencies. Index
- * guards added for the app's strict TS config (noUncheckedIndexedAccess) — the
- * encoder is unchanged.
+ * Operates on plain typed arrays; no app/engine dependencies.
  */
 
 // TIFF field type codes
@@ -190,7 +187,7 @@ export function encodeSingleChannelTiff(
   // For inline SHORT values stored in the 4-byte value field, the value
   // occupies the first 2 bytes (little-endian), leaving the upper 2 as 0.
   const entries: IfdEntry[] = [
-    // LONG (not SHORT): image dimensions can exceed 65535 px (Review F8).
+    // LONG (not SHORT): image dimensions can exceed 65535 px.
     { tag: TAG_IMAGE_WIDTH, type: TYPE_LONG, count: 1, inlineValue: width },
     { tag: TAG_IMAGE_LENGTH, type: TYPE_LONG, count: 1, inlineValue: height },
     { tag: TAG_BITS_PER_SAMPLE, type: TYPE_SHORT, count: 1, inlineValue: 32 },
@@ -211,7 +208,7 @@ export function encodeSingleChannelTiff(
     { tag: TAG_SAMPLES_PER_PIXEL, type: TYPE_SHORT, count: 1, inlineValue: 1 },
     {
       tag: TAG_ROWS_PER_STRIP,
-      type: TYPE_LONG, // rows-per-strip = height, which can exceed 65535 (Review F8)
+      type: TYPE_LONG, // rows-per-strip = height, which can exceed 65535
       count: 1,
       inlineValue: height,
     },
@@ -294,7 +291,7 @@ export function encodeRgbTiff(
   const ifdOffset = 8;
 
   const entries: IfdEntry[] = [
-    // LONG (not SHORT): image dimensions can exceed 65535 px (Review F8).
+    // LONG (not SHORT): image dimensions can exceed 65535 px.
     { tag: TAG_IMAGE_WIDTH, type: TYPE_LONG, count: 1, inlineValue: width },
     { tag: TAG_IMAGE_LENGTH, type: TYPE_LONG, count: 1, inlineValue: height },
     {
@@ -320,7 +317,7 @@ export function encodeRgbTiff(
     { tag: TAG_SAMPLES_PER_PIXEL, type: TYPE_SHORT, count: 1, inlineValue: 3 },
     {
       tag: TAG_ROWS_PER_STRIP,
-      type: TYPE_LONG, // rows-per-strip = height, which can exceed 65535 (Review F8)
+      type: TYPE_LONG, // rows-per-strip = height, which can exceed 65535
       count: 1,
       inlineValue: height,
     },

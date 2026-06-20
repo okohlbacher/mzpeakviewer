@@ -1,12 +1,10 @@
 // Engine spectrum read: reconstruct one spectrum's signal, then adapt to the wire
 // `SpectrumArrays`. The reconstruction (choosing the profile vs centroid source and
 // resolving the representation) is a PURE, separately-testable function operating on
-// the already-fetched raw mzpeakts spectrum record — this is the M4 reconstruction
-// helper codex asked for. The live reader call is the only I/O; everything else is
-// pure so it can be unit-tested without WASM.
+// the already-fetched raw mzpeakts spectrum record. The live reader call is the only
+// I/O; everything else is pure so it can be unit-tested without WASM.
 //
-// Routing (DATA-03 / IMAGING-SPEC C6), mirrors mzPeakIV src/reader/arrays.ts +
-// Explorer's cv.ts:
+// Routing:
 //   - representation "centroid" → centroid source (spectra_peaks).
 //   - representation "profile" / null → data-array source (spectra_data), the
 //     documented profile default.
@@ -83,9 +81,8 @@ function hasCentroids(s: RawSpectrum): boolean {
 
 /**
  * Drop non-finite (mz, intensity) PAIRS, reconcile a ragged mz/intensity length
- * (truncate to the shorter), and guarantee ascending m/z. Harvested from
- * mzPeakExplorer's `getSpectrumArrays` (browse.ts `sanitizePairs`): uPlot and the
- * hover binary-search require monotonic finite x. PURE + separately unit-testable.
+ * (truncate to the shorter), and guarantee ascending m/z. uPlot and the hover
+ * binary-search require monotonic finite x. PURE + separately unit-testable.
  *
  * Fast path: when the input is already finite + sorted + equal-length (the normal
  * case for real data) the inputs are returned unchanged with no copy.
@@ -147,7 +144,7 @@ function readCentroids(s: RawSpectrum): { mz: Float64Array; intensity: Float32Ar
 /**
  * PURE reconstruction: pick the signal source the resolved `representation` routes
  * to, with a fall-through to the OTHER source so a file whose MS:1000525 disagrees
- * with its stored layout still reconstructs. Two invariants codex asked for:
+ * with its stored layout still reconstructs. Two invariants:
  *   1. `representation` in the result is ALWAYS the metadata-declared value — a
  *      fallback read never rewrites it (no false claim about the file).
  *   2. When NEITHER source has arrays we throw `EmptySpectrumError`, never zeros.

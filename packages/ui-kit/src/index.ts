@@ -1,10 +1,9 @@
 // @mzpeak/ui-kit — unified design tokens + purely presentational components for the
-// mzPeak viewer. No reader, no store, no imaging assumptions. Harvested from the two
-// source apps (IV's `ds/` design system + Explorer's pure plot/tree/util components).
+// mzPeak viewer. No reader, no store, no imaging assumptions.
 //
 // Stylesheet: import "@mzpeak/ui-kit/styles.css" once in the app.
 
-// Design-system primitives (from mzPeakIV ds/*)
+// Design-system primitives
 export * from "./primitives";
 // Accessible interactive controls. Aliased to avoid a name clash with the
 // primitives' tablist-flavored SegmentedControl: this radio-group variant is
@@ -14,9 +13,9 @@ export {
   type SegmentedControlProps as RadioSegmentedControlProps,
   type SegmentedControlOption as RadioSegmentedControlOption,
 } from "./controls";
-// Spectrum plot stack (from mzPeakExplorer)
+// Spectrum plot stack
 export * from "./spectrum";
-// Metadata JSON tree (from mzPeakExplorer)
+// Metadata JSON tree
 export * from "./tree";
-// cv / format utilities (from mzPeakExplorer)
+// cv / format utilities
 export * from "./utils";

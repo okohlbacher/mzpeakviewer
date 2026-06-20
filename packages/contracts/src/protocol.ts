@@ -1,21 +1,18 @@
 // Superset worker protocol — the typed postMessage boundary for @mzpeak/core.
 //
-// CONTRACT (Phase 1, types only): only serializable/transferable values cross this
+// CONTRACT (types only): only serializable/transferable values cross this
 // boundary. No Reader, no Arrow Table, no parquet handle, no WASM memory — those
-// stay inside the worker (MERGE-ROADMAP §1.1). The engine returns plain typed
+// stay inside the worker. The engine returns plain typed
 // arrays / ImageData-like RGBA / plain JSON only.
 //
-// This union is the SUPERSET of:
-//   - mzPeakIV's ~30 imaging/worker messages (already a worker), and
-//   - mzPeakExplorer's main-thread data access rewritten as messages
-//     (archiveList, parquetFooter, deepColumn, sampleColumn, scanBreakdown,
-//      extractChrom, studyMeta) — Explorer has NO worker today.
+// This union covers both the imaging/worker messages and the data-access messages
+// (archiveList, parquetFooter, deepColumn, sampleColumn, scanBreakdown,
+//  extractChrom, studyMeta).
 //
 // Every long-running request carries a `requestId`; the matching response echoes
 // it for stale-response rejection and the `cancel` message targets it. The
 // per-message clone/transfer/cancellation/paging rules are encoded in
-// `MESSAGE_POLICY` below (vibe review MAJOR-3 / CTR-01) so they are testable, not
-// just prose.
+// `MESSAGE_POLICY` below so they are testable, not just prose.
 
 import type {
   Manifest,
@@ -60,7 +57,7 @@ export type OpenSource =
   | { kind: "url"; url: string }
   | { kind: "file"; blob: Blob; name: string };
 
-/** Chromatogram extraction mode (Explorer parity). */
+/** Chromatogram extraction mode. */
 export type ChromRequest =
   | { mode: "tic"; rt?: [number, number] }
   // xic: sum mz ± tolDa per spectrum vs RT. `msLevel` (optional) limits the sum to spectra
@@ -78,10 +75,10 @@ export type WorkerRequest =
   | { type: "open"; requestId: number; source: OpenSource }
   | { type: "close" }
   | { type: "setCacheConfig"; preloadEnabled: boolean; cacheLimitBytes: number }
-  // Cancels an in-flight request by id (supersedes Explorer's "one in-flight" model).
+  // Cancels an in-flight request by id (allows multiple requests in flight).
   | { type: "cancel"; cancelId: number }
 
-  // --- spectra / aggregate browse (Explorer + IV) --------------------------
+  // --- spectra / aggregate browse ------------------------------------------
   // selectId monotonically orders rapid clicks; the worker echoes it.
   | { type: "selectSpectrum"; index: number; selectId: number }
   // Time-sliced aggregate pass: MS-level counts, mz/rt range, browse index.
@@ -89,7 +86,7 @@ export type WorkerRequest =
   | { type: "meanSpectrum"; requestId: number }
   | { type: "roiSpectrum"; spectrumIndices: number[]; requestId: number }
 
-  // --- UV/VIS wavelength spectra (DATA layer; SEPARATE from MS spectra) -----
+  // --- UV/VIS wavelength spectra (SEPARATE from MS spectra) -----------------
   // Lazy per-wavelength-spectrum browse index (built on first UV access).
   | { type: "wavelengthBrowse"; requestId: number }
   // Dense time × wavelength matrix (built lazily on first PDA-view access).
@@ -98,12 +95,12 @@ export type WorkerRequest =
   // mirroring selectSpectrum's stale-drop model.
   | { type: "selectWavelengthSpectrum"; index: number; selectId: number }
 
-  // --- chromatograms (Explorer) -------------------------------------------
+  // --- chromatograms -------------------------------------------------------
   | { type: "extractChrom"; chrom: ChromRequest; requestId: number }
   // List the file's stored chromatograms + their metadata (Chromatograms view).
   | { type: "chromatogramList"; requestId: number }
 
-  // --- archive / parquet structure (Explorer Structure tab) ----------------
+  // --- archive / parquet structure (Structure tab) -------------------------
   | { type: "archiveList"; requestId: number }
   | { type: "parquetFooter"; archivePath: string; requestId: number }
   // Paged deep column read; offset/limit page large columns (no 256 MB clone).
@@ -112,10 +109,10 @@ export type WorkerRequest =
   // Raw member bytes, capped; the result ArrayBuffer is TRANSFERRED, never cloned.
   | { type: "archiveMemberBytes"; archivePath: string; maxBytes: number; requestId: number }
 
-  // --- study metadata (Explorer SDRF/ISA) ----------------------------------
+  // --- study metadata (SDRF/ISA) -------------------------------------------
   | { type: "studyMeta"; requestId: number }
 
-  // --- imaging (IV) --------------------------------------------------------
+  // --- imaging -------------------------------------------------------------
   | { type: "renderIonImage"; mz: number; tolDa: number; requestId: number }
   | { type: "renderMultiChannel"; channels: (ChannelRequest | null)[]; requestId: number }
   // gen = load generation, echoed so results from a previous file are dropped.
@@ -183,7 +180,7 @@ export type WorkerResponse =
   | { type: "cancelled"; cancelId: number }
   // `requestId` correlates a request-failure; `selectId` correlates a selectSpectrum
   // failure (selects are selectId-keyed, not requestId-keyed). Neither set = a global
-  // error (e.g. open/WASM init) the client surfaces on its error channel (review).
+  // error (e.g. open/WASM init) the client surfaces on its error channel.
   | { type: "error"; requestId?: number; selectId?: number; class: ReaderErrorClass; message: string; findings?: UnsupportedFinding[] };
 
 // ---------------------------------------------------------------------------
@@ -193,17 +190,17 @@ export type WorkerResponse =
 export type RequestType = WorkerRequest["type"];
 
 /**
- * Cancellation semantics (codex review #2). "Every long read is abortable" is NOT
+ * Cancellation semantics. "Every long read is abortable" is NOT
  * backed by the underlying readers today: neither mzpeakts path threads an
  * `AbortSignal` into in-flight Parquet/ZIP reads. The honest contract is per-op:
  *  - `abort`     — a true hard stop is possible (AbortController-backed fetch /
  *                  range read); the worker must wire one in and stop work.
  *  - `stale-drop`— no hard stop; the worker runs to a bounded chunk point and the
  *                  result is SUPPRESSED on the main thread by requestId. This is
- *                  IV's current generation-counter model — explicitly NOT a hard
+ *                  a generation-counter model — explicitly NOT a hard
  *                  abort (heavy work may still complete in the worker).
  *  - `none`      — fast/lifecycle; not cancellable.
- * Phase 3 must upgrade `stale-drop` ops to `abort` only where it actually wires an
+ * A `stale-drop` op should only be upgraded to `abort` where it actually wires an
  * AbortController; until then the label tells the truth.
  */
 export type CancellationMode = "abort" | "stale-drop" | "none";
@@ -224,7 +221,7 @@ export type MessagePolicy = {
   sizeCapBytes?: number;
 };
 
-/** 256 MiB — the archive-member read cap carried from Explorer. */
+/** 256 MiB — the archive-member read cap. */
 export const MAX_MEMBER_BYTES = 256 * 1024 * 1024;
 
 export const MESSAGE_POLICY: Record<RequestType, MessagePolicy> = {

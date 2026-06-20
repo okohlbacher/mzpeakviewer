@@ -1,21 +1,16 @@
 // Engine imaging-render: the ion-image + mean/ROI-spectrum compute primitives.
 //
-// HARVESTED from mzPeakIV's compute/worker layer (the read-only mzPeakIV tree):
-//   - engineRenderIonImage  ← src/worker/mzPeakWorker.ts `ionImageFromCache` /
-//       `computeIonImageFast` (the EXACT per-pixel window-sum) + src/compute/
-//       ionImage.ts `buildIonImage` (the grid-key write) + `computeIonImageStats`.
-//   - engineMeanSpectrum / engineRoiSpectrum ← mzPeakWorker.ts
-//       `_computeMeanSpectrumFrom` (reference-axis binning, ±0.5 Da, mean per bin)
-//       and `computeRoiMeanSpectrum` (100-index cap).
+// engineRenderIonImage computes the per-pixel window-sum, writes it at the grid key,
+// and computes image stats. engineMeanSpectrum / engineRoiSpectrum build a reference
+// m/z axis and bin into it (±0.5 Da, mean per bin), with a per-pixel sampling cap.
 //
 // The live `reader` (mzpeakts MzPeakReader) is the only I/O. Per-spectrum arrays for
-// the ion image and the mean/ROI traces are harvested DIRECTLY from the DATA-ARRAY
-// source (spectra_data point intensities) via reader/arrays.ts
-// `harvestDataArraysOrNull` — NOT through representation-routed reconstruction. This
-// is the source IV's ion-image path uses (its in-memory index is built from
-// spectra_data, and its legacy getSpectrumArrays tries dataArrays first, then
-// centroids), so a file declared centroid that ALSO carries data arrays produces the
-// same ion image as IV. Nothing here imports mzpeakts.
+// the ion image and the mean/ROI traces are read DIRECTLY from the DATA-ARRAY source
+// (spectra_data point intensities) via reader/arrays.ts `harvestDataArraysOrNull` —
+// NOT through representation-routed reconstruction. The in-memory index is built from
+// spectra_data and tries dataArrays first then centroids, so a file declared centroid
+// that ALSO carries data arrays sums those data-array points. Nothing here imports
+// mzpeakts.
 
 import type { IonImageStats, ImagingGridWire, SpectrumArrays } from "@mzpeak/contracts";
 import { rebuildCoordMap } from "../adapt/grid";
@@ -40,10 +35,10 @@ const MAX_PREFETCH_STARVE_MS = 4000;
 
 /**
  * Build the "include this spectrum in the ion image?" predicate enforcing the MS1-ONLY
- * rule (design requirement: NEVER sum MS2 into an ion image / its cache). Mirrors
- * buildTic's fallback: filter to MS1 only when the grid actually carries MS1 data; if NO
- * mapped spectrum is MS1 (a misannotated / level-0 file) or the MS-level column is absent,
- * include every mapped spectrum (so such files still render rather than going blank).
+ * rule (never sum MS2 into an ion image / its cache). Filter to MS1 only when the grid
+ * actually carries MS1 data; if NO mapped spectrum is MS1 (a misannotated / level-0
+ * file) or the MS-level column is absent, include every mapped spectrum (so such files
+ * still render rather than going blank).
  */
 export function makeMs1Only(reader: Reader, mappedIndices: Iterable<number>): (i: number) => boolean {
   const levels = readMsLevels(reader);
@@ -59,11 +54,10 @@ export function makeMs1Only(reader: Reader, mappedIndices: Iterable<number>): (i
 /**
  * Read one spectrum's plain (mz, intensity) arrays from the DATA-ARRAY source
  * (spectra_data), with a centroid (spectra_peaks) fallback ONLY when the spectrum
- * genuinely has no data arrays — exactly IV's ion-image source selection (see
- * `harvestDataArraysOrNull`). Deliberately NOT representation-routed: it must not
- * read spectra_peaks for a centroid-declared file that still carries data arrays,
- * or the ion image would diverge from IV. Returns null when the spectrum is absent
- * or has no decodable arrays (caller skips it).
+ * genuinely has no data arrays (see `harvestDataArraysOrNull`). Deliberately NOT
+ * representation-routed: it must not read spectra_peaks for a centroid-declared file
+ * that still carries data arrays. Returns null when the spectrum is absent or has no
+ * decodable arrays (caller skips it).
  */
 async function readSpectrumArrays(
   reader: Reader,
@@ -77,24 +71,21 @@ async function readSpectrumArrays(
  * within the m/z window `[mz - tolDa, mz + tolDa]` and write that sum at the cell's
  * `coordKey` (= y*width + x) into a dense `Float32Array(width*height)`.
  *
- * WINDOW-SUM SEMANTICS — matched to mzPeakIV (`ionImageFromCache` /
- * `computeIonImageFast`, src/worker/mzPeakWorker.ts:878-887 / 909-952):
+ * WINDOW-SUM SEMANTICS:
  *   - bounds are `mzStart = mz - tolDa`, `mzEnd = mz + tolDa`; a point is included
- *     iff `m >= mzStart && m <= mzEnd` — i.e. INCLUSIVE on BOTH ends (IV's
- *     `if (m < mzStart || m > mzEnd) continue` ⇒ keep `[mzStart, mzEnd]`).
+ *     iff `m >= mzStart && m <= mzEnd` — i.e. INCLUSIVE on BOTH ends.
  *   - the summed array is the spectrum's INTENSITY array read from the DATA-ARRAY
- *     source (spectra_data point intensities), NOT a representation-routed read.
- *     IV builds its ion index from spectra_data (`forEachSpectraRowGroup` /
- *     `pointVecs`), so a centroid-declared file that still carries data arrays sums
- *     those data-array points — identical bytes to IV (`harvestDataArraysOrNull`).
+ *     source (spectra_data point intensities), NOT a representation-routed read. The
+ *     ion index is built from spectra_data, so a centroid-declared file that still
+ *     carries data arrays sums those data-array points (`harvestDataArraysOrNull`).
  *     Only a spectrum with NO data arrays falls back to its centroid peaks.
  *   - accumulation is per spectrum_index, then mapped onto the grid via the
- *     coord→spectrum map — identical to IV mapping `coordToSpectrumIndex`.
+ *     coord→spectrum map.
  *
  * Stats are computed via `computeIonImageStats(img, gridWire.presenceMask)` so a
- * present-with-zero pixel still counts toward min (IV `computeIonImageStats`).
+ * present-with-zero pixel still counts toward min.
  *
- * CACHE (review follow-up): the FIRST render streams + decodes the whole spectra_data
+ * CACHE: the FIRST render streams + decodes the whole spectra_data
  * (one row-group pass, ~tens of seconds over the CDN). The decoded per-pixel (mz,
  * intensity) arrays are retained in a `SpectraArrayCache` so EVERY subsequent ion image
  * — any m/z, any tolerance — re-sums from memory in ~a second, with NO network. The cache
@@ -120,8 +111,7 @@ function lowerBound(a: ArrayLike<number>, x: number): number {
 }
 
 /** Window-sum over one spectrum's (mz, intensity): sum intensity where mz ∈ [lo, hi]
- *  INCLUSIVE on both ends (IV `ionImageFromCache`), NaN/Inf skipped. Full scan — makes no
- *  ordering assumption. */
+ *  INCLUSIVE on both ends, NaN/Inf skipped. Full scan — makes no ordering assumption. */
 export function windowSumScan(
   mz: ArrayLike<number>,
   intensity: ArrayLike<number>,
@@ -200,7 +190,7 @@ export async function engineRenderIonImage(
   // coordKey → spectrumIndex for every filled cell (inverse of flattenGrid).
   const coordToSpectrum = rebuildCoordMap(gridWire);
   // MS1-only gate (never sum MS2 into an ion image); fallback includes all when the grid
-  // carries no MS1 data — mirrors buildTic. Excluded (MS2) pixels stay 0 in every path.
+  // carries no MS1 data. Excluded (MS2) pixels stay 0 in every path.
   const isMs1 = makeMs1Only(reader, coordToSpectrum.values());
   // Inverse: spectrumIndex → coordKey, so a stream keyed by spectrum index writes pixels
   // directly. Filled cells are 1:1 with spectra.
@@ -237,8 +227,8 @@ export async function engineRenderIonImage(
     }
   };
 
-  // Window-sum over one spectrum's (mz, intensity) — INCLUSIVE [mzStart, mzEnd] (IV
-  // `ionImageFromCache`), NaN/Infinity skipped. Full scan for the streaming build path.
+  // Window-sum over one spectrum's (mz, intensity) — INCLUSIVE [mzStart, mzEnd],
+  // NaN/Infinity skipped. Full scan for the streaming build path.
   const windowSum = (mzArr: ArrayLike<number>, inArr: ArrayLike<number>): number =>
     windowSumScan(mzArr, inArr, mzStart, mzEnd);
 
@@ -265,9 +255,9 @@ export async function engineRenderIonImage(
 
   // ── BUILD PATH: ONE sequential pass over spectra_data row groups (each read once),
   // instead of a random-access getSpectrum per pixel (≈700 ms/pixel over the CDN ⇒ a
-  // 34,840-pixel image never finishes). Same data-array source IV/`harvestDataArraysOrNull`
-  // prefers, so the summed values are identical. Decoded grid-cell arrays are cached as we
-  // go (until the budget is hit), so later renders take the cache-hit path above. ──────
+  // 34,840-pixel image never finishes). Reads the data-array source via
+  // `harvestDataArraysOrNull`. Decoded grid-cell arrays are cached as we go (until the
+  // budget is hit), so later renders take the cache-hit path above. ──────
   // Cache decoded grid-cell arrays as we go (shared IonCacheBuilder — f32 compaction + budget +
   // sortedness bookkeeping), so later renders take the cache-hit path above.
   const builder = new IonCacheBuilder(() => limitBytes);
@@ -321,11 +311,11 @@ export type RenderMultiChannelOptions = {
 
 /**
  * Render an RGB-overlay's worth of ion images — one per channel SLOT, POSITION-ALIGNED with
- * `channels` (null slot → null result, IV parity). Unlike a per-channel loop, this does ONE
- * streamed pass over spectra_data and computes EVERY active channel's window-sum per spectrum
- * (so a cold N-channel render streams once, not N times), building the SHARED compact ion
- * cache as it goes; a warm cache makes all channels an instant binary-search re-sum. Each
- * channel's pixel values are byte-identical to the single-channel `engineRenderIonImage` (same
+ * `channels` (null slot → null result). Unlike a per-channel loop, this does ONE streamed
+ * pass over spectra_data and computes EVERY active channel's window-sum per spectrum (so a
+ * cold N-channel render streams once, not N times), building the SHARED compact ion cache as
+ * it goes; a warm cache makes all channels an instant binary-search re-sum. Each channel's
+ * pixel values are byte-identical to the single-channel `engineRenderIonImage` (same
  * data-array source, same inclusive `[mz−tolDa, mz+tolDa]` window, computed from the same f64
  * stream on the build path). Returns the channel images + the (built or reused) cache.
  */
@@ -519,16 +509,16 @@ export async function prefetchIonCache(
 
 // ── Mean / ROI spectrum ──────────────────────────────────────────────────────
 //
-// Harvested from mzPeakWorker.ts `_computeMeanSpectrumFrom`: a reference m/z axis is
-// taken from the FIRST sampled spectrum (sorted ascending); every subsequent
-// spectrum's points are binned into the nearest reference m/z within ±0.5 Da; the
-// output is the MEAN intensity per reference bin across the contributing spectra.
+// A reference m/z axis is taken from the FIRST sampled spectrum (sorted ascending);
+// every subsequent spectrum's points are binned into the nearest reference m/z within
+// ±0.5 Da; the output is the MEAN intensity per reference bin across the contributing
+// spectra.
 
-/** Bin tolerance for accumulating a point onto the reference axis (IV ±0.5 Da). */
+/** Bin tolerance for accumulating a point onto the reference axis (±0.5 Da). */
 const BIN_TOL_DA = 0.5;
-/** Global-mean sampling cap (IV MAX_SAMPLES = 300) — keeps the full-file mean fast. */
+/** Global-mean sampling cap (300 spectra) — keeps the full-file mean fast. */
 const MAX_SAMPLES = 300;
-/** ROI cap (IV computeRoiMeanSpectrum slices to 100). */
+/** ROI cap (100 spectra). */
 const MAX_ROI = 100;
 
 type MeanAccumulator = {
@@ -542,7 +532,7 @@ type MeanAccumulator = {
   contributed: number;
 };
 
-/** Nearest reference-bin index for `mzVal` via binary search (IV inner loop). */
+/** Nearest reference-bin index for `mzVal` via binary search. */
 function nearestBin(refMz: Float32Array, mzVal: number): number {
   let lo = 0;
   let hi = refMz.length - 1;
@@ -697,13 +687,12 @@ function uniformSubsample(sorted: number[], cap: number): number[] {
  *
  * SAMPLED MEAN — HONEST CONTRACT: this is the SAMPLED mean over N of M spectra, not
  * an exact all-pixel mean. A true all-pixel mean reads every spectrum, which is slow
- * for large imaging files (IV's worker reads spectra_data.parquet by row group; here
- * each read is an individual `getSpectrum`). Mirroring IV's
- * `_computeMeanSpectrumFrom(null)`, the global mean SAMPLES uniformly down to
- * `MAX_SAMPLES` (300) spectra — the result is a representative mean, not an exact
- * all-pixel sum. To signal this to consumers WITHOUT a wire-type change (SpectrumArrays
- * is fixed), the result `id` is `"mean-sampled"`. The fixture has far fewer than 300
- * spectra, so the golden test averages every spectrum.
+ * for large imaging files (each read is an individual `getSpectrum`). The global mean
+ * SAMPLES uniformly down to `MAX_SAMPLES` (300) spectra — the result is a
+ * representative mean, not an exact all-pixel sum. To signal this to consumers WITHOUT
+ * a wire-type change (SpectrumArrays is fixed), the result `id` is `"mean-sampled"`.
+ * The fixture has far fewer than 300 spectra, so the golden test averages every
+ * spectrum.
  *
  * TODO(mean-ui): when the mean/ROI UI lands, report the actual sampled-count N and
  * the population M (e.g. via a separate side channel) so the UI can show "mean of
@@ -723,7 +712,7 @@ export async function engineMeanSpectrum(
       representation: null,
     };
   }
-  // Uniform subsample of [0, total) to at most MAX_SAMPLES indices (IV step subset).
+  // Uniform subsample of [0, total) to at most MAX_SAMPLES indices.
   const all = Array.from({ length: total }, (_, i) => i);
   const indices = uniformSubsample(all, MAX_SAMPLES);
   return meanSpectrumOver(reader, indices, "mean-sampled", cache);
@@ -732,12 +721,11 @@ export async function engineMeanSpectrum(
 /**
  * Mean spectrum across a SUBSET of spectra (an ROI selection).
  *
- * SAMPLED MEAN — HONEST CONTRACT: when the ROI exceeds `MAX_ROI` (100, IV) the
- * selection is SORTED then UNIFORMLY SUBSAMPLED across the whole sorted set (via
- * `uniformSubsample`), so the sampled mean is representative of the entire ROI —
- * NOT just the first 100 indices (the prior `.slice(0, 100)` dropped everything
- * after the 100th and was arbitrary). The result `id` is `"roi-mean"` so a consumer
- * can tell this is a derived ROI mean (and, when over-cap, a sampled one).
+ * SAMPLED MEAN — HONEST CONTRACT: when the ROI exceeds `MAX_ROI` (100) the selection
+ * is SORTED then UNIFORMLY SUBSAMPLED across the whole sorted set (via
+ * `uniformSubsample`), so the sampled mean is representative of the entire ROI — NOT
+ * just the first 100 indices. The result `id` is `"roi-mean"` so a consumer can tell
+ * this is a derived ROI mean (and, when over-cap, a sampled one).
  *
  * TODO(mean-ui): when the ROI UI lands, surface the sampled-count N vs the ROI size
  * M ("ROI mean of N / M") via a side channel — SpectrumArrays stays a fixed wire type.

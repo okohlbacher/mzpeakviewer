@@ -4,30 +4,28 @@
 // counts and per-column footprint/stats). NO bulk column data is materialized
 // (except the optional bounded engineSampleColumn preview).
 //
-// HARVESTED:
-//   - Archive listing from mzPeakExplorer/src/reader/archive.ts (listArchive):
-//     read `reader.store.entries` (zip.js entries), classify by extension, attach
-//     the `data_kind` role from `store.fileIndex.files`.
-//   - Footer decode via hyparquet (mzPeakExplorer/src/reader/parquetDeep.ts pattern):
-//     `parquetMetadataAsync(asyncBuffer)` → num_rows / row_groups / created_by, then
-//     aggregate each leaf column across row groups (type/codec/numValues/nullCount/
-//     sizes/min/max). Logical type is read from the footer schema's leaf elements.
+// Two parts:
+//   - Archive listing (listArchive): read `reader.store.entries` (zip.js entries),
+//     classify by extension, attach the `data_kind` role from `store.fileIndex.files`.
+//   - Footer decode via hyparquet: `parquetMetadataAsync(asyncBuffer)` → num_rows /
+//     row_groups / created_by, then aggregate each leaf column across row groups
+//     (type/codec/numValues/nullCount/sizes/min/max). Logical type is read from the
+//     footer schema's leaf elements.
 //   - The pure adapter adapt/footer.ts (adaptParquetFooter) maps the plain decoded
 //     FooterInput → the wire ParquetFooter. ENUM ints are never produced here:
 //     hyparquet already yields string physical-types + codec names, so they pass
 //     straight through.
 //
-// IV's hand-rolled Thrift decoder (src/worker/parquetFooter.ts) was the fallback,
-// but hyparquet — already a @mzpeak/core dependency and proven against these
-// fixtures in Explorer — reads the FULL footer (logical types, statistics, min/max,
-// created_by) that the IV decoder deliberately omits, so we use it instead.
+// hyparquet is already a @mzpeak/core dependency and reads the FULL footer (logical
+// types, statistics, min/max, created_by), so it is used here rather than a
+// hand-rolled Thrift decoder.
 //
-// ── CACHE-IDENTITY (the spike) ──────────────────────────────────────────────────
-// Explorer keyed its footer cache on a `WeakMap<Reader, ...>` that auto-invalidates
-// when a new file is loaded (a new Reader object). In the worker there is exactly ONE
-// long-lived Reader per open file (the engine context), and the worker REOPENS on
-// each new file — so cross-boundary Reader identity is not a reliable cache key here.
-// Instead we key a small in-module Map by `archivePath` (the ZIP member path). The
+// ── CACHE-IDENTITY ──────────────────────────────────────────────────────────────
+// A `WeakMap<Reader, ...>` footer cache auto-invalidates when a new file is loaded (a
+// new Reader object). In the worker there is exactly ONE long-lived Reader per open
+// file (the engine context), and the worker REOPENS on each new file — so
+// cross-boundary Reader identity is not a reliable cache key here. Instead we key a
+// small in-module Map by `archivePath` (the ZIP member path). The
 // worker's open handler MUST call `clearStructureCache()` on every file open so a
 // stale footer from a previous file cannot leak (archive paths repeat across files —
 // e.g. every LC file has a "spectra_data.parquet"). Only PLAIN JSON / typed arrays
@@ -138,7 +136,7 @@ function roleMap(store: Store | undefined): Map<string, string> {
 /**
  * List every member of the backing ZIP archive (path, stored/expanded sizes, parquet
  * flag, index role, directory flag). Pure read of the already-parsed zip.js entry list
- * — no member is opened. Harvested from Explorer's `listArchive`.
+ * — no member is opened.
  */
 export async function engineArchiveList(reader: Reader): Promise<ArchiveMemberList> {
   const store = readerStore(reader);
@@ -187,7 +185,7 @@ export async function engineArchiveMemberBytes(
 
 // ── Footer decode (hyparquet) with the archivePath-keyed cache ───────────────────
 
-// SPIKE cache: keyed by archivePath, NOT by Reader identity (see file header).
+// Footer cache: keyed by archivePath, NOT by Reader identity (see file header).
 // Holds the in-flight/decoded hyparquet FileMetaData promise so expanding several
 // columns / re-reading one parquet member decodes its footer once.
 const footerCache = new Map<string, Promise<FileMetaData>>();
@@ -408,8 +406,7 @@ export async function engineParquetFooter(
 /**
  * A small bounded preview of one leaf column's values via hyparquet. Reads only the
  * first `n` rows of the chosen column (range reads — never the whole file). Values are
- * stringified for display (the wire `ColumnSample.preview` is `string[]`). No histogram
- * is computed here (that's a separate Explorer operation; left null). Used by the
+ * stringified for display (the wire `ColumnSample.preview` is `string[]`). Used by the
  * Structure tab's per-column preview.
  *
  * Fails soft to an empty preview if the member/footer can't be read.

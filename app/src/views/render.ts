@@ -1,10 +1,9 @@
 // render.ts — pure, DOM-free raster transforms for the imaging views.
 //
-// A faithful port of mzPeakIV's `src/ui/rasterize.ts`, adapted to the merged app's
-// `ImagingGridWire` (only width/height/presenceMask are needed here). No `react`,
-// no canvas/DOM — so it stays unit-testable in isolation.
+// Operates on `ImagingGridWire` (only width/height/presenceMask are needed here).
+// No `react`, no canvas/DOM — so it stays unit-testable in isolation.
 //
-// Correctness invariants carried verbatim from IV (C2 / C8 / D-09):
+// Correctness invariants:
 //   - Absent pixels (presenceMask[k] === 0) render to a fixed near-black SENTINEL,
 //     NEVER colormap-bottom — "no data" must read as visually distinct from zero.
 //   - The percentile clip ceiling is computed from PRESENT cells only, so a stray
@@ -138,10 +137,10 @@ function percentileClip(values: Float32Array, presenceMask: Uint8Array, p: numbe
 /**
  * Generalized raster render: Float32Array → RGBA bytes (length width*height*4, row-major).
  *
- * - Absent cells → SENTINEL (D-09 / C8).
+ * - Absent cells → SENTINEL.
  * - Log scale uses Math.log1p: raw=0 → norm=0 exactly (never NaN / negative).
  * - Percentile clip from PRESENT cells only.
- * - No cell reorder (C2): out[k*4..] derives from values[k].
+ * - No cell reorder: out[k*4..] derives from values[k].
  */
 export function rasterizeImage(
   values: Float32Array,
@@ -204,7 +203,7 @@ export function rasterizeImage(
 
 /**
  * Render a per-pixel TIC raster (overview mode). Honors the global colormap + scale
- * just like the ion image; percentile fixed at the 99th (IV parity).
+ * just like the ion image; percentile fixed at the 99th.
  */
 export function rasterizeTic(
   tic: Float32Array,

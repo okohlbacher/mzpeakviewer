@@ -7,17 +7,15 @@
 import type { SpectrumArrays, SpectrumRepresentation } from "@mzpeak/contracts";
 
 // MS:1000128 = profile spectrum, MS:1000127 = centroid spectrum. This is the
-// authoritative mapping the Explorer reader uses in cv.ts (`toRepresentation`,
-// lines 21-25: `raw === "MS:1000128" → "profile"`, `raw === "MS:1000127" → "centroid"`,
-// else null). Mirrored here so the adapter is the single boundary that normalizes it.
+// authoritative CV mapping (`"MS:1000128" → "profile"`, `"MS:1000127" → "centroid"`,
+// else null). The adapter is the single boundary that normalizes it.
 const REPR_PROFILE = "MS:1000128";
 const REPR_CENTROID = "MS:1000127";
 
 /**
- * Plain single-spectrum shape the handler extracts from the reader (mirrors what
- * Explorer's `getSpectrumArrays` and IV's `readFastSpectrum` already produce). No
- * Arrow vectors, no reader handle — just the index, native id, the two signal
- * arrays, and the raw representation indicator straight off the spectrum/metadata.
+ * Plain single-spectrum shape the handler extracts from the reader. No Arrow vectors,
+ * no reader handle — just the index, native id, the two signal arrays, and the raw
+ * representation indicator straight off the spectrum/metadata.
  */
 export type SpectrumInput = {
   /** Zero-based spectrum index. */
@@ -46,8 +44,8 @@ function mapRepresentation(raw: string | null | undefined): SpectrumRepresentati
 // Coerce array-like → typed array, ALWAYS copying. Even when the input already is the
 // target type we copy: the result buffer is TRANSFERRED to the main thread, and the
 // reader/cache may still hold the source buffer — returning it by reference would let
-// the worker transfer (detach) a buffer it still references (review: transfer-after-
-// alias corruption). The copy is the price of a safe transfer; spectra transfer once.
+// the worker transfer (detach) a buffer it still references (transfer-after-alias
+// corruption). The copy is the price of a safe transfer; spectra transfer once.
 function toF64(a: ArrayLike<number>): Float64Array {
   return a instanceof Float64Array ? a.slice() : Float64Array.from(a);
 }

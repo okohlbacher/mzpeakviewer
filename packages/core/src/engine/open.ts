@@ -1,15 +1,14 @@
 // Engine open: the file→capabilities→spectrum round-trip entry point.
 //
-// HARVESTED boundary: opens the vendored mzpeakts reader via the IV node-proven
-// path (openBlob, src/reader/openUrl.ts), then drives the pure detection +
-// adapter layer:
-//   1. probeImagingSignals (the 3-signal IV probe, enumerated) + layout/encoding
+// Opens the vendored mzpeakts reader (openBlob, src/reader/openUrl.ts), then drives
+// the pure detection + adapter layer:
+//   1. probeImagingSignals (the 3-signal imaging probe, enumerated) + layout/encoding
 //      (computeCapabilities) → buildCapabilityModel.
 //   2. numChromatograms / optical count straight off the reader + index metadata.
 //   3. when imaging, extractCoords + readGridGeometry → buildImagingGrid →
 //      flattenGrid (passing the grid's REAL coordinateBase, never defaulting to 0).
 //   4. a dense per-pixel TIC keyed y0*width+x0 from the spectrum total-ion-current
-//      column (mirrors IV buildGridFast); null for non-imaging.
+//      column; null for non-imaging.
 //
 // The live `reader` is RETURNED but never serialized — the worker keeps it
 // module-global and reads spectra through `readEngineSpectrum`. Only the wire
@@ -88,8 +87,8 @@ type SpectraStruct = {
 /**
  * Bulk-read the promoted per-spectrum TIC column (MS:1000285) once, vectorized — the
  * same columnar discipline the grid build uses (scanCoords.fromPromotedColumns). This
- * replaces the old per-pixel `sm.get(index)` record materialization, which made imaging
- * open O(spectrum-count) with a huge constant (I-05: a 34,840-pixel file never finished).
+ * replaces a per-pixel `sm.get(index)` record materialization, which made imaging open
+ * O(spectrum-count) with a huge constant (a 34,840-pixel file never finished).
  * Returns `null` when the promoted column isn't available (caller falls back per-record).
  */
 function readAllTics(reader: Reader): Float64Array | null {
@@ -132,14 +131,14 @@ function readSpectrumTic(reader: Reader, index: number): number {
 }
 
 /**
- * Build a dense per-pixel TIC keyed `y0*width+x0` (IV buildGridFast semantics): for
- * each filled grid cell, look up the spectrum's total ion current. Cells with no
- * spectrum or no TIC value stay 0. Uses the vectorized column read when available
- * (fast), falling back to a guarded per-record read otherwise.
+ * Build a dense per-pixel TIC keyed `y0*width+x0`: for each filled grid cell, look up
+ * the spectrum's total ion current. Cells with no spectrum or no TIC value stay 0. Uses
+ * the vectorized column read when available (fast), falling back to a guarded per-record
+ * read otherwise.
  *
  * MS1-ONLY: the TIC aggregates MS1 spectra only — a pixel whose spectrum is MS2/MSn is
  * left at 0. FALLBACK: if the grid declares NO MS1 spectrum at all (a misannotated /
- * level-0 file), every pixel contributes (mirrors the LC chrom `ticRows` rule).
+ * level-0 file), every pixel contributes (same rule as the LC chrom `ticRows` path).
  */
 function buildTic(reader: Reader, grid: ImagingGrid): Float32Array {
   const tic = new Float32Array(grid.width * grid.height);
@@ -213,7 +212,7 @@ export async function openEngineFile(
 /**
  * Open a remote URL and assemble the wire payload. Uses the reader's URL path
  * (HTTP RANGE reads via zip.js) — NOT a whole-file fetch — so a large remote file
- * isn't fully downloaded just to open it (review MAJOR: the dispatcher must not
+ * isn't fully downloaded just to open it (the dispatcher must not
  * `fetch().arrayBuffer()` the whole archive).
  */
 export async function openEngineUrl(url: string | URL): Promise<EngineFile> {
@@ -255,8 +254,8 @@ async function assembleEngineFile(reader: Reader): Promise<EngineFile> {
     count: opticalImages.length,
   };
 
-  // MG-11: observed wavelength range for the Summary UV/VIS band pill, materialized
-  // ONCE from the first wavelength spectrum (PDA scans share one grid). One small read.
+  // Observed wavelength range for the Summary UV/VIS band pill, materialized ONCE from
+  // the first wavelength spectrum (PDA scans share one grid). One small read.
   if (capabilities.wavelength.present) {
     capabilities.wavelength.range = await wavelengthRange(reader);
   }

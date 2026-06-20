@@ -5,7 +5,7 @@
 //
 // Class hierarchy:
 //   Error
-//     ├── UnsupportedEncodingError  (DATA-02: unsupported but valid mzPeak file)
+//     ├── UnsupportedEncodingError  (unsupported but valid mzPeak file)
 //     ├── CorruptFileError          (unreadable / not a valid mzPeak file)
 //     └── (network)                 (URL unreachable / CORS-blocked — classified
 //                                    from the fetch TypeError, no dedicated class)
@@ -21,7 +21,7 @@ import type { UnsupportedFinding } from "./types";
  * findings so the UI can render a class-specific, actionable message.
  *
  * This is a LOAD ABORT — the reader must not return any signal arrays after
- * throwing this error (DATA-02 / T-01-03-SPOOF).
+ * throwing this error.
  */
 export class UnsupportedEncodingError extends Error {
   readonly findings: UnsupportedFinding[];
@@ -43,7 +43,7 @@ export class UnsupportedEncodingError extends Error {
 /**
  * Thrown when a file cannot be parsed at all — not a valid ZIP, missing the
  * mzpeak_index.json, corrupt Parquet, etc. Distinct from UnsupportedEncodingError
- * so the UI can prompt the user appropriately (PITFALLS 11 / T-01-03-INFO).
+ * so the UI can prompt the user appropriately.
  */
 export class CorruptFileError extends Error {
   constructor(message: string) {

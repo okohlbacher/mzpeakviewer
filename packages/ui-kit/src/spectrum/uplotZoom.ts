@@ -16,7 +16,7 @@ export function wheelZoomPlugin(opts: { factor?: number } = {}): uPlot.Plugin {
   const factor = opts.factor ?? 0.8;
   // Abort any in-flight middle-drag document listeners if the plot is destroyed
   // mid-drag (otherwise they target a dead instance). Plugin-scoped so the
-  // `destroy` hook can reach it (CODEX-REVIEW uplotZoom).
+  // `destroy` hook can reach it.
   let drag: AbortController | null = null;
 
   return {
@@ -25,7 +25,7 @@ export function wheelZoomPlugin(opts: { factor?: number } = {}): uPlot.Plugin {
         const over = u.over;
 
         // Finite extent (not xs[0]/xs[last]) so the pan/zoom clamp is correct
-        // for unsorted or NaN-ended data (CODEX-REVIEW uplotZoom).
+        // for unsorted or NaN-ended data.
         const xBounds = (): [number, number] | null => finiteExtent(u.data[0]);
 
 

@@ -1,8 +1,6 @@
-/* Presentational CSS for the Explorer-harvested components (metadata tree + the
-   uPlot chart host/tooltip). Harvested verbatim from mzPeakExplorer src/ui/styles.css
-   (the selectors those components actually emit) — adversarial-review fix (codex
-   Phase-2 #1): without these, TreeView and SpectrumPlot/ChromPlot render unstyled.
-   App-shell layout classes are NOT here — only the components' own selectors. */
+/* Presentational CSS for the shared chart + metadata-tree components: the selectors
+   TreeView and the uPlot chart host/tooltip emit. Without these those components render
+   unstyled. App-shell layout classes are NOT here — only the components' own selectors. */
 
 /* ── Metadata JSON tree (TreeView) ─────────────────────────────────────────── */
 .tree {

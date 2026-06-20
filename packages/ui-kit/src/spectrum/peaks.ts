@@ -7,8 +7,8 @@ export type Representation = "profile" | "centroid" | null;
 
 /**
  * Spectrum arrays as the plot cluster needs them. The `@mzpeak/contracts` wire
- * `SpectrumArrays` now carries `representation?` too (added after the Phase-2
- * review), so a contracts spectrum is structurally assignable to this type.
+ * `SpectrumArrays` carries `representation?` too, so a contracts spectrum is
+ * structurally assignable to this type.
  *
  * Kept as a LOCAL type on purpose: ui-kit is purely presentational and imports
  * nothing from @mzpeak/contracts — the engine/app adapts wire spectra to this prop

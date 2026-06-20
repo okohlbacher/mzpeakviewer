@@ -1,22 +1,17 @@
-/* Explorer semantic-alias tokens — harvested alongside Explorer's presentational
-   components (SpectrumPlot, TreeView, ChromPlot). The IV-derived token set is the
-   base; the *palette* (grays / blue-600 / reds) is value-equal across both apps,
-   but Explorer added these SEMANTIC aliases that its components reference. Values
-   are Explorer's, mapped onto the shared palette (so they stay in sync).
+/* Semantic alias tokens referenced by the presentational components (SpectrumPlot,
+   TreeView, ChromPlot). These map component-facing names onto the shared palette in
+   colors.css so the two stay in sync; a component referencing a missing alias would
+   render unstyled, so the styles closure test enforces this set.
 
-   Adversarial-review fix (codex Phase-2 #2): the "value-equal" claim held for the
-   scales, NOT these aliases — a harvested Explorer component referencing a missing
-   var would render unstyled. The styles closure test now enforces this set.
-
-   Note: `--text-sm` is intentionally NOT redefined here — the IV value wins (a ~1px
-   metric difference from Explorer's 11.5px; documented, not worth a fork). */
+   Note: `--text-sm` is intentionally NOT redefined here so the base value wins (a ~1px
+   metric difference; documented, not worth a fork). */
 :root {
   --border-default: var(--gray-200);
   --surface-panel: var(--gray-50);
   --surface-card: var(--gray-0);
   --text-heading: var(--gray-900);
 
-  /* JSON/CV syntax colors for the metadata tree (Explorer values). */
+  /* JSON/CV syntax colors for the metadata tree. */
   --syntax-key: #b026d3; /* object keys (brand purple) */
   --syntax-cv: #3b54da;  /* CV accessions (accent blue) */
   --syntax-num: #2e9e5b; /* numeric / boolean (green) */

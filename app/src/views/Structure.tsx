@@ -1,4 +1,4 @@
-// Structure view — the parquet/archive inspector (harvested from mzPeakExplorer).
+// Structure view — the parquet/archive inspector.
 // Lists ZIP members (manifest pinned, clicking it jumps to the Metadata JSON view);
 // clicking a parquet member shows its footer: archive header + per-column table. Click
 // a column → deep footer stats + an on-demand "Sample value distribution" that reads
@@ -28,7 +28,7 @@ function fmtFloat(n: number): string {
 function isManifest(path: string): boolean {
   return path.split("/").pop()?.toLowerCase() === "mzpeak_index.json";
 }
-/** Embedded raster image (optical / derived-MS overview, the images/ folder — Q10). */
+/** Embedded raster image (optical / derived-MS overview, the images/ folder). */
 function isImage(path: string): boolean {
   return /\.(tiff?|png|jpe?g|gif|bmp|webp)$/i.test(path);
 }
@@ -307,8 +307,7 @@ const MONOLITHIC_BYTES = 64_000_000;
  * Chunk / row-group structure for a parquet member — the signal that distinguishes a
  * well-chunked file (many uniform ~25 MB groups, seekable) from the monolithic-row-group
  * anti-pattern (one 942 MB group, no page index → every random read decodes the whole group).
- * Reads only footer metadata already on `ParquetFooter`. See the converter handoff
- * (mzML2mzPeak/docs/handoff-mzpeak-profile-rowgroup-chunking-2026-06-15.md).
+ * Reads only footer metadata already on `ParquetFooter`.
  */
 function ChunkStructure({ footer, numSpectra }: { footer: ParquetFooter; numSpectra: number | null }) {
   const sizes = footer.rowGroupSizes ?? [];

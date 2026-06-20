@@ -27,7 +27,7 @@ export type CapabilityInput = {
   opticalCount: number;
   /** Wavelength (UV/VIS) spectrum count (reader.numWavelengthSpectra). */
   wavelengthCount: number;
-  /** Observed wavelength range [minNm, maxNm], or null/omitted when unknown (MG-11). */
+  /** Observed wavelength range [minNm, maxNm], or null/omitted when unknown. */
   wavelengthRange?: [number, number] | null;
   layout: "point" | "chunked" | "mixed" | "unknown";
   encodings: string[];

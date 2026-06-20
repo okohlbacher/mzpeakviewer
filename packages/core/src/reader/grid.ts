@@ -1,9 +1,9 @@
-// buildImagingGrid — the pure geometry + presence + diagnostics transform (IMG-02, IMG-03).
+// buildImagingGrid — the pure geometry + presence + diagnostics transform.
 //
-// Mirrors src/reader/arrays.ts: a named pure export, no side effects (beyond one
-// console.warn on the DoS cap), importing ONLY from ./types. It NEVER touches Arrow,
-// bigint, or mzpeakts — it receives plain `{x,y}[]` coords from the reader boundary
-// (02-CONTEXT D-08). The boundary is one-way: imaging/ does not import reader/.
+// A named pure export, no side effects (beyond one console.warn on the DoS cap),
+// importing ONLY from ./types. It NEVER touches Arrow, bigint, or mzpeakts — it
+// receives plain `{x,y}[]` coords from the reader boundary. The boundary is
+// one-way: imaging/ does not import reader/.
 import type {
   ImagingGrid,
   GridGeometry,
@@ -12,7 +12,7 @@ import type {
 } from "./imagingTypes";
 
 /**
- * DoS cap (T-02-02-OOM): refuse to allocate a presence mask larger than this many
+ * DoS cap: refuse to allocate a presence mask larger than this many
  * cells. Map lookup is O(filled); only the mask is dense, so this bounds the single
  * dense allocation. 50M cells ≈ 50 MB Uint8Array — well beyond any real MSI grid.
  */
@@ -30,8 +30,8 @@ export interface Coord {
  * @param coords           per-spectrum {x,y} (1-based by spec, but base is READ from geometry)
  * @param spectrumIndices  parallel array: spectrumIndices[i] is the spectrum index for coords[i]
  * @param geometry         declared extent / pixel size / coordinate base (declared extent WINS)
- * @param coordSourceStrategy which CoordSource won (surfaced in diagnostics, D-16)
- * @returns the grid, or `null` when coords is empty (non-imaging is a valid null state, D-04)
+ * @param coordSourceStrategy which CoordSource won (surfaced in diagnostics)
+ * @returns the grid, or `null` when coords is empty (non-imaging is a valid null state)
  *          or when the declared/observed extent exceeds the DoS cap.
  */
 export function buildImagingGrid(
@@ -40,12 +40,12 @@ export function buildImagingGrid(
   geometry: GridGeometry | null,
   coordSourceStrategy: CoordSourceStrategy,
 ): ImagingGrid | null {
-  // Non-imaging / empty: a valid null state, not an error (D-04).
+  // Non-imaging / empty: a valid null state, not an error.
   if (coords.length === 0) {
     return null;
   }
 
-  // Read the base from geometry — NEVER hard-code −1 (D-10/C3).
+  // Read the base from geometry — NEVER hard-code −1.
   const coordinateBase = geometry?.coordinateBase ?? 1;
 
   // Observed extent from the coords themselves (1-based → +1 to count cells).
@@ -58,7 +58,7 @@ export function buildImagingGrid(
     if (y0 + 1 > observedMaxY) observedMaxY = y0 + 1;
   }
 
-  // Declared extent WINS over observed max (D-11/C4); fall back to observed otherwise.
+  // Declared extent WINS over observed max; fall back to observed otherwise.
   const declared = geometry?.pixelCount ?? null;
   const rawWidth = declared?.x ?? observedMaxX;
   const rawHeight = declared?.y ?? observedMaxY;
@@ -82,7 +82,7 @@ export function buildImagingGrid(
     return null;
   }
 
-  // Sparse model: a Map lookup + a dense boolean presence mask (D-14/C8).
+  // Sparse model: a Map lookup + a dense boolean presence mask.
   const coordToSpectrumIndex = new Map<number, number>();
   const presenceMask = new Uint8Array(totalCells);
 
@@ -108,14 +108,14 @@ export function buildImagingGrid(
       oobCount++;
       continue;
     }
-    // Bounds-check (T-02-02-OOB): out-of-range coords are skipped and counted.
+    // Bounds-check: out-of-range coords are skipped and counted.
     if (x0 < 0 || x0 >= width || y0 < 0 || y0 >= height) {
       oobCount++;
       continue;
     }
-    const key = y0 * width + x0; // row-major: row=y, col=x (C2: col=position_x, row=position_y)
+    const key = y0 * width + x0; // row-major: row=y, col=x (col=position_x, row=position_y)
     if (coordToSpectrumIndex.has(key)) {
-      // Keep the first writer; do not silently overwrite (Pattern 2).
+      // Keep the first writer; do not silently overwrite.
       duplicateCount++;
       continue;
     }
@@ -126,7 +126,7 @@ export function buildImagingGrid(
   const filledCount = coordToSpectrumIndex.size;
   const missingCount = totalCells - filledCount;
 
-  // Declared-vs-observed disagreement note (C1/C4): flag when a declared extent is
+  // Declared-vs-observed disagreement note: flag when a declared extent is
   // present AND coords reach beyond it on either axis.
   let discoveryDisagreement: string | null = null;
   if (

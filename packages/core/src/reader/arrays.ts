@@ -1,6 +1,6 @@
 // Reconstruct one spectrum's signal as plain typed arrays.
 //
-// Keeps m/z at float64 precision (PITFALLS 9) and intensity at float32. Returns
+// Keeps m/z at float64 precision and intensity at float32. Returns
 // `Float64Array`/`Float32Array` only — no Arrow Vectors leak upward.
 import type { Reader } from "./openUrl";
 import type { SpectrumArrays } from "./types";
@@ -26,7 +26,7 @@ function fromDataArrays(spectrum: RawSpectrum, index: number): SpectrumArrays {
   const id = String(spectrum.id);
   const da = spectrum.dataArrays;
   // Explicit profile-path fail-loud guard (mirror of the centroid "no rows"
-  // throw): a profile-routed spectrum whose data-array source is null or missing
+  // throw). A profile-routed spectrum whose data-array source is null or missing
   // the m/z / intensity arrays must throw a named error, never fall through to a
   // silent blank spectrum. This distinguishes "spectra_data has no arrays" from
   // a length mismatch below.
@@ -49,8 +49,8 @@ function fromDataArrays(spectrum: RawSpectrum, index: number): SpectrumArrays {
 
 /**
  * Reconstruct from the centroid source (spectra_peaks → centroid). Throws a
- * NAMED error when the routed centroid source has zero rows (Pitfall 7) so a
- * centroid spectrum is never rendered as a silent blank.
+ * NAMED error when the routed centroid source has zero rows so a centroid
+ * spectrum is never rendered as a silent blank.
  */
 function fromCentroids(spectrum: RawSpectrum, index: number): SpectrumArrays {
   const id = String(spectrum.id);
@@ -73,16 +73,14 @@ function fromCentroids(spectrum: RawSpectrum, index: number): SpectrumArrays {
 }
 
 /**
- * Ion-image / mean source read: harvest one spectrum's (mz, intensity) DIRECTLY
+ * Ion-image / mean source read: read one spectrum's (mz, intensity) DIRECTLY
  * from the DATA-ARRAY source (spectra_data point intensities), falling back to the
  * centroid source (spectra_peaks) only when the spectrum has no data arrays.
  *
- * This is the SAME source-selection IV's ion-image path uses: IV builds its in-
- * memory ion index from spectra_data (`forEachSpectraRowGroup` / `pointVecs` over
- * spectra_data.parquet, mzPeakWorker.ts), and its legacy `getSpectrumArrays` tries
- * dataArrays first, then centroids — it does NOT route by the file's declared
- * representation. A file declared centroid that ALSO carries data arrays therefore
- * sums the data-array intensities (matching IV), not the spectra_peaks centroids.
+ * Source selection does NOT route by the file's declared representation: data
+ * arrays are tried first, then centroids. A file declared centroid that ALSO
+ * carries data arrays therefore sums the data-array intensities, not the
+ * spectra_peaks centroids.
  *
  * Returns `null` (never throws) when the spectrum is absent or has neither source,
  * so the ion-image / mean loop can simply skip an undecodable pixel.
@@ -98,7 +96,7 @@ export async function harvestDataArraysOrNull(
     return null;
   }
   if (!spectrum) return null;
-  // Data-array source FIRST (spectra_data) — the IV ion-image source of truth.
+  // Data-array source FIRST (spectra_data) — the ion-image source of truth.
   const da = spectrum.dataArrays;
   if (da && da[MZ_KEY] && da[INTENSITY_KEY]) {
     const arr = fromDataArrays(spectrum, index);

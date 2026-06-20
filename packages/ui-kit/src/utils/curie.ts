@@ -1,4 +1,4 @@
-// Case-insensitive CURIE parsing for SDRF/ISA accessions (review §A-4/A-5).
+// Case-insensitive CURIE parsing for SDRF/ISA accessions.
 // SDRF inlines `AC=MS:1002602` / `AC=UNIMOD:737` / `AC=Unimod:27`; ISA carries a
 // purl URL like http://purl.obolibrary.org/obo/OBI_0000366. Prefix casing varies
 // in the wild, so we match on an upper-cased `id` but preserve the original.

@@ -1,4 +1,3 @@
-// HARVESTED from mzPeakExplorer/src/reader/cv.ts (read-only source; do not edit there).
 // Shared helpers for the reader's promoted-column "meta" bags, which are keyed
 // by accession-derived names like "MS_1000511_ms_level". Single source of truth
 // for the column names + small coercions used by both summary.ts and browse.ts.

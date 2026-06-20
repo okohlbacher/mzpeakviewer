@@ -2,7 +2,7 @@
 //
 // Everything else in the app depends on the opaque `Reader` handle re-exported
 // here, never on `mzpeakts` directly. `grep -rl "from 'mzpeakts'" src/` must
-// return only this file (acceptance criterion, R-03c).
+// return only this file.
 //
 // Exception: mzPeakWorker.ts also imports ZipStorage from mzpeakts for the
 // fast-path load (reads only mzpeak_index.json). That import is the ONLY other
@@ -24,14 +24,14 @@ export type Reader = InstanceType<typeof MzPeakReader>;
 /**
  * Run the capability gate after a reader has been opened + initialized.
  * Eagerly triggers spectrumData() so the arrayIndex is populated for detection.
- * Throws UnsupportedEncodingError if any unsupported encodings are found (DATA-02).
+ * Throws UnsupportedEncodingError if any unsupported encodings are found.
  */
 async function capabilityGate(reader: Reader): Promise<Reader> {
   // Eagerly load the spectrum data reader so the arrayIndex is populated (needed
   // for Numpress detection from static Parquet metadata). TOLERATE its absence: a
-  // chromatogram-only mzPeak has no spectrum data, and the unified engine must open
-  // it rather than reject (review MAJOR — the single open boundary serves both
-  // imaging/LC spectra files AND chrom-only files, matching Explorer's open).
+  // chromatogram-only mzPeak has no spectrum data, and the engine must open it
+  // rather than reject — the single open boundary serves both imaging/LC spectra
+  // files AND chrom-only files.
   try {
     await reader.spectrumData();
   } catch {
@@ -68,10 +68,9 @@ export async function openReaderFromStore(
  * its 206 Partial Content responses carry a correct `Content-Range` but OMIT the
  * `Accept-Ranges` header, so zip.js's default probe concludes ranges are
  * unsupported and throws "HTTP range unsupported" — even though ranges work. We
- * force range mode rather than trust the (missing) advertisement header. This
- * mirrors the Explorer reader (reader/explorer/open.ts); the vendored
- * `MzPeakReader.fromUrl()` builds an unforced `HttpRangeReader`, so we construct
- * the store ourselves instead of using it.
+ * force range mode rather than trust the (missing) advertisement header. The
+ * vendored `MzPeakReader.fromUrl()` builds an unforced `HttpRangeReader`, so we
+ * construct the store ourselves instead of using it.
  * @deprecated Use ZipStorage.fromUrl() for the fast path + openReaderFromStore()
  * for lazy full init. This function reads all metadata eagerly.
  */
@@ -95,7 +94,7 @@ export async function openBlob(blob: Blob): Promise<Reader> {
   return capabilityGate(reader);
 }
 
-/** One spectrum's plain point arrays, harvested from the bulk spectra_data stream. */
+/** One spectrum's plain point arrays, read from the bulk spectra_data stream. */
 export type StreamedSpectrumArrays = {
   index: number;
   /** Float32Array when the caller requested `mzFloat32` (ion-image recompute — ~1e-4 Da is
@@ -116,15 +115,15 @@ export type StreamArraysOptions = {
  * spectra_data parquet row groups (mzpeakts `DataArraysReader.enumerate`), reading each
  * row group exactly once.
  *
- * This is the IV ion-index discipline and the fix for the O(pixels)×row-group blow-up of
- * the per-pixel path: `reader.getSpectrum(i)` → `DataArraysReader.get(i)` re-reads+decodes
+ * This is the fix for the O(pixels)×row-group blow-up of the per-pixel path:
+ * `reader.getSpectrum(i)` → `DataArraysReader.get(i)` re-reads+decodes
  * a WHOLE row group on every call, so summing an ion image pixel-by-pixel re-reads the same
  * row groups thousands of times (measured ≈ 700 ms/pixel over the CDN ⇒ a 34,840-pixel image
  * never finishes). Enumerating instead touches each row group once.
  *
  * Spectra whose data-array source has no rows (e.g. centroid-only spectra) are simply not
  * yielded — the caller falls back to a per-spectrum read for those few. Kept in this module
- * so the `mzpeakts` import stays confined here (reader-boundary acceptance criterion R-03c).
+ * so the `mzpeakts` import stays confined here (reader-boundary encapsulation).
  */
 export async function* streamSpectraDataArrays(
   reader: Reader,

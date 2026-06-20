@@ -1,6 +1,5 @@
-// HARVESTED (trimmed) from mzPeakExplorer/src/reader/types.ts (read-only source).
-// Only the reader-boundary types used by the harvested open/summary/browse modules
-// are kept; the unused Structure/Study/Imaging types were intentionally dropped.
+// Reader-boundary types used by the open/summary/browse modules. The
+// Structure/Study/Imaging types are not used here and are intentionally omitted.
 
 /** One entity row from `mzpeak_index.json`. */
 export type ManifestEntry = {
@@ -14,9 +13,8 @@ export type Representation = "profile" | "centroid" | null;
 
 /**
  * OpenMS FileInfo-style aggregate readout. Derived from the eagerly-loaded
- * metadata tables — no signal arrays are read to compute it. (Trimmed: the
- * imaging discovery block + layout/encoding fields are not needed by the LC
- * engine slice, so they are omitted here.)
+ * metadata tables — no signal arrays are read to compute it. The imaging
+ * discovery block and layout/encoding fields are omitted here.
  */
 export type FileSummary = {
   fileName: string;

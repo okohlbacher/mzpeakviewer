@@ -7,6 +7,7 @@
 // lazily the first time this view mounts (store.ensureWavelength — the shared loader).
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
+import { nearestSpectrumByTime } from "../nearestSpectrum";
 import {
   WavelengthSpectrumPlot,
   WavelengthChromatogramPlot,
@@ -60,12 +61,8 @@ export function Wavelength() {
   // Heatmap/chromatogram click → jump to the spectrum at the nearest retention time.
   const pickTime = (timeSec: number) => {
     if (!browse) return;
-    let best = 0;
-    let bestD = Infinity;
-    for (let i = 0; i < browse.rt.length; i++) {
-      const d = Math.abs((browse.rt[i] ?? NaN) - timeSec);
-      if (Number.isFinite(d) && d < bestD) { bestD = d; best = i; }
-    }
+    const best = nearestSpectrumByTime(browse, timeSec);
+    if (best < 0) return;
     void select(best);
     setUvView("spectrum");
   };

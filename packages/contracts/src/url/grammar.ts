@@ -1,16 +1,14 @@
-// Unified URL / deep-link grammar — a PURE parse/serialize/resolve module
-// (MERGE-ROADMAP §3). No store, no DOM, no reader. This is the Phase-1 keystone
-// the resolver (Phase 5) wires into the shell.
+// Unified URL / deep-link grammar — a PURE parse/serialize/resolve module.
+// No store, no DOM, no reader. The resolver wires this into the shell.
 //
 // Responsibilities:
 //   1. parse a query string into raw params (alias folding: url→file, tab→view).
 //   2. resolve raw params against the file's MODE (imaging / lc / unknown) into a
 //      canonical ViewState + a list of notices for cross-mode / dropped params
-//      (the §3.5 non-blocking info banner). The full conflict matrix is here.
+//      (the non-blocking info banner). The full conflict matrix is here.
 //   3. serialize a ViewState back to the SHORTEST canonical query, driving the
 //      "Share view" link. Selection is serialized from its PROVENANCE
-//      (selector.by), never by parsing a possibly-synthesized `scan=N` id
-//      (codex review #8).
+//      (selector.by), never by parsing a possibly-synthesized `scan=N` id.
 //
 // Legacy `/IV/` translation lives in ./legacy.
 
@@ -340,7 +338,7 @@ function num(v: number): string {
  * only when it differs from what inference would yield from the data params, so a
  * link is never longer than it needs to be and always round-trips through
  * resolve(). Selection is emitted from `selector.by` (provenance), never by
- * re-parsing an id (codex #8): a synthesized imaging `scan=N` id can NOT leak out
+ * re-parsing an id: a synthesized imaging `scan=N` id can NOT leak out
  * as a native-scan link.
  */
 export function serialize(v: ViewState, mode: FileMode): URLSearchParams {

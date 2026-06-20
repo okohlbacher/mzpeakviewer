@@ -1,12 +1,9 @@
 // Engine optical-image decode: read an embedded optical TIFF ZIP member and decode
 // it to RGBA pixels.
 //
-// HARVESTED from mzPeakIV's optical layer (the read-only mzPeakIV tree):
-//   - the TIFF→RGBA decode (`decodeTiff`, utif2) + the size/pixel decode guards
-//     ← src/imaging/optical.ts.
-//   - the ZIP-member read (find the entry by archive path, narrow to a FILE entry
-//     with getData, inflate via Uint8ArrayWriter) ← src/worker/mzPeakWorker.ts
-//     `getOpticalImage` handler.
+// Two parts: the TIFF→RGBA decode (`decodeTiff`, utif2) with size/pixel decode guards,
+// and the ZIP-member read (find the entry by archive path, narrow to a FILE entry with
+// getData, inflate via Uint8ArrayWriter).
 //
 // mzPeak MAY embed optical images (microscopy / histology overviews) as separate
 // TIFF ZIP members (`images/image_NNNN.tiff`), described in `mzpeak_index.json`
@@ -14,17 +11,17 @@
 // (engine/open.ts `parseOpticalImages` → OpticalImageMeta[]); the PIXELS are decoded
 // lazily here, on demand, by archive path.
 //
-// The reader's `store.entries` are the raw zip.js entries (the SAME handle IV's
-// worker reads optical bytes from); only this engine function and open.ts reach into
-// `reader.store`. Nothing here imports mzpeakts (it reaches `reader.store` opaquely).
+// The reader's `store.entries` are the raw zip.js entries; only this engine function
+// and open.ts reach into `reader.store`. Nothing here imports mzpeakts (it reaches
+// `reader.store` opaquely).
 
 import { Uint8ArrayWriter } from "@zip.js/zip.js";
 import * as UTIF from "utif2";
 import type { Reader } from "../reader/openUrl";
 
 /**
- * Decode guards (defense-in-depth, harvested from IV optical.ts): optical images come
- * from an untrusted index naming an arbitrary ZIP member. Cap the raw byte size and
+ * Decode guards (defense-in-depth): optical images come from an untrusted index
+ * naming an arbitrary ZIP member. Cap the raw byte size and
  * decoded pixel count so a malformed/hostile file can't exhaust memory. ~256 MB /
  * 64 Mpx are generous for real microscopy overviews while bounding the worst case.
  */
@@ -39,8 +36,8 @@ export type DecodedOptical = {
 };
 
 /**
- * Decode a TIFF byte blob to RGBA via utif2 (harvested verbatim from IV
- * `decodeTiff`). Handles the common baseline subtypes (8/16-bit grayscale,
+ * Decode a TIFF byte blob to RGBA via utif2. Handles the common baseline subtypes
+ * (8/16-bit grayscale,
  * 8-bit RGB(A), palette, packbits/LZW) that utif2 supports. Throws a clear error on
  * an oversized or undecodable blob; the caller surfaces it as a graceful optical
  * error (optical images are auxiliary, never fatal to the load).
@@ -86,7 +83,7 @@ type ZipFileEntry = {
   getData?: (writer: unknown) => Promise<Uint8Array>;
 };
 
-/** Reach the raw zip.js entries off the opaque reader's store (same handle IV uses). */
+/** Reach the raw zip.js entries off the opaque reader's store. */
 function readerEntries(reader: Reader): ZipFileEntry[] {
   const store = (reader as unknown as { store?: { entries?: ZipFileEntry[] } }).store;
   const entries = store?.entries;
@@ -96,8 +93,8 @@ function readerEntries(reader: Reader): ZipFileEntry[] {
 /**
  * Read an embedded optical TIFF ZIP member by its archive path and decode it to RGBA.
  *
- * HARVESTED from IV `getOpticalImage`: find the entry by `archivePath`, narrow it to a
- * FILE entry exposing `getData` (zip.js Entry is FileEntry | DirectoryEntry — only
+ * Find the entry by `archivePath`, narrow it to a FILE entry exposing `getData`
+ * (zip.js Entry is FileEntry | DirectoryEntry — only
  * file entries inflate), reject an oversized member BEFORE inflating it (so a hostile
  * index can't name a huge member and exhaust memory), inflate via `Uint8ArrayWriter`,
  * then decode via {@link decodeTiff}.

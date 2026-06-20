@@ -1,8 +1,8 @@
 // Normalize the reader's metadata into plain POJOs / primitives.
 //
-// Converts any `bigint` to `number` and never returns Arrow `Vector`/`Table`
-// (ARCHITECTURE anti-pattern 2). Imports only the opaque `Reader` handle from
-// openUrl.ts — never `mzpeakts` directly.
+// Converts any `bigint` to `number` and never returns Arrow `Vector`/`Table`.
+// Imports only the opaque `Reader` handle from openUrl.ts — never `mzpeakts`
+// directly.
 import type { Reader } from "./openUrl";
 import type {
   FileMeta,
@@ -21,7 +21,7 @@ const MS_LEVEL_ACCESSION = "MS_1000511_ms_level";
  * Recursively convert a value into something structured-clone- and
  * JSON-friendly: `bigint` -> `number`, Arrow/class instances -> plain objects.
  * Defensive at the boundary because the reader hands us mixed
- * Arrow/class/bigint shapes (only validate at system boundaries — CLAUDE.md).
+ * Arrow/class/bigint shapes (only validate at system boundaries).
  */
 export function plainify(value: unknown, depth = 0): unknown {
   if (value === null || value === undefined) return value;
@@ -50,7 +50,7 @@ export function plainify(value: unknown, depth = 0): unknown {
   return undefined;
 }
 
-/** Normalize file-level metadata groups into a plain {@link FileMeta} (FMT-02). */
+/** Normalize file-level metadata groups into a plain {@link FileMeta}. */
 export function fileMeta(reader: Reader): FileMeta {
   const fm = reader.fileMetadata;
   return {
@@ -63,7 +63,7 @@ export function fileMeta(reader: Reader): FileMeta {
   };
 }
 
-/** Parse `mzpeak_index.json` into a plain {@link ManifestEntry}[] (FMT-01). */
+/** Parse `mzpeak_index.json` into a plain {@link ManifestEntry}[]. */
 export function manifest(reader: Reader): ManifestEntry[] {
   const files = reader.store?.fileIndex?.files ?? [];
   return files.map((e) => ({
@@ -81,9 +81,9 @@ function toRepresentation(raw: unknown): SpectrumRepresentation {
 }
 
 /**
- * Per-spectrum metadata accessor (R-01a): exposes `representation` as a typed
- * field so Phase 3 signal-file routing builds on the boundary. Reads the
- * promoted MS:1000525 column from the spectrum record.
+ * Per-spectrum metadata accessor: exposes `representation` as a typed field so
+ * signal-file routing builds on the boundary. Reads the promoted MS:1000525
+ * column from the spectrum record.
  */
 export function spectrumMeta(reader: Reader, index: number): SpectrumMeta {
   const sm = reader.spectrumMetadata;
@@ -104,11 +104,10 @@ export function spectrumMeta(reader: Reader, index: number): SpectrumMeta {
 
 /**
  * Full per-spectrum metadata as a plain, structured-clone-safe tree for the
- * "Spectrum metadata" panel in the Spectra view. Restores mzPeakExplorer's
- * `getSpectrumMetadata`, which was trimmed during the engine harvest (see the note
- * in reader/explorer/browse.ts). Reads the in-memory record fresh on each select —
- * instant, independent of the spectrum array cache. CV-resolution is the UI's job
- * (the TreeView), so we hand over the raw promoted columns under `promotedColumns`.
+ * "Spectrum metadata" panel in the Spectra view. Reads the in-memory record fresh
+ * on each select — instant, independent of the spectrum array cache. CV-resolution
+ * is the UI's job (the TreeView), so we hand over the raw promoted columns under
+ * `promotedColumns`.
  */
 export function spectrumMetaTree(reader: Reader, index: number): unknown {
   const sm = reader.spectrumMetadata;

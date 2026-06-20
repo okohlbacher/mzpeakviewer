@@ -77,7 +77,7 @@ export function Summary() {
         )}
       </div>
 
-      {/* UV/VIS optical band pill (MG-11) — shown only when the file has wavelength
+      {/* UV/VIS optical band pill — shown only when the file has wavelength
           (UV/PDA/DAD) spectra. The band (UV / VIS / UV-VIS) is inferred from the observed
           wavelength range; when the range is unknown we still flag that optical data is
           present. */}
@@ -245,7 +245,7 @@ export function Summary() {
         </Panel>
       )}
 
-      {/* Study (SDRF/ISA) — dataset, isobaric channels, sample characteristics (MG-05) */}
+      {/* Study (SDRF/ISA) — dataset, isobaric channels, sample characteristics */}
       <StudyPanel channels={channels} study={study} samples={studySamples} sdrfMember={sdrfMember} />
 
       {/* Archive members are covered by the Advanced ▸ Structure view (with per-member
@@ -254,7 +254,7 @@ export function Summary() {
   );
 }
 
-/** Study panel (MG-05): the dataset accession + title, the run's isobaric channels, and a
+/** Study panel: the dataset accession + title, the run's isobaric channels, and a
  *  per-sample characteristics matrix (samples × their CV parameters) from the index
  *  `study` block + `sample_list`. The full embedded SDRF/ISA table is a separate member
  *  (deferred). All inputs are plainified `unknown` — read defensively. */
@@ -330,7 +330,7 @@ function StudyPanel({ channels, study, samples, sdrfMember }: { channels: Channe
   );
 }
 
-/** The full embedded SDRF characteristics table (MG-05 remainder), fetched ON DEMAND
+/** The full embedded SDRF characteristics table, fetched ON DEMAND
  *  — the member is hundreds of KB / rows, so it is loaded only when the user expands
  *  the `<details>`. Bytes are decoded + parsed in a try/catch and rendered as a
  *  scrollable, bounded-height table (capped at SDRF_MAX_ROWS rendered rows). */
@@ -466,7 +466,7 @@ function MetricTile({ label, value, unit, accent }: { label: string; value: stri
   );
 }
 
-/** UV / VIS / UV-VIS band pill (MG-11). The band is classified from the observed
+/** UV / VIS / UV-VIS band pill. The band is classified from the observed
  *  wavelength range; an unknown range still flags that optical (wavelength) data is
  *  present. Violet accent matches the UV/VIS demo chip on the start page. */
 function OpticalBandPill({ range, count }: { range: [number, number] | null; count: number }) {

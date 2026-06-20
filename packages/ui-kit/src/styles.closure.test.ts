@@ -21,7 +21,7 @@ const CSS_FILES = [
   "styles/tokens/aliases.css",
   "styles/tokens/base.css",
   "styles/components.css",
-  "styles/explorer-components.css",
+  "styles/chart-components.css",
 ].map((p) => readFileSync(join(here, p), "utf8"));
 
 const css = CSS_FILES.join("\n");

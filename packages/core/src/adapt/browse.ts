@@ -1,17 +1,15 @@
-// PURE adapter: Explorer's per-spectrum Browse rows → the contract BrowseIndex.
+// PURE adapter: per-spectrum Browse rows → the contract BrowseIndex.
 // Follows the capability.ts template: a pure function from plain, already-extracted
 // data (NO Arrow vectors, no reader handle) to a wire type, with a unit test. The
-// reader-I/O (Explorer's `scanByColumns` single column pass that produces these
-// rows) lives in the worker handler — this only columnarizes into transferable
-// parallel typed arrays.
+// reader-I/O (the single column pass that produces these rows) lives in the worker
+// handler — this only columnarizes into transferable parallel typed arrays.
 
 import type { BrowseIndex } from "@mzpeak/contracts";
 
 /**
- * One per-spectrum Browse row, mirroring the load-bearing fields of Explorer's
- * `SpectrumIndexRow` (summary.ts `scanByColumns`, lines 178-185: id/msLevel/time/tic
+ * One per-spectrum Browse row carrying the load-bearing fields (id/msLevel/time/tic
  * per spectrum). `time` is retention time in SECONDS straight off the metadata
- * `time` column (numOrNull → number | null); null where the column is absent.
+ * `time` column (number | null); null where the column is absent.
  * `msLevel`/`tic` are likewise nullable (numOrNull yields null for missing cells).
  */
 export type BrowseRow = {
@@ -27,8 +25,8 @@ export type BrowseRow = {
 
 /**
  * Columnarize Browse rows into the wire `BrowseIndex` — parallel arrays of length
- * `rows.length`, order preserved. Absence sentinels (review: 0 collides with real
- * values — a valid msLevel 0 / TIC 0 must be distinguishable from missing metadata):
+ * `rows.length`, order preserved. Absence sentinels (0 collides with real values —
+ * a valid msLevel 0 / TIC 0 must be distinguishable from missing metadata):
  *   - `rt`  (Float32): NaN where `time` is absent.
  *   - `tic` (Float32): NaN where absent (NOT 0 — 0 is a real empty-spectrum TIC).
  *   - `msLevel` (Int16): {@link MSLEVEL_ABSENT} (-1) where absent (out of the valid

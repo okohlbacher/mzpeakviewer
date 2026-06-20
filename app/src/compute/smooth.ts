@@ -1,14 +1,12 @@
-// smooth.ts — BL-04: separable 2D Gaussian smoothing for Float32Array ion images.
+// smooth.ts — separable 2D Gaussian smoothing for Float32Array ion images.
 //
 // Pure compute module: no external dependencies, no side effects, no mutations of
 // the input array. Absent pixels (presenceMask[k] === 0) are excluded from both
 // the weighted sum AND the denominator so they do not bleed intensity into
 // neighboring present pixels.
 //
-// Ported verbatim from mzPeakIV (src/compute/smooth.ts) for the unified viewer
-// (MG-04c). Operates on plain Float32Array + grid dims + a presence mask; no
-// app/engine dependencies. Guards added for the app's strict TS config
-// (noUncheckedIndexedAccess) — the algorithm is unchanged.
+// Operates on plain Float32Array + grid dims + a presence mask; no app/engine
+// dependencies.
 
 /**
  * Build a 1D Gaussian kernel of half-width `radius` (full length = 2*radius+1).

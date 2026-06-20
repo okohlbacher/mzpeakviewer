@@ -29,7 +29,7 @@ export function xRange(
 ): [number, number] {
   if (Number.isFinite(initMin) && Number.isFinite(initMax)) return [initMin, initMax];
   // Scan for the finite min/max rather than trusting xs[0]/xs[last], which are
-  // wrong for unsorted or NaN-terminated data (CODEX-REVIEW chartTheme).
+  // wrong for unsorted or NaN-terminated data.
   const ext = finiteExtent(u.data[0]);
   if (!ext) return [0, 1];
   const [a, b] = ext;

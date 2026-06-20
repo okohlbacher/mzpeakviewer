@@ -5,10 +5,10 @@
 // encodings the bundled reader cannot decode.
 //
 // The caller (openUrl / openFile) must throw UnsupportedEncodingError(findings)
-// if the returned array is non-empty (DATA-02 / PITFALL 3).
+// if the returned array is non-empty.
 //
-// Import boundary (R-03c): this file is inside src/reader/ and is the ONLY
-// import-site of the encoding CV accessions. No mzpeakts types leak upward.
+// Import boundary: this file is inside src/reader/ and is the ONLY import-site
+// of the encoding CV accessions. No mzpeakts types leak upward.
 import type { Reader } from "./openUrl";
 import type { ManifestEntry, UnsupportedFinding } from "./types";
 
@@ -19,7 +19,7 @@ import type { ManifestEntry, UnsupportedFinding } from "./types";
 // "MS:1003089" = Delta encoding (decodeDelta)
 // null         = No transform specified
 
-// ── Unsupported encoding accessions (R-03a) ───────────────────────────────────
+// ── Unsupported encoding accessions ───────────────────────────────────────────
 
 // MS-Numpress encodings the bundled mzpeakts reader CANNOT decode (rejected at open).
 // As of this change ALL THREE Numpress variants are decoded by the vendored reader —
@@ -38,7 +38,7 @@ const NUMPRESS_ACCESSIONS = new Map<string, string>([]);
  * Returns a named `UnsupportedFinding` per problem.
  * Returns `[]` if all encodings are supported.
  *
- * Checks (R-03a, in order):
+ * Checks (in order):
  * 1. Numpress: any ArrayIndexEntry with `transform` in {MS:1002312, MS:1002313, MS:1002314}.
  * 2. Auxiliary arrays: populated `auxiliary_arrays` list in the file index metadata.
  * 3. Directory storage: `storage_type === 'directory'` in the file index metadata.
