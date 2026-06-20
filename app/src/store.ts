@@ -253,6 +253,9 @@ export interface AppState {
   addTic: (rt?: [number, number]) => void;
   /** Add an extracted-ion chromatogram (m/z ± tolDa, optional RT seconds, optional MS level). */
   addXic: (opts: { mz: number; tolDa: number; rt?: [number, number]; msLevel?: number }) => void;
+  /** Add one chromatogram card per DIA fragment: each fragment m/z is extracted over the
+   *  precursor isolation window's MS2 spectra (same managed list as TIC/XIC). */
+  addDiaXic: (opts: { precursorMz: number; fragmentMzs: number[]; tolDa: number; rt?: [number, number] }) => void;
   /** Add (or focus, if already present) the file's stored chromatogram by index. */
   addStoredChrom: (index: number, id: string) => void;
   /** Resolve a stored chromatogram id → index (via the engine inventory) and add it as a
@@ -806,6 +809,14 @@ export const useStore = create<AppState>((set, get) => ({
     const label = `XIC ${mz.toFixed(4)} ± ${tolDa} Da${msLevel != null ? ` · MS${msLevel}` : ""}`;
     const req: ChromRequest = { mode: "xic", mz, tolDa, ...(rt ? { rt } : {}), ...(msLevel != null ? { msLevel } : {}) };
     startChromItem(set, get, req, "generated", label);
+  },
+
+  addDiaXic: ({ precursorMz, fragmentMzs, tolDa, rt }) => {
+    for (const mz of fragmentMzs) {
+      const label = `DIA ${mz.toFixed(3)} ◀ ${precursorMz.toFixed(2)}`;
+      const req: ChromRequest = { mode: "diaXic", precursorMz, mz, tolDa, ...(rt ? { rt } : {}) };
+      startChromItem(set, get, req, "generated", label);
+    }
   },
 
   addStoredChrom: (index, id) => {

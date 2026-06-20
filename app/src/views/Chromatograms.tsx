@@ -1,18 +1,16 @@
 // Chromatograms view — a managed LIST of chromatograms:
 //   • the file's STORED chromatograms (browse table; "+ Add" puts one on a plot, click a
 //     row to inspect its CV-resolved metadata),
-//   • user-GENERATED (in-memory) TIC / XIC traces via "+ add TIC" / "+ add XIC".
-// Each is a card with independent zoom (wheel / double-click reset) + drag-resize. The DIA
-// fragment extractor (separate, overlaid) stays at the bottom.
+//   • user-GENERATED (in-memory) TIC / XIC / DIA-fragment traces via the toolbar.
+// Each is a card with independent zoom (wheel / double-click reset), collapse, drag-reorder,
+// and drag-resize — all chromatogram types share the same card + ChromPlot widget.
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useStore, seriesToPoints, CHROM_MIN_H, CHROM_MAX_H, type ChromItem } from "../store";
 import { engine } from "../engine";
 import { nearestSpectrumByTime } from "../nearestSpectrum";
 import { parseRtRange } from "../rtRange";
-import { ChromPlot, MultiChromPlot, Button, TreeView, useCvTerms, cvName, type ChromTrace } from "@mzpeak/ui-kit";
+import { ChromPlot, Button, TreeView, useCvTerms, cvName } from "@mzpeak/ui-kit";
 import type { ChromatogramInfo } from "@mzpeak/contracts";
-
-const DIA_PALETTE = ["#3b54da", "#c00000", "#2e9e5b", "#e8820c", "#8a3ffc", "#0e9bb5", "#d6336c", "#7cb518"];
 
 const xicInputStyle = (widthRem: number): CSSProperties => ({
   width: `${widthRem}rem`,
@@ -31,6 +29,7 @@ export function Chromatograms() {
   const settings = useStore((s) => s.settings);
   const addTic = useStore((s) => s.addTic);
   const addXic = useStore((s) => s.addXic);
+  const addDiaXic = useStore((s) => s.addDiaXic);
   const addStoredChrom = useStore((s) => s.addStoredChrom);
   const clearGeneratedChroms = useStore((s) => s.clearGeneratedChroms);
   const cv = useCvTerms();
@@ -44,31 +43,20 @@ export function Chromatograms() {
   const [xicRtMin, setXicRtMin] = useState("");
   const [xicRtMax, setXicRtMax] = useState("");
 
-  // DIA fragment extractor — view-local + overlaid. `diaOpen` shows the form below the toolbar.
+  // DIA fragment extractor form (toggled in the toolbar). Each fragment m/z is extracted over
+  // the precursor isolation window and added to the managed list as its own card.
   const [diaOpen, setDiaOpen] = useState(false);
   const [diaPrecursor, setDiaPrecursor] = useState("");
   const [diaFragments, setDiaFragments] = useState("");
   const [diaTol, setDiaTol] = useState("0.02");
   const [diaRtCenter, setDiaRtCenter] = useState("");
-  const [diaTraces, setDiaTraces] = useState<ChromTrace[] | null>(null);
-  const [diaBusy, setDiaBusy] = useState(false);
-  const [diaNote, setDiaNote] = useState<string | null>(null);
 
-  // Bumped on every file/phase change; the DIA extractor captures it before its await and
-  // drops a stale commit (an extraction from a since-closed file).
-  const diaRunRef = useRef(0);
   useEffect(() => {
-    diaRunRef.current++;
-    setDiaTraces(null); setDiaNote(null); setDiaBusy(false); // also clear busy, else a stale
-    // in-flight run's guarded finally skips it and the new view's extractor stays disabled.
     if (phase !== "ready") { setList(null); setMetaId(null); return; }
     let live = true;
     engine.chromatogramList().then((cs) => { if (live) setList(cs); }).catch(() => { if (live) setList([]); });
     return () => { live = false; };
   }, [phase]);
-  // Invalidate any in-flight DIA extraction on unmount so its async tail can't setState on the
-  // gone component (the run-token guard then drops the commit).
-  useEffect(() => () => { diaRunRef.current++; }, []);
 
   // Keep the add-XIC ± field in sync with the Settings default when it changes while this
   // view is mounted (the field is seeded from settings only at mount otherwise).
@@ -98,27 +86,17 @@ export function Chromatograms() {
   const generatedCount = chromList.filter((it) => it.source === "generated").length;
   const hasTic = chromList.some((it) => it.req.mode === "tic"); // gray out "+ add TIC" once one exists
 
-  // DIA
+  // DIA — each fragment m/z becomes its own card via addDiaXic (extracted over the precursor
+  // isolation window's MS2 spectra). An optional RT center expands to a ±60 s window.
   const diaPrecursorNum = Number(diaPrecursor);
   const diaTolNum = Number(diaTol);
   const diaFragmentMzs = diaFragments.split(/[\s,;]+/).map((s) => Number(s)).filter((v) => Number.isFinite(v) && v > 0);
   const diaValid = Number.isFinite(diaPrecursorNum) && diaPrecursorNum > 0 && Number.isFinite(diaTolNum) && diaTolNum > 0 && diaFragmentMzs.length > 0;
-  async function extractDia() {
-    if (!diaValid || diaBusy) return;
-    const run = diaRunRef.current; // guard: drop the commit if the file changes mid-extraction
-    setDiaBusy(true); setDiaNote(null);
+  function onAddDia() {
+    if (!diaValid) return;
     const c = Number(diaRtCenter);
     const rt: [number, number] | undefined = diaRtCenter.trim() !== "" && Number.isFinite(c) ? [c - 60, c + 60] : undefined;
-    try {
-      const series = await Promise.all(diaFragmentMzs.map((mz) => engine.extractChrom({ mode: "diaXic", precursorMz: diaPrecursorNum, mz, tolDa: diaTolNum, ...(rt ? { rt } : {}) })));
-      if (run !== diaRunRef.current) return;
-      const traces: ChromTrace[] = series.map((s, i) => ({ label: `m/z ${diaFragmentMzs[i]!.toFixed(3)}`, color: DIA_PALETTE[i % DIA_PALETTE.length]!, points: seriesToPoints(s) }));
-      setDiaTraces(traces);
-      if (traces.every((t) => t.points.length === 0)) setDiaNote(`No MS2 isolation window contains m/z ${diaPrecursorNum.toFixed(4)} — check the precursor m/z, or this file may not be DIA.`);
-    } catch (err) {
-      if (run !== diaRunRef.current) return;
-      setDiaNote(err instanceof Error ? err.message : String(err)); setDiaTraces(null);
-    } finally { if (run === diaRunRef.current) setDiaBusy(false); }
+    addDiaXic({ precursorMz: diaPrecursorNum, fragmentMzs: diaFragmentMzs, tolDa: diaTolNum, rt });
   }
 
   return (
@@ -159,7 +137,7 @@ export function Chromatograms() {
       {diaOpen && (
         <div data-testid="dia-extractor">
           <p style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", margin: "0 0 0.4rem" }}>
-            Enter a precursor m/z (selects the DIA isolation window) and one or more fragment m/z values; each is extracted over that window&apos;s MS2 spectra and overlaid by retention time.
+            Enter a precursor m/z (selects the DIA isolation window) and one or more fragment m/z values; each is added as its own chromatogram card below, extracted over that window&apos;s MS2 spectra.
           </p>
           <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-end", flexWrap: "wrap", marginBottom: "0.5rem" }}>
             <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>Precursor m/z
@@ -170,15 +148,8 @@ export function Chromatograms() {
               <input data-testid="dia-tol-input" type="number" step="any" value={diaTol} onChange={(e) => setDiaTol(e.target.value)} style={xicInputStyle(4.5)} /></label>
             <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>RT center (s, optional)
               <input data-testid="dia-rt-input" type="number" step="any" placeholder="full run" value={diaRtCenter} onChange={(e) => setDiaRtCenter(e.target.value)} style={xicInputStyle(6)} /></label>
-            <Button variant="secondary" size="sm" onClick={() => void extractDia()} disabled={!diaValid || diaBusy} data-testid="dia-extract-btn">{diaBusy ? "Extracting…" : "Extract fragments"}</Button>
+            <Button variant="secondary" size="sm" onClick={onAddDia} disabled={!diaValid} data-testid="dia-extract-btn">Add fragment chromatograms</Button>
           </div>
-          {diaNote && <p data-testid="dia-note" style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", margin: "0.25rem 0" }}>{diaNote}</p>}
-          {diaTraces && diaTraces.some((t) => t.points.length > 0) && (
-            <div data-testid="dia-plot-host">
-              <MultiChromPlot traces={diaTraces} />
-              <p style={{ margin: "0.25rem 0 0", fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{diaTraces.length} transition{diaTraces.length === 1 ? "" : "s"} · scroll to zoom · double-click to reset</p>
-            </div>
-          )}
         </div>
       )}
 
@@ -281,11 +252,13 @@ function ChromCard({ item }: { item: ChromItem }) {
   const points = useMemo(() => (item.series ? seriesToPoints(item.series) : []), [item.series]);
 
   // RT-click → nearest spectrum. Restrict to the trace's effective MS level so the click
-  // lands on a same-level scan: the XIC's own msLevel, or MS1 for a TIC (the engine TIC sums
-  // MS1 when present, so a DDA run must not pick an interleaved MS2 scan).
+  // lands on a same-level scan: the XIC's own msLevel, MS1 for a TIC (the engine TIC sums
+  // MS1 when present, so a DDA run must not pick an interleaved MS2 scan), or MS2 for a DIA
+  // fragment (extracted over the window's MS2 spectra).
   const pickLevel =
     item.req.mode === "xic" ? item.req.msLevel
     : item.req.mode === "tic" && browse?.msLevel.some((l) => l === 1) ? 1
+    : item.req.mode === "diaXic" && browse?.msLevel.some((l) => l === 2) ? 2
     : undefined;
   // route=false: left-click marks the spectrum but stays here; route=true (right-click) navigates.
   function pickNearestSpectrum(time: number, navigate: boolean) {

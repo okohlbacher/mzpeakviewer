@@ -207,15 +207,19 @@
   vertical marker shows it); <strong>right-click</strong> a point to open that spectrum in the
   Spectra view. Both pick the right scan for the trace — MS1 for a TIC, the XIC's own MS level —
   so a click never lands on an interleaved scan of the wrong level.</p>
-  <p>Three ways to add a card:</p>
+  <p>Four ways to add a card:</p>
   <ul>
     <li><strong>Stored chromatograms</strong> — the file's own chromatograms (SRM/MRM transitions,
       instrument traces) are listed with their metadata (type, polarity, precursor → product m/z,
       point count). Click a row to inspect its full CV-resolved metadata; press <em>+ Add</em> to
       put it on a card.</li>
-    <li><strong>+ add TIC</strong> — compute the total-ion chromatogram across the run.</li>
+    <li><strong>+ add TIC</strong> — compute the total-ion chromatogram across the run (disabled
+      once a TIC is already in the list).</li>
     <li><strong>+ add XIC</strong> — extract an ion chromatogram for an m/z ± tolerance window,
       with an optional retention-time range. Leave the range blank for the whole run.</li>
+    <li><strong>+ add DIA</strong> — for a precursor m/z (its DIA isolation window) and one or more
+      fragment m/z values, add one card per fragment, each extracted over that window's MS2 spectra.
+      DIA fragment cards behave like any other — collapse, reorder, and close them in the same list.</li>
   </ul>
   <p>You can also create an XIC straight from a peak: <strong>right-click a peak</strong> in the
   Spectra view (see <a href="#spectra">section 3</a>) and the new trace appears here, limited to

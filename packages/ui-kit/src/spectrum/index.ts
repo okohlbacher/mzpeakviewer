@@ -17,10 +17,6 @@ export { WavelengthHeatmap } from "./WavelengthHeatmap";
 export { ChromPlot } from "./ChromPlot";
 export type { ChromPoint } from "./ChromPlot";
 
-// Multi-trace chromatogram overlay (DIA fragment peak group).
-export { MultiChromPlot } from "./MultiChromPlot";
-export type { ChromTrace } from "./MultiChromPlot";
-
 // Spectrum data shape the plot consumes (contracts wire shape + `representation`).
 export type { SpectrumArrays, Representation } from "./peaks";
 
