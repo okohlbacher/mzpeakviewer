@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   showChromatograms,
-  showOptical,
   hasDetectionDiscrepancy,
   type CapabilityModel,
 } from "./capability";
@@ -31,19 +30,6 @@ describe("showChromatograms — independent of imaging (vibe MAJOR-4)", () => {
   });
   it("shown once a TIC column is confirmed present", () => {
     expect(showChromatograms({ ...base, chromatograms: { numChromatograms: 0, ticColumn: "present" } })).toBe(true);
-  });
-});
-
-describe("showOptical — imaging-gated", () => {
-  it("requires both isImaging and hasOptical", () => {
-    expect(showOptical({ ...base, optical: { hasOptical: true, count: 1 } })).toBe(false);
-    expect(
-      showOptical({
-        ...base,
-        imaging: { ...base.imaging, isImaging: true },
-        optical: { hasOptical: true, count: 1 },
-      }),
-    ).toBe(true);
   });
 });
 

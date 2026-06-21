@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { packMobility, mobilityAt } from "./mobility";
+import { packMobility } from "./mobility";
 
 describe("packMobility", () => {
   it("dictionary-encodes: distinct ascending values + per-peak index, lossless", () => {
@@ -8,8 +8,8 @@ describe("packMobility", () => {
     const c = packMobility(raw);
     expect(Array.from(c.values)).toEqual([0.85, 1.2, 1.55]); // distinct, ascending
     expect(c.index instanceof Uint16Array).toBe(true); // ≤65535 distinct → Uint16
-    // round-trip every peak
-    for (let i = 0; i < raw.length; i++) expect(mobilityAt(c, i)).toBe(raw[i]);
+    // round-trip every peak (decode via the dictionary: values[index[i]])
+    for (let i = 0; i < raw.length; i++) expect(c.values[c.index[i]!]).toBe(raw[i]);
     expect(Array.from(c.index)).toEqual([1, 1, 0, 0, 0, 2, 1]);
   });
 

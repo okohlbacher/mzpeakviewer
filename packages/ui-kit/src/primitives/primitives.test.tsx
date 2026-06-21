@@ -10,13 +10,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   Button,
-  SegmentedControl,
-  NumberField,
   Select,
-  Checkbox,
   Badge,
   StatRow,
-  ColormapScale,
   Panel,
 } from "./index";
 
@@ -42,41 +38,6 @@ describe("Button", () => {
   });
 });
 
-describe("SegmentedControl", () => {
-  it("renders tablist with aria-selected on the active option", () => {
-    const m = html(
-      <SegmentedControl
-        ariaLabel="View"
-        value="b"
-        options={[
-          { value: "a", label: "A" },
-          { value: "b", label: "B" },
-        ]}
-      />,
-    );
-    expect(m).toContain('role="tablist"');
-    expect(m).toContain('aria-label="View"');
-    // active option b is selected; a is not
-    expect(m).toContain('aria-selected="true"');
-    expect(m).toContain('aria-selected="false"');
-    expect(m).toContain("mz-seg__item");
-  });
-});
-
-describe("NumberField", () => {
-  it("defaults to a TEXT input (URL-safe) with mono .mz-input + unit chip", () => {
-    const m = html(
-      <NumberField value="740.50" unit="Da" ariaLabel="m/z start" />,
-    );
-    expect(m).toContain('class="mz-input"');
-    expect(m).toContain('type="text"'); // critical: not number
-    expect(m).toContain('value="740.50"');
-    expect(m).toContain('aria-label="m/z start"');
-    expect(m).toContain("mz-input__unit");
-    expect(m).toContain("Da");
-  });
-});
-
 describe("Select", () => {
   it("renders native select + chevron with options", () => {
     const m = html(
@@ -93,17 +54,6 @@ describe("Select", () => {
     expect(m).toContain("mz-select__chev");
     expect(m).toContain("viridis");
     expect(m).toContain("inferno");
-  });
-});
-
-describe("Checkbox", () => {
-  it("renders checked input + box", () => {
-    const m = html(<Checkbox checked label="TIC norm" />);
-    expect(m).toContain("mz-check");
-    expect(m).toContain('type="checkbox"');
-    expect(m).toContain("checked");
-    expect(m).toContain("mz-check__box");
-    expect(m).toContain("TIC norm");
   });
 });
 
@@ -130,15 +80,6 @@ describe("StatRow", () => {
     expect(m).toContain("260");
     const empty = html(<StatRow label="m/z" value={null} />);
     expect(empty).toContain("—");
-  });
-});
-
-describe("ColormapScale", () => {
-  it("renders the colormap bar + ticks", () => {
-    const m = html(<ColormapScale colormap="inferno" low="0" high="1.4e6" />);
-    expect(m).toContain("mz-cmap__bar--inferno");
-    expect(m).toContain("1.4e6");
-    expect(m).toContain("mz-cmap__ticks");
   });
 });
 

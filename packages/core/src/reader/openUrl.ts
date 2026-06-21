@@ -46,20 +46,6 @@ async function capabilityGate(reader: Reader): Promise<Reader> {
 }
 
 /**
- * Initialize a full MzPeakReader from an already-opened ZipStorage.
- * Called lazily on the first renderIonImage / selectSpectrum — NOT during
- * the initial file open (which uses ZipStorage.fromUrl/fromBlob directly).
- * Runs the capability gate before returning.
- */
-export async function openReaderFromStore(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  store: ZipStorage<any>,
-): Promise<Reader> {
-  const reader = await MzPeakReader.fromStore(store);
-  return capabilityGate(reader);
-}
-
-/**
  * Open a `.mzpeak` from a URL (HTTP range requests via zip.js). Eagerly loads
  * metadata; signal arrays are read lazily on demand. The boundary into the
  * vendored WASM reader. Runs the capability gate before returning.
@@ -71,8 +57,6 @@ export async function openReaderFromStore(
  * force range mode rather than trust the (missing) advertisement header. The
  * vendored `MzPeakReader.fromUrl()` builds an unforced `HttpRangeReader`, so we
  * construct the store ourselves instead of using it.
- * @deprecated Use ZipStorage.fromUrl() for the fast path + openReaderFromStore()
- * for lazy full init. This function reads all metadata eagerly.
  */
 export async function openUrl(url: string | URL): Promise<Reader> {
   // boundary: mzpeakts/parquet-wasm — opening untrusted file bytes over HTTP.

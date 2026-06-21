@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import { viridis } from "./colormap";
+import { niceTicks, fmtTick } from "./axisTicks";
 
 /**
  * 2-D ion-mobility frame heatmap: m/z (x) × inverse reduced ion mobility 1/K0 (y), cell
@@ -165,14 +166,14 @@ function paint(canvas: HTMLCanvasElement, host: HTMLElement, f: Grid | null): vo
   for (const tv of niceTicks(f.mzMin, f.mzMax, 6)) {
     const x = plot.x + (tv - f.mzMin) / (f.mzMax - f.mzMin || 1) * plot.w;
     ctx.beginPath(); ctx.moveTo(x, plot.y + plot.h); ctx.lineTo(x, plot.y + plot.h + 4); ctx.stroke();
-    ctx.fillText(fmtTick(tv), x, plot.y + plot.h + 6);
+    ctx.fillText(fmtTick(tv, 3), x, plot.y + plot.h + 6);
   }
   ctx.textAlign = "right"; ctx.textBaseline = "middle";
   for (const mv of niceTicks(f.mobMin, f.mobMax, 5)) {
     const fy = (mv - f.mobMin) / (f.mobMax - f.mobMin || 1);
     const y = plot.y + (1 - fy) * plot.h; // low 1/K0 at bottom
     ctx.beginPath(); ctx.moveTo(plot.x - 4, y); ctx.lineTo(plot.x, y); ctx.stroke();
-    ctx.fillText(fmtTick(mv), plot.x - 6, y);
+    ctx.fillText(fmtTick(mv, 3), plot.x - 6, y);
   }
 
   ctx.fillStyle = colText; ctx.font = fontSans;
@@ -201,29 +202,11 @@ function paint(canvas: HTMLCanvasElement, host: HTMLElement, f: Grid | null): vo
   ctx.strokeStyle = colSoft; ctx.strokeRect(cbX + 0.5, cbY + 0.5, COLORBAR_W - 1, cbH - 1);
   ctx.fillStyle = colMuted; ctx.font = fontMono;
   ctx.textAlign = "left"; ctx.textBaseline = "top";
-  ctx.fillText(fmtTick(vmax), cbX + COLORBAR_W + 4, cbY);
+  ctx.fillText(fmtTick(vmax, 3), cbX + COLORBAR_W + 4, cbY);
   ctx.textBaseline = "bottom"; ctx.fillText("0", cbX + COLORBAR_W + 4, cbY + cbH);
   ctx.fillStyle = colText; ctx.font = fontSans;
   ctx.save();
   ctx.translate(cssW - 2, cbY + cbH / 2); ctx.rotate(Math.PI / 2);
   ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.fillText("intensity (log)", 0, 0);
   ctx.restore();
-}
-
-function niceTicks(lo: number, hi: number, count: number): number[] {
-  if (!(hi > lo)) return [lo];
-  const raw = (hi - lo) / Math.max(1, count);
-  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-  const step = (raw / mag >= 5 ? 5 : raw / mag >= 2 ? 2 : 1) * mag;
-  const start = Math.ceil(lo / step) * step;
-  const out: number[] = [];
-  for (let v = start; v <= hi + step * 1e-6; v += step) out.push(v);
-  return out;
-}
-function fmtTick(v: number): string {
-  if (!Number.isFinite(v)) return "";
-  const a = Math.abs(v);
-  if (a !== 0 && (a >= 1e5 || a < 1e-3)) return v.toExponential(1);
-  if (a >= 1000) return Math.round(v).toLocaleString();
-  return Number.isInteger(v) ? String(v) : v.toFixed(a < 10 ? 3 : 2);
 }

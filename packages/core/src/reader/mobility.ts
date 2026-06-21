@@ -31,8 +31,3 @@ export function packMobility(raw: ArrayLike<number>): MobilityCodec {
 
   return { values, index };
 }
-
-/** The 1/K0 value for peak `i` (decode a single entry without materializing the full array). */
-export function mobilityAt(c: MobilityCodec, i: number): number {
-  return c.values[c.index[i]!]!;
-}

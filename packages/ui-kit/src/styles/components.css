@@ -81,14 +81,7 @@
 }
 .mz-seg__item:first-child { border-left: none; }
 .mz-seg__item:hover { background: var(--gray-50); }
-.mz-seg__item[aria-selected="true"] {
-  background: var(--accent);
-  color: var(--text-on-accent);
-  font-weight: var(--weight-semibold);
-}
 .mz-seg__item .mz-ic { width: 14px; height: 14px; }
-.mz-seg--sm { height: var(--control-h-sm); }
-.mz-seg--sm .mz-seg__item { font-size: var(--text-2xs); padding: 0 var(--space-3); }
 /* Radio-group variant (controls/SegmentedControl): selected state keys off
    aria-checked, and the focus ring is inset so it isn't clipped by the group's
    `overflow: hidden`. */
@@ -101,52 +94,6 @@
   outline: none;
   box-shadow: inset var(--focus-ring);
 }
-
-/* ── Field (label + control) ───────────────────────────────────────────── */
-.mz-field { display: inline-flex; flex-direction: column; gap: var(--space-2); }
-.mz-field__label {
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.mz-input {
-  display: inline-flex;
-  align-items: center;
-  height: var(--control-h);
-  background: var(--surface);
-  border: var(--border-width) solid var(--border-strong);
-  border-radius: var(--radius-xs);
-  transition: var(--transition-control);
-  overflow: hidden;
-}
-.mz-input:focus-within { border-color: var(--border-focus); box-shadow: var(--focus-ring); }
-.mz-input > input {
-  height: 100%;
-  min-width: 0;
-  padding: 0 var(--space-3);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-strong);
-  background: transparent;
-  border: none;
-  outline: none;
-}
-.mz-input__unit {
-  padding: 0 var(--space-3);
-  font-family: var(--font-sans);
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  background: var(--gray-50);
-  border-left: var(--border-width) solid var(--border-soft);
-  align-self: stretch;
-  display: inline-flex;
-  align-items: center;
-}
-.mz-input--sm { height: var(--control-h-sm); }
-.mz-input--sm > input { font-size: var(--text-xs); }
 
 /* ── Select ────────────────────────────────────────────────────────────── */
 .mz-select {
@@ -181,36 +128,6 @@
 }
 .mz-select--sm { height: var(--control-h-sm); }
 .mz-select--sm > select { font-size: var(--text-xs); }
-
-/* ── Checkbox ──────────────────────────────────────────────────────────── */
-.mz-check {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--text-body);
-  cursor: pointer;
-  user-select: none;
-}
-.mz-check > input { position: absolute; opacity: 0; width: 0; height: 0; }
-.mz-check__box {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 15px; height: 15px;
-  border: var(--border-width-2) solid var(--border-strong);
-  border-radius: var(--radius-xs);
-  background: var(--surface);
-  color: #fff;
-  transition: var(--transition-control);
-}
-.mz-check__box .mz-ic { width: 11px; height: 11px; opacity: 0; }
-.mz-check > input:checked + .mz-check__box {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-.mz-check > input:checked + .mz-check__box .mz-ic { opacity: 1; }
-.mz-check > input:focus-visible + .mz-check__box { box-shadow: var(--focus-ring); }
 
 /* ── Badge / Tag ───────────────────────────────────────────────────────── */
 .mz-badge {
@@ -258,46 +175,6 @@
   text-align: right;
 }
 .mz-statrow__val em { font-style: normal; color: var(--text-faint); }
-
-/* ── ColormapScale (signature legend / scale bar) ──────────────────────── */
-.mz-cmap { display: inline-flex; flex-direction: column; gap: var(--space-2); width: 100%; }
-.mz-cmap__bar {
-  height: 12px;
-  width: 100%;
-  border-radius: var(--radius-xs);
-  border: var(--border-width) solid rgba(0,0,0,0.18);
-}
-.mz-cmap__bar--viridis { background: var(--gradient-viridis); }
-.mz-cmap__bar--inferno { background: var(--gradient-inferno); }
-.mz-cmap__bar--gray    { background: var(--gradient-gray); }
-.mz-cmap__ticks {
-  display: flex;
-  justify-content: space-between;
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
-}
-.mz-cmap--stage .mz-cmap__ticks { color: var(--gray-400); }
-.mz-cmap--vertical { flex-direction: row; height: 100%; width: auto; gap: var(--space-3); }
-.mz-cmap--vertical .mz-cmap__bar {
-  width: 12px; height: 100%;
-  background-size: 100% 100%;
-}
-.mz-cmap--vertical .mz-cmap__bar--viridis {
-  background: linear-gradient(0deg,
-    var(--viridis-0) 0%, var(--viridis-1) 12.5%, var(--viridis-2) 25%,
-    var(--viridis-3) 37.5%, var(--viridis-4) 50%, var(--viridis-5) 62.5%,
-    var(--viridis-6) 75%, var(--viridis-7) 87.5%, var(--viridis-8) 100%);
-}
-.mz-cmap--vertical .mz-cmap__bar--inferno {
-  background: linear-gradient(0deg,
-    var(--inferno-0) 0%, var(--inferno-1) 12.5%, var(--inferno-2) 25%,
-    var(--inferno-3) 37.5%, var(--inferno-4) 50%, var(--inferno-5) 62.5%,
-    var(--inferno-6) 75%, var(--inferno-7) 87.5%, var(--inferno-8) 100%);
-}
-.mz-cmap--vertical .mz-cmap__bar--gray { background: linear-gradient(0deg, #000 0%, #fff 100%); }
-.mz-cmap--vertical .mz-cmap__ticks { flex-direction: column-reverse; }
 
 /* ── Panel (collapsible inspector section) ─────────────────────────────── */
 .mz-panel { border-bottom: var(--border-width) solid var(--border-hairline); }

@@ -8,8 +8,6 @@ export {
   type CvTerm,
   type CvMap,
 } from "./cvTerms";
-export { parseCurie, olsUrl, type CvRef } from "./curie";
-export { fmtBytes } from "./format";
 // Note: `SpectrumArrays` is intentionally NOT re-exported here — the spectrum
 // cluster already exports a (different) public `SpectrumArrays`, and the package
 // root barrel `export *`s both clusters. The reporters' local `SpectrumArrays`

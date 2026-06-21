@@ -253,8 +253,3 @@ export const MESSAGE_POLICY: Record<RequestType, MessagePolicy> = {
   renderMultiChannel: { cancellation: "abort", transfersResult: true, paged: false },
   getOpticalImage: { cancellation: "stale-drop", transfersResult: true, paged: false },
 };
-
-/** Narrowing helper for response handling in the adapters. */
-export function isErrorResponse(r: WorkerResponse): r is Extract<WorkerResponse, { type: "error" }> {
-  return r.type === "error";
-}

@@ -17,9 +17,8 @@ import { readWavelengthSpectrum, buildWavelengthBrowse, buildWavelengthMatrix } 
 import { CacheBudget, SpectrumLruCache, WavelengthLruCache, IonCacheStore } from "../engine/cache";
 import { engineScanBreakdown } from "../engine/scanBreakdown";
 import { engineExtractChrom, engineChromatogramList, type ChromContext } from "../engine/chrom";
-import { engineRenderIonImage, engineMeanSpectrum, engineRoiSpectrum, prefetchIonCache, type SpectraArrayCache } from "../engine/imaging";
+import { engineRenderIonImage, engineMeanSpectrum, engineRoiSpectrum, prefetchIonCache, engineRenderMultiChannel, type SpectraArrayCache } from "../engine/imaging";
 import { Mutex } from "../engine/mutex";
-import { engineRenderMultiChannel } from "../engine/multichannel";
 import { engineGetOpticalImage } from "../engine/optical";
 import { engineArchiveList, engineArchiveMemberBytes, engineParquetFooter, engineSampleColumn, clearStructureCache } from "../engine/structure";
 import { engineStudyMeta } from "../engine/studyMeta";

@@ -132,11 +132,6 @@ export function showWavelength(c: CapabilityModel): boolean {
   return c.wavelength.present;
 }
 
-/** True when Optical + Overlay nav entries should be shown (imaging-gated). */
-export function showOptical(c: CapabilityModel): boolean {
-  return c.imaging.isImaging && c.optical.hasOptical;
-}
-
 /** Whether auto-detection and the effective flag disagree (override in effect). */
 export function hasDetectionDiscrepancy(d: ImagingDetection): boolean {
   return d.override !== null && d.override !== d.detected;

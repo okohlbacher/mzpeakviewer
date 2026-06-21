@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { WavelengthMatrix } from "@mzpeak/contracts";
 import { viridis } from "./colormap";
+import { niceTicks, fmtTick } from "./axisTicks";
 
 /**
  * 2D PDA/DAD heatmap: retention time (x) × wavelength (y), cell intensity mapped
@@ -305,25 +306,4 @@ function finite2(xs: Float32Array): [number, number] | null {
     }
   }
   return lo <= hi ? [lo, hi] : null;
-}
-
-/** ~`count` "nice" tick values spanning [lo, hi]. */
-function niceTicks(lo: number, hi: number, count: number): number[] {
-  if (!(hi > lo)) return [lo];
-  const raw = (hi - lo) / Math.max(1, count);
-  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-  const norm = raw / mag;
-  const step = (norm >= 5 ? 5 : norm >= 2 ? 2 : 1) * mag;
-  const start = Math.ceil(lo / step) * step;
-  const out: number[] = [];
-  for (let v = start; v <= hi + step * 1e-6; v += step) out.push(v);
-  return out;
-}
-
-function fmtTick(v: number): string {
-  if (!Number.isFinite(v)) return "";
-  const a = Math.abs(v);
-  if (a !== 0 && (a >= 1e5 || a < 1e-3)) return v.toExponential(1);
-  if (a >= 1000) return Math.round(v).toLocaleString();
-  return Number.isInteger(v) ? String(v) : v.toFixed(2);
 }

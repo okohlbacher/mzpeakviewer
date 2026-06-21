@@ -1,5 +1,5 @@
 // GOLDEN NODE TEST — the multi-channel RGB-overlay render against the REAL imaging
-// fixture (mzpeakts runs in node via WASM). Gates engine/multichannel.ts:
+// fixture (mzpeakts runs in node via WASM). Gates the multi-channel render in engine/imaging.ts:
 //   open → grid → engineRenderMultiChannel(reader, grid, [chA, null, chB])
 //   → assert the result is POSITION-ALIGNED with the input (length matches),
 //     each non-null slot is a Float32Array of width*height with signal, and the null
@@ -16,8 +16,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import { openEngineFile, type EngineFile } from "./open";
-import { engineRenderMultiChannel } from "./multichannel";
-import { engineRenderIonImage } from "./imaging";
+import { engineRenderMultiChannel, engineRenderIonImage } from "./imaging";
 import { rebuildCoordMap } from "../adapt/grid";
 import { harvestDataArraysOrNull } from "../reader/arrays";
 
