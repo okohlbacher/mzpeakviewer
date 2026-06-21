@@ -161,3 +161,44 @@ describe("reconstructSpectrum representation routing + preservation", () => {
     expect(() => reconstructSpectrum(empty, 6, null)).toThrow(/Spectrum 6/);
   });
 });
+
+describe("reconstructSpectrum ims-compact tof→m/z", () => {
+  // The real BRFP/mzPeakConverter timsTOF calibration (MANIFEST.md). tof is absolute.
+  const cal = { a: 9.74680332211541, b: 7.855554279925029e-05 };
+  const mzOf = (tof: number) => (cal.a + cal.b * tof) ** 2;
+
+  it("reconstructs mz=(a+b·tof)² from a tof-bearing centroid frame, mobility aligned", () => {
+    // Mobility-major frame (NOT tof-sorted): no `mz` key, integer `tof` instead. mzpeakts
+    // can't suffix-strip the 1-word "tof" name — verify the by-elimination column locate.
+    const rec = {
+      id: "frame=1",
+      centroids: [
+        { tof: 250000, intensity: 3, mean_inverse_reduced_ion_mobility: 1.5 },
+        { tof: 100000, intensity: 1, mean_inverse_reduced_ion_mobility: 0.85 },
+        { tof: 180000, intensity: 2, mean_inverse_reduced_ion_mobility: 0.85 },
+      ],
+    } as unknown as RawSpectrum;
+    const r = reconstructSpectrum(rec, 0, "centroid", cal);
+    // sorted by reconstructed m/z (tof is monotonic in m/z): 100k < 180k < 250k
+    expect(Array.from(r.mz)).toEqual([mzOf(100000), mzOf(180000), mzOf(250000)]);
+    expect(r.mz[0]).toBeCloseTo(309.84, 1); // sanity: real m/z magnitude, not a raw tof index
+    expect(Array.from(r.intensity)).toEqual([1, 2, 3]);
+    // mobility tracks each peak through the m/z sort
+    expect(Array.from(r.mobility!.values)).toEqual([0.85, 1.5]);
+    expect(Array.from(r.mobility!.index)).toEqual([0, 0, 1]);
+  });
+
+  it("handles the empty-string key mzpeakts emits for the 1-word tof array", () => {
+    const rec = {
+      id: "frame=2",
+      centroids: [{ "": 100000, intensity: 5 }],
+    } as unknown as RawSpectrum;
+    const r = reconstructSpectrum(rec, 1, "centroid", cal);
+    expect(r.mz[0]).toBeCloseTo(mzOf(100000), 6);
+  });
+
+  it("does NOT touch m/z when a real `mz` key is present (standard archive)", () => {
+    const rec: RawSpectrum = { id: "s", centroids: [{ mz: 150, intensity: 5 }] };
+    expect(Array.from(reconstructSpectrum(rec, 2, "centroid", cal).mz)).toEqual([150]);
+  });
+});

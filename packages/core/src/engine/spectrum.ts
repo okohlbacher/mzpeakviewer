@@ -44,6 +44,40 @@ const INTENSITY_KEY = "intensity array";
 // field (mzpeakts' packTableIntoPeaks underscores the array name).
 const MOBILITY_DATA_KEY = "mean inverse reduced ion mobility array";
 
+/**
+ * ims-compact (Bruker timsTOF / TDF) peaks store an integer `tof` (MS:1000786) in place of an
+ * `m/z array`; m/z is recovered as `mz = (a + b·tof)²` with `a,b` from the index's
+ * `ims_calibration` (the converter keeps this as the contract — tof in the *archive* is
+ * absolute, a direct per-point map). See the mzPeakConverter compliance reply §2.
+ */
+export type ImsCalibration = { a: number; b: number };
+
+function mzFromTof(cal: ImsCalibration, tof: number): number {
+  const m = cal.a + cal.b * tof;
+  return m * m;
+}
+
+/** Parse `metadata.ims_calibration` (a JSON string OR an inlined object) to `{a,b}`, or null
+ *  when the file isn't ims-compact / the calibration is malformed. */
+export function readImsCalibration(reader: Reader): ImsCalibration | null {
+  const meta = (reader as unknown as { store?: { fileIndex?: { metadata?: Record<string, unknown> } } })
+    .store?.fileIndex?.metadata;
+  let raw: unknown = meta?.["ims_calibration"];
+  if (raw == null) return null;
+  if (typeof raw === "string") { try { raw = JSON.parse(raw); } catch { return null; } }
+  if (!raw || typeof raw !== "object") return null;
+  const a = (raw as Record<string, unknown>)["a"], b = (raw as Record<string, unknown>)["b"];
+  return typeof a === "number" && typeof b === "number" ? { a, b } : null;
+}
+
+// Standard centroid-object keys mzpeakts emits; any OTHER numeric key is the non-standard
+// data array (the ims-compact `tof`, whose 1-word name packTableIntoPeaks can't suffix-strip).
+const CENTROID_STD_KEYS = new Set(["mz", "intensity", "mean_inverse_reduced_ion_mobility"]);
+function tofColumnKey(c: Record<string, unknown>): string | null {
+  for (const k of Object.keys(c)) if (!CENTROID_STD_KEYS.has(k) && typeof c[k] === "number") return k;
+  return null;
+}
+
 /** The raw spectrum record shape mzpeakts returns from getSpectrum(index). The centroid
  *  objects may carry extra promoted columns (e.g. ion mobility) beyond mz/intensity. */
 export type RawSpectrum = {
@@ -150,18 +184,25 @@ function readDataArrays(s: RawSpectrum): RawSignal {
 }
 
 /** Copy spectra_peaks (centroid) arrays into the canonical dtypes, plus per-peak ion
- *  mobility when the centroid objects carry it (timsTOF / IMS). */
-function readCentroids(s: RawSpectrum): RawSignal {
-  const centroids = s.centroids!;
+ *  mobility when the centroid objects carry it (timsTOF / IMS). When the peaks carry a
+ *  `tof` array instead of `mz` (ims-compact) and `cal` is present, reconstruct
+ *  `mz = (a + b·tof)²`. */
+function readCentroids(s: RawSpectrum, cal: ImsCalibration | null): RawSignal {
+  const centroids = s.centroids! as unknown as Record<string, number>[];
   const n = centroids.length;
   const mz = new Float64Array(n);
   const intensity = new Float32Array(n);
-  const hasMobility = n > 0 && centroids[0]!.mean_inverse_reduced_ion_mobility != null;
+  const hasMobility = n > 0 && centroids[0]!["mean_inverse_reduced_ion_mobility"] != null;
   const mobility = hasMobility ? new Float64Array(n) : undefined;
+  // ims-compact: no `mz` key, integer `tof` instead. Locate the tof column once (its mzpeakts
+  // key is unstable), then map every peak through the calibration.
+  const tofKey = cal && n > 0 && centroids[0]!["mz"] == null ? tofColumnKey(centroids[0]!) : null;
   for (let i = 0; i < n; i++) {
-    mz[i] = centroids[i]!.mz;
-    intensity[i] = centroids[i]!.intensity;
-    if (mobility) mobility[i] = centroids[i]!.mean_inverse_reduced_ion_mobility!;
+    const c = centroids[i]!;
+    // tofKey may be "" (mzpeakts mangles the 1-word "tof" name) — test for null, not truthiness.
+    mz[i] = tofKey !== null ? mzFromTof(cal!, c[tofKey]!) : c["mz"]!;
+    intensity[i] = c["intensity"]!;
+    if (mobility) mobility[i] = c["mean_inverse_reduced_ion_mobility"]!;
   }
   return mobility ? { mz, intensity, mobility } : { mz, intensity };
 }
@@ -179,18 +220,20 @@ export function reconstructSpectrum(
   spectrum: RawSpectrum,
   index: number,
   representation: SpectrumRepresentation,
+  cal: ImsCalibration | null = null,
 ): ReconstructedSpectrum {
   // Route by representation, but fall through to the other source when empty.
   // `representation` is reported as-is regardless of which source supplied bytes.
+  // ims-compact peaks are centroids, so only the centroid reader takes `cal`.
   let raw: RawSignal;
   if (representation === "centroid") {
-    if (hasCentroids(spectrum)) raw = readCentroids(spectrum);
+    if (hasCentroids(spectrum)) raw = readCentroids(spectrum, cal);
     else if (hasDataArrays(spectrum)) raw = readDataArrays(spectrum);
     else throw new EmptySpectrumError(index);
   } else {
     // "profile" or null (unknown) → data-array default, centroid fall-through.
     if (hasDataArrays(spectrum)) raw = readDataArrays(spectrum);
-    else if (hasCentroids(spectrum)) raw = readCentroids(spectrum);
+    else if (hasCentroids(spectrum)) raw = readCentroids(spectrum, cal);
     else throw new EmptySpectrumError(index);
   }
 
@@ -226,7 +269,7 @@ export async function readEngineSpectrum(
   const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
   if (!spectrum) throw new Error(`No spectrum at index ${index}`);
 
-  const recon = reconstructSpectrum(spectrum, index, representation);
+  const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader));
   return adaptSpectrum({
     index: recon.index,
     id: recon.id,
@@ -335,6 +378,10 @@ export async function prefetchSpectrumCache(
   // Profile/unknown spectra from spectra_data; centroid spectra from spectra_peaks.
   const okData = await drain(streamSpectraDataArrays(reader), (i) => isMs01(i) && reprOf(i) !== "centroid");
   if (!okData) return { cached, stopped: true };
+  // ims-compact: the bulk peaks stream yields {index, mz, intensity} with NO `tof`, so it
+  // can't reconstruct m/z — skip it (don't cache empty m/z). Per-select getSpectrum +
+  // reconstructSpectrum handles + caches these correctly on demand. Small file (500 frames).
+  if (readImsCalibration(reader)) return { cached, stopped: false };
   const okPeaks = await drain(streamSpectraPeaksArrays(reader), (i) => isMs01(i) && reprOf(i) === "centroid");
   return { cached, stopped: !okPeaks };
 }
@@ -386,7 +433,7 @@ export async function readEngineSpectrumCached(
 
   const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
   if (!spectrum) throw new Error(`No spectrum at index ${index}`);
-  const recon = reconstructSpectrum(spectrum, index, representation);
+  const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader));
   // Cache the canonical decoded arrays (adaptSpectrum copies for the wire below).
   cache.set(index, { mz: recon.mz, intensity: recon.intensity, msLevel, ...(recon.mobility ? { mobility: recon.mobility } : {}) });
   return adaptSpectrum({
