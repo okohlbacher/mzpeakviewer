@@ -12,16 +12,18 @@
 // never cached. msLevel is kept so a future MS0/1-only prefetch can build its
 // worklist without materializing per-spectrum records.
 
-/** One cached spectrum's signal arrays + MS level (no other metadata). */
+/** One cached spectrum's signal arrays + MS level (no other metadata). `mobility` is the
+ *  compact ion-mobility codec for IMS spectra (absent otherwise). */
 export type CachedSpectrum = {
   mz: Float64Array;
   intensity: Float32Array;
   msLevel: number | null;
+  mobility?: MobilityCodec;
 };
 
-/** Bytes a cached spectrum occupies (f64 m/z + f32 intensity; msLevel is negligible). */
+/** Bytes a cached spectrum occupies (f64 m/z + f32 intensity + optional mobility codec). */
 export function spectrumBytes(s: CachedSpectrum): number {
-  return s.mz.byteLength + s.intensity.byteLength;
+  return s.mz.byteLength + s.intensity.byteLength + (s.mobility ? s.mobility.values.byteLength + s.mobility.index.byteLength : 0);
 }
 
 /**
@@ -148,7 +150,7 @@ export class SpectrumLruCache {
 // instant hit; the wire copy is made at the transfer boundary (the cached object is
 // never transferred). Shares the same `CacheBudget` as the MS caches.
 
-import type { WavelengthSpectrumArrays } from "@mzpeak/contracts";
+import type { WavelengthSpectrumArrays, MobilityCodec } from "@mzpeak/contracts";
 
 /** Bytes a cached wavelength spectrum occupies (its two f32 axes; scalars negligible). */
 export function wavelengthBytes(s: WavelengthSpectrumArrays): number {

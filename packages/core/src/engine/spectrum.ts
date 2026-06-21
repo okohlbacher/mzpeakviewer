@@ -14,8 +14,9 @@
 //     rewrites the representation, so we don't lie about what the file says it is.
 //   - when BOTH sources are empty we throw a named error rather than emit zeros.
 
-import type { SpectrumArrays as WireSpectrumArrays } from "@mzpeak/contracts";
+import type { SpectrumArrays as WireSpectrumArrays, MobilityCodec } from "@mzpeak/contracts";
 import { adaptSpectrum } from "../adapt/spectrum";
+import { packMobility } from "../reader/mobility";
 import { spectrumMeta } from "../reader/fileMeta";
 import { streamSpectraDataArrays, streamSpectraPeaksArrays, type Reader, type StreamedSpectrumArrays } from "../reader/openUrl";
 import type { SpectrumRepresentation } from "../reader/types";
@@ -38,12 +39,17 @@ const MAX_PREFETCH_STARVE_MS = 4000;
 // mzpeakts names the reconstructed data-array columns by their human-readable CV name.
 const MZ_KEY = "m/z array";
 const INTENSITY_KEY = "intensity array";
+// Ion mobility (1/K0, MS:1003006) in the data-array (profile) path, keyed by the human
+// array name. The centroid path reads it off the typed `mean_inverse_reduced_ion_mobility`
+// field (mzpeakts' packTableIntoPeaks underscores the array name).
+const MOBILITY_DATA_KEY = "mean inverse reduced ion mobility array";
 
-/** The raw spectrum record shape mzpeakts returns from getSpectrum(index). */
+/** The raw spectrum record shape mzpeakts returns from getSpectrum(index). The centroid
+ *  objects may carry extra promoted columns (e.g. ion mobility) beyond mz/intensity. */
 export type RawSpectrum = {
   id: unknown;
   dataArrays?: Record<string, ArrayLike<number>> | undefined;
-  centroids?: { mz: number; intensity: number }[] | undefined;
+  centroids?: { mz: number; intensity: number; mean_inverse_reduced_ion_mobility?: number }[] | undefined;
 };
 
 /** Plain, transfer-ready reconstruction output (pre-adapter). */
@@ -58,6 +64,9 @@ export type ReconstructedSpectrum = {
    * does not change this — the metadata claim is preserved verbatim.
    */
   representation: SpectrumRepresentation;
+  /** Dictionary-encoded per-peak ion mobility (1/K0), present only for IMS spectra that
+   *  carry the MS:1003006 array; aligned with the post-sanitize `mz`/`intensity`. */
+  mobility?: MobilityCodec;
 };
 
 /**
@@ -90,7 +99,8 @@ function hasCentroids(s: RawSpectrum): boolean {
 export function sanitizePairs(
   mz: Float64Array,
   intensity: Float32Array,
-): { mz: Float64Array; intensity: Float32Array } {
+  mobility?: ArrayLike<number>,
+): { mz: Float64Array; intensity: Float32Array; mobility?: Float64Array } {
   const n = Math.min(mz.length, intensity.length);
   let clean = mz.length === intensity.length;
   for (let i = 0; i < n && clean; i++) {
@@ -102,7 +112,9 @@ export function sanitizePairs(
       clean = false;
     }
   }
-  if (clean) return { mz, intensity };
+  // Fast path: already finite + sorted + equal-length. mz/intensity pass through uncopied;
+  // mobility (if any) is owned-copied to the same length so it stays aligned.
+  if (clean) return mobility ? { mz, intensity, mobility: Float64Array.from({ length: n }, (_, i) => mobility[i]!) } : { mz, intensity };
 
   const idx: number[] = [];
   for (let i = 0; i < n; i++) {
@@ -111,34 +123,47 @@ export function sanitizePairs(
   idx.sort((a, b) => mz[a]! - mz[b]!);
   const nmz = new Float64Array(idx.length);
   const ninten = new Float32Array(idx.length);
+  // Carry mobility through the SAME drop-and-reorder permutation so mobility[k] keeps
+  // pointing at the peak now at nmz[k]/ninten[k].
+  const nmob = mobility ? new Float64Array(idx.length) : undefined;
   for (let i = 0; i < idx.length; i++) {
     const j = idx[i]!;
     nmz[i] = mz[j]!;
     ninten[i] = intensity[j]!;
+    if (nmob) nmob[i] = mobility![j]!;
   }
-  return { mz: nmz, intensity: ninten };
+  return nmob ? { mz: nmz, intensity: ninten, mobility: nmob } : { mz: nmz, intensity: ninten };
 }
 
-/** Copy spectra_data (profile) arrays into the canonical dtypes (f64 m/z, f32 int). */
-function readDataArrays(s: RawSpectrum): { mz: Float64Array; intensity: Float32Array } {
+type RawSignal = { mz: Float64Array; intensity: Float32Array; mobility?: ArrayLike<number> };
+
+/** Copy spectra_data (profile) arrays into the canonical dtypes (f64 m/z, f32 int), plus
+ *  the optional ion-mobility array when the file carries it. */
+function readDataArrays(s: RawSpectrum): RawSignal {
   const da = s.dataArrays!;
+  const mob = da[MOBILITY_DATA_KEY];
   return {
     mz: Float64Array.from(da[MZ_KEY]!),
     intensity: Float32Array.from(da[INTENSITY_KEY]!),
+    ...(mob ? { mobility: mob } : {}),
   };
 }
 
-/** Copy spectra_peaks (centroid) arrays into the canonical dtypes. */
-function readCentroids(s: RawSpectrum): { mz: Float64Array; intensity: Float32Array } {
+/** Copy spectra_peaks (centroid) arrays into the canonical dtypes, plus per-peak ion
+ *  mobility when the centroid objects carry it (timsTOF / IMS). */
+function readCentroids(s: RawSpectrum): RawSignal {
   const centroids = s.centroids!;
   const n = centroids.length;
   const mz = new Float64Array(n);
   const intensity = new Float32Array(n);
+  const hasMobility = n > 0 && centroids[0]!.mean_inverse_reduced_ion_mobility != null;
+  const mobility = hasMobility ? new Float64Array(n) : undefined;
   for (let i = 0; i < n; i++) {
     mz[i] = centroids[i]!.mz;
     intensity[i] = centroids[i]!.intensity;
+    if (mobility) mobility[i] = centroids[i]!.mean_inverse_reduced_ion_mobility!;
   }
-  return { mz, intensity };
+  return mobility ? { mz, intensity, mobility } : { mz, intensity };
 }
 
 /**
@@ -157,7 +182,7 @@ export function reconstructSpectrum(
 ): ReconstructedSpectrum {
   // Route by representation, but fall through to the other source when empty.
   // `representation` is reported as-is regardless of which source supplied bytes.
-  let raw: { mz: Float64Array; intensity: Float32Array };
+  let raw: RawSignal;
   if (representation === "centroid") {
     if (hasCentroids(spectrum)) raw = readCentroids(spectrum);
     else if (hasDataArrays(spectrum)) raw = readDataArrays(spectrum);
@@ -169,13 +194,16 @@ export function reconstructSpectrum(
     else throw new EmptySpectrumError(index);
   }
 
-  const clean = sanitizePairs(raw.mz, raw.intensity);
+  // Carry mobility through the same drop-and-sort permutation, then dictionary-encode it
+  // (a TIMS frame's ~10⁵ peaks share a few hundred 1/K0 bins — see MobilityCodec).
+  const clean = sanitizePairs(raw.mz, raw.intensity, raw.mobility);
   return {
     index,
     id: String(spectrum.id),
     mz: clean.mz,
     intensity: clean.intensity,
     representation, // metadata value, preserved across any fallback
+    ...(clean.mobility ? { mobility: packMobility(clean.mobility) } : {}),
   };
 }
 
@@ -205,6 +233,7 @@ export async function readEngineSpectrum(
     mz: recon.mz,
     intensity: recon.intensity,
     representation: recon.representation,
+    ...(recon.mobility ? { mobility: recon.mobility } : {}),
   });
 }
 
@@ -342,7 +371,7 @@ export async function readEngineSpectrumCached(
 
   const hit = cache.get(index);
   if (hit) {
-    return adaptSpectrum({ index, id, mz: hit.mz, intensity: hit.intensity, representation });
+    return adaptSpectrum({ index, id, mz: hit.mz, intensity: hit.intensity, representation, ...(hit.mobility ? { mobility: hit.mobility } : {}) });
   }
 
   // Imaging fast path: the background ion prefetch has already DECODED every grid-pixel
@@ -359,12 +388,13 @@ export async function readEngineSpectrumCached(
   if (!spectrum) throw new Error(`No spectrum at index ${index}`);
   const recon = reconstructSpectrum(spectrum, index, representation);
   // Cache the canonical decoded arrays (adaptSpectrum copies for the wire below).
-  cache.set(index, { mz: recon.mz, intensity: recon.intensity, msLevel });
+  cache.set(index, { mz: recon.mz, intensity: recon.intensity, msLevel, ...(recon.mobility ? { mobility: recon.mobility } : {}) });
   return adaptSpectrum({
     index,
     id: recon.id,
     mz: recon.mz,
     intensity: recon.intensity,
     representation: recon.representation,
+    ...(recon.mobility ? { mobility: recon.mobility } : {}),
   });
 }

@@ -22,7 +22,7 @@
       "bom-ref": "mzpeakviewer@0.6.4",
       "type": "library",
       "name": "mzPeakViewer",
-      "version": "0.6.8",
+      "version": "0.6.9",
       "scope": "required",
       "description": "Unified mzPeak viewer — merge of mzPeakIV (imaging) and mzPeakExplorer (general explorer).",
       "purl": "pkg:npm/mzpeakviewer@0.0.0",

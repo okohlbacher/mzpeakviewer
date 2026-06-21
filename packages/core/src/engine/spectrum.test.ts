@@ -46,6 +46,25 @@ describe("sanitizePairs", () => {
     expect(Array.from(out.mz)).toEqual([100, 200, 300]);
     expect(Array.from(out.intensity)).toEqual([1, 2, 3]); // intensity tracks its m/z
   });
+
+  it("carries a mobility array through the SAME drop+reorder permutation", () => {
+    // mobility-major input (NOT mz-sorted) with one non-finite pair to drop.
+    const mz = new Float64Array([300, 100, NaN, 200]);
+    const intensity = new Float32Array([3, 1, 9, 2]);
+    const mobility = [1.5, 0.8, 0.8, 1.2]; // aligned with the input order
+    const out = sanitizePairs(mz, intensity, mobility);
+    expect(Array.from(out.mz)).toEqual([100, 200, 300]); // NaN pair dropped, sorted
+    expect(Array.from(out.intensity)).toEqual([1, 2, 3]);
+    expect(out.mobility && Array.from(out.mobility)).toEqual([0.8, 1.2, 1.5]); // tracks its peak
+  });
+
+  it("returns mobility on the already-clean fast path too", () => {
+    const mz = new Float64Array([100, 200, 300]);
+    const intensity = new Float32Array([1, 2, 3]);
+    const out = sanitizePairs(mz, intensity, [0.8, 1.2, 1.5]);
+    expect(out.mz).toBe(mz); // fast path: mz/intensity uncopied
+    expect(out.mobility && Array.from(out.mobility)).toEqual([0.8, 1.2, 1.5]);
+  });
 });
 
 describe("reconstructSpectrum representation routing + preservation", () => {
@@ -76,6 +95,30 @@ describe("reconstructSpectrum representation routing + preservation", () => {
     const r = reconstructSpectrum(centroidRec, 1, "centroid");
     expect(r.representation).toBe("centroid");
     expect(Array.from(r.mz)).toEqual([150, 250]);
+  });
+
+  it("packs ion mobility (IMS) from a mobility-bearing centroid frame, aligned post-sort", () => {
+    // A mobility-major TIMS frame: peaks NOT m/z-sorted, mobility repeats across peaks.
+    const imsRec: RawSpectrum = {
+      id: "merged=0 frame=1",
+      centroids: [
+        { mz: 300, intensity: 3, mean_inverse_reduced_ion_mobility: 1.50 },
+        { mz: 100, intensity: 1, mean_inverse_reduced_ion_mobility: 0.85 },
+        { mz: 200, intensity: 2, mean_inverse_reduced_ion_mobility: 0.85 },
+      ],
+    };
+    const r = reconstructSpectrum(imsRec, 0, "centroid");
+    expect(Array.from(r.mz)).toEqual([100, 200, 300]); // sorted by m/z
+    expect(r.mobility).toBeDefined();
+    expect(Array.from(r.mobility!.values)).toEqual([0.85, 1.5]); // distinct bins, ascending
+    // mobility tracks each peak through the sort: 100→0.85, 200→0.85, 300→1.50
+    expect(r.mobility!.index[0]).toBe(0);
+    expect(r.mobility!.index[1]).toBe(0);
+    expect(r.mobility!.index[2]).toBe(1);
+  });
+
+  it("omits mobility for a non-IMS centroid frame", () => {
+    expect(reconstructSpectrum(centroidRec, 1, "centroid").mobility).toBeUndefined();
   });
 
   it("PRESERVES metadata representation when the routed source is empty and it falls back", () => {

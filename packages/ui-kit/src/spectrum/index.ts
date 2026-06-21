@@ -17,6 +17,9 @@ export { WavelengthHeatmap } from "./WavelengthHeatmap";
 export { ChromPlot } from "./ChromPlot";
 export type { ChromPoint } from "./ChromPlot";
 
+// 2-D ion-mobility frame heatmap (m/z × 1/K0) for timsTOF / IMS spectra.
+export { MobilityFrameHeatmap } from "./MobilityFrameHeatmap";
+
 // Spectrum data shape the plot consumes (contracts wire shape + `representation`).
 export type { SpectrumArrays, Representation } from "./peaks";
 

@@ -337,7 +337,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         try { meta = spectrumMetaTree(reader, req.index); } catch { meta = undefined; }
         respond(
           { type: "spectrumResult", spectrum: { ...spectrum, meta }, selectId: req.selectId },
-          buffersOf(spectrum.mz, spectrum.intensity),
+          buffersOf(spectrum.mz, spectrum.intensity, spectrum.mobility?.values, spectrum.mobility?.index),
         );
         return;
       }

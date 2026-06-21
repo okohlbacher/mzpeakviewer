@@ -64,12 +64,33 @@ export type BrowseIndex = {
 /** Profile vs centroid — the plot branches on this (peak labels, fill vs needles). */
 export type SpectrumRepresentation = "profile" | "centroid" | null;
 
+/**
+ * Compact in-memory ion mobility for one spectrum/frame (timsTOF / IMS files).
+ *
+ * On disk the column is `mean inverse reduced ion mobility` (1/K0, MS:1003006, f64),
+ * but a TIMS frame takes only a few hundred DISTINCT values — one per mobility/scan bin —
+ * across its (often >10⁵) peaks. So instead of an 8-byte float per peak we dictionary-encode:
+ * a per-peak index into a small ascending lookup of the distinct values. For a 205 k-peak
+ * frame that's a `Uint16Array` (~0.4 MB) + a ~1 k-entry `Float64Array`, versus a 1.6 MB
+ * `Float64Array` — same trick the file's RLE-dictionary uses, applied in RAM.
+ */
+export type MobilityCodec = {
+  /** Distinct 1/K0 values, ascending. Length = number of mobility bins (~hundreds–~1000). */
+  values: Float64Array;
+  /** Per-peak index into `values`, ALIGNED with this spectrum's `mz`/`intensity` (post-sort).
+   *  `Uint16Array` when ≤65535 distinct bins (the timsTOF case), else `Uint32Array`. */
+  index: Uint16Array | Uint32Array;
+};
+
 /** One spectrum's arrays (transfer mz + intensity buffers). */
 export type SpectrumArrays = {
   index: number;
   id: string;
   mz: Float64Array;
   intensity: Float32Array;
+  /** Per-peak ion mobility (1/K0), dictionary-encoded — present only for IMS/timsTOF
+   *  spectra that carry the MS:1003006 array; omitted otherwise. See {@link MobilityCodec}. */
+  mobility?: MobilityCodec;
   /**
    * Profile/centroid — the spectrum plot renders centroid as needles + picks top
    * peaks, profile as a filled trace. REQUIRED and nullable: the engine

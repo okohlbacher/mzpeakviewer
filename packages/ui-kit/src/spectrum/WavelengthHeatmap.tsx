@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { WavelengthMatrix } from "@mzpeak/contracts";
+import { viridis } from "./colormap";
 
 /**
  * 2D PDA/DAD heatmap: retention time (x) × wavelength (y), cell intensity mapped
@@ -325,62 +326,4 @@ function fmtTick(v: number): string {
   if (a !== 0 && (a >= 1e5 || a < 1e-3)) return v.toExponential(1);
   if (a >= 1000) return Math.round(v).toLocaleString();
   return Number.isInteger(v) ? String(v) : v.toFixed(2);
-}
-
-// --- Viridis colormap -------------------------------------------------------
-// Self-contained, no deps. 256-entry RGB LUT generated once at module load from
-// 11 matplotlib viridis control points (perceptually-uniform), linearly
-// interpolated. NOTE: VIRIDIS_ANCHORS (a const) MUST be declared BEFORE this LUT
-// build call — buildViridisLUT() → viridisPoly() reads it at module-init time, so
-// declaring it later would hit the temporal dead zone and blank the whole app.
-const VIRIDIS_ANCHORS: ReadonlyArray<readonly [number, number, number]> = [
-  [0.267, 0.005, 0.329], [0.283, 0.141, 0.458], [0.254, 0.265, 0.53],
-  [0.207, 0.372, 0.553], [0.164, 0.471, 0.558], [0.128, 0.567, 0.551],
-  [0.135, 0.659, 0.518], [0.267, 0.749, 0.441], [0.478, 0.821, 0.318],
-  [0.741, 0.873, 0.15], [0.993, 0.906, 0.144],
-];
-const VIRIDIS_LUT = buildViridisLUT();
-
-function buildViridisLUT(): Uint8Array {
-  const lut = new Uint8Array(256 * 3);
-  for (let i = 0; i < 256; i++) {
-    const t = i / 255;
-    const c = viridisPoly(t);
-    lut[i * 3] = c[0];
-    lut[i * 3 + 1] = c[1];
-    lut[i * 3 + 2] = c[2];
-  }
-  return lut;
-}
-
-/** Lookup viridis for a fraction in [0,1] (clamped). Returns [r,g,b] 0..255. */
-function viridis(f: number): [number, number, number] {
-  let t = f;
-  if (!Number.isFinite(t)) t = 0;
-  if (t < 0) t = 0;
-  else if (t > 1) t = 1;
-  const i = Math.round(t * 255) * 3;
-  return [VIRIDIS_LUT[i]!, VIRIDIS_LUT[i + 1]!, VIRIDIS_LUT[i + 2]!];
-}
-
-/**
- * Linear interpolation over VIRIDIS_ANCHORS (declared above the LUT build).
- * Perceptually-uniform, monotonic in luminance, ending in yellow-green (NOT red).
- */
-function viridisPoly(t: number): [number, number, number] {
-  const x = (t < 0 ? 0 : t > 1 ? 1 : t) * (VIRIDIS_ANCHORS.length - 1);
-  const i = Math.min(VIRIDIS_ANCHORS.length - 2, Math.floor(x));
-  const f = x - i;
-  const a = VIRIDIS_ANCHORS[i]!;
-  const b = VIRIDIS_ANCHORS[i + 1]!;
-  return [
-    clamp255(a[0] + (b[0] - a[0]) * f),
-    clamp255(a[1] + (b[1] - a[1]) * f),
-    clamp255(a[2] + (b[2] - a[2]) * f),
-  ];
-}
-
-function clamp255(x: number): number {
-  const v = Math.round(x * 255);
-  return v < 0 ? 0 : v > 255 ? 255 : v;
 }

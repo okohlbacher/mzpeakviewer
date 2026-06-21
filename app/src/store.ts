@@ -17,11 +17,11 @@ import type {
   WavelengthBrowseIndex,
   WavelengthSpectrumArrays,
   WavelengthMatrix,
+  SpectrumArrays,
 } from "@mzpeak/contracts";
 import { showChromatograms, showWavelength } from "@mzpeak/contracts";
 import { rebuildCoordMap } from "@mzpeak/core";
 import type { View } from "@mzpeak/contracts";
-import type { SpectrumArrays } from "@mzpeak/ui-kit";
 import { engine } from "./engine";
 
 // ---------------------------------------------------------------------------

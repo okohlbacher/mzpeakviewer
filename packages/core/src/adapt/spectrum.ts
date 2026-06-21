@@ -4,7 +4,7 @@
 // (calling getSpectrum, reconstructing mz/intensity, reading the representation CV
 // term off the metadata row) lives in the worker handler — this only reshapes.
 
-import type { SpectrumArrays, SpectrumRepresentation } from "@mzpeak/contracts";
+import type { SpectrumArrays, SpectrumRepresentation, MobilityCodec } from "@mzpeak/contracts";
 
 // MS:1000128 = profile spectrum, MS:1000127 = centroid spectrum. This is the
 // authoritative CV mapping (`"MS:1000128" → "profile"`, `"MS:1000127" → "centroid"`,
@@ -32,6 +32,9 @@ export type SpectrumInput = {
    * "profile"/"centroid", or null/undefined when genuinely unknown.
    */
   representation?: string | null;
+  /** Dictionary-encoded per-peak ion mobility for IMS spectra. Copied at the boundary
+   *  (like mz/intensity) so transferring the wire result never detaches the cached codec. */
+  mobility?: MobilityCodec;
 };
 
 /** Map the raw representation indicator to the contract enum (null = unknown). */
@@ -52,6 +55,10 @@ function toF64(a: ArrayLike<number>): Float64Array {
 function toF32(a: ArrayLike<number>): Float32Array {
   return a instanceof Float32Array ? a.slice() : Float32Array.from(a);
 }
+/** Deep-copy a mobility codec so the transferred wire buffers never alias the cached ones. */
+function copyMobility(m: MobilityCodec): MobilityCodec {
+  return { values: m.values.slice(), index: m.index.slice() };
+}
 
 /** Reshape extracted spectrum fields into the wire `SpectrumArrays`. */
 export function adaptSpectrum(input: SpectrumInput): SpectrumArrays {
@@ -61,5 +68,6 @@ export function adaptSpectrum(input: SpectrumInput): SpectrumArrays {
     mz: toF64(input.mz),
     intensity: toF32(input.intensity),
     representation: mapRepresentation(input.representation),
+    ...(input.mobility ? { mobility: copyMobility(input.mobility) } : {}),
   };
 }

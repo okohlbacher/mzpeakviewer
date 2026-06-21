@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "r
 import { useStore } from "../store";
 import { parseRtRange } from "../rtRange";
 import { buildLevelIndex, activeSet, rankOf, absoluteOf } from "../levelIndex";
-import { SpectrumPlot, Select, Button, TreeView, spectrumReporters, type SelectOption, type ReporterMarker, type ReporterPeak } from "@mzpeak/ui-kit";
+import { SpectrumPlot, MobilityFrameHeatmap, Select, Button, TreeView, spectrumReporters, type SelectOption, type ReporterMarker, type ReporterPeak } from "@mzpeak/ui-kit";
 
 // Categorical palette for isobaric channels — shared by the pills + the peak dots
 // so a channel reads as the same colour in both places.
@@ -422,6 +422,27 @@ export function Spectra() {
           </div>
         )}
       </div>
+
+      {/* IMS / timsTOF: a frame is 2-D (m/z × 1/K0). The 1-D plot above collapses mobility,
+          so when the spectrum carries per-peak ion mobility, show the 2-D frame heatmap. */}
+      {spectrum?.mobility && (
+        <details data-testid="mobility-frame-panel" open style={{ borderTop: "1px solid var(--border-hairline, #eee)", paddingTop: "0.5rem" }}>
+          <summary style={{ cursor: "pointer", fontSize: "0.9rem", fontWeight: 600, userSelect: "none" }}>
+            Ion-mobility frame (m/z × 1/K0)
+            <span style={{ fontWeight: 400, color: "var(--text-muted)", marginLeft: "0.5rem" }}>
+              {spectrum.mobility.values.length} mobility bins
+            </span>
+          </summary>
+          <div style={{ marginTop: "0.5rem" }}>
+            <MobilityFrameHeatmap
+              mz={spectrum.mz}
+              intensity={spectrum.intensity}
+              mobilityValues={spectrum.mobility.values}
+              mobilityIndex={spectrum.mobility.index}
+            />
+          </div>
+        </details>
+      )}
 
       {/* Isobaric channel pills — color-coded to the reporter-peak dots above.
           Click a pill to zoom the plot to the reporter region + highlight its peak. */}
