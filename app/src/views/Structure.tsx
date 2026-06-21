@@ -11,6 +11,7 @@ import type { ArchiveMemberList, ParquetFooter, ParquetColumn, ColumnSample } fr
 import { Button } from "@mzpeak/ui-kit";
 import { AdvancedTabs } from "./AdvancedTabs";
 import { formatBytes } from "./render";
+import { gunzipBytes, decompressedName, isGzip } from "../gunzip";
 
 type Member = ArchiveMemberList["members"][number];
 
@@ -194,6 +195,72 @@ function MemberDownload({ path, bytes }: { path: string; bytes: number | null | 
   );
 }
 
+/** For a `.gz` archive member: gunzip its raw bytes on the fly (native zlib via
+ *  DecompressionStream) and download the DECOMPRESSED file, with the `.gz` stripped. */
+function MemberGunzipDownload({ path, bytes }: { path: string; bytes: number | null | undefined }) {
+  const [busy, setBusy] = useState(false);
+  const gzName = path.split("/").pop() ?? path;
+  const outName = decompressedName(gzName);
+  // The compressed member is bounded by the read cap; the DECOMPRESSED result may still be
+  // larger and could exceed the browser's ~2 GiB ArrayBuffer ceiling — caught below.
+  const tooBig = typeof bytes === "number" && bytes > DOWNLOAD_HARD_MAX;
+
+  async function download() {
+    if (busy || tooBig) return;
+    setBusy(true);
+    try {
+      const res = await engine.archiveMemberBytes(path, DOWNLOAD_HARD_MAX);
+      if (res.truncated) {
+        window.alert(`${gzName} is larger than the in-browser read limit (${formatBytes(DOWNLOAD_HARD_MAX)}); can't decompress a truncated member.`);
+        return;
+      }
+      let out: Uint8Array<ArrayBuffer>;
+      try {
+        out = await gunzipBytes(res.bytes);
+      } catch (e) {
+        window.alert(`Couldn't decompress ${gzName} (the decompressed output may exceed browser memory, or it isn't gzip): ${e instanceof Error ? e.message : String(e)}`);
+        return;
+      }
+      const url = URL.createObjectURL(new Blob([out], { type: mimeForMember(outName) }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = outName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      window.alert(`Couldn't download ${outName}: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      disabled={busy || tooBig}
+      title={tooBig ? `Too large to read in-browser (${formatBytes(bytes)})` : `Decompress & download ${outName}`}
+      aria-label={`Decompress and download ${outName}`}
+      data-testid={`structure-gunzip-${path}`}
+      onClick={() => void download()}
+    >
+      {busy ? (
+        "…"
+      ) : (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ width: "0.95rem", height: "0.95rem", display: "block" }}>
+          {/* unzip → download: a box with diverging (decompress) chevrons + down arrow */}
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <line x1="12" y1="13" x2="12" y2="3" />
+          <polyline points="8 7 12 3 16 7" />
+          <polyline points="8 13 12 17 16 13" />
+        </svg>
+      )}
+    </Button>
+  );
+}
+
 export function Structure() {
   const phase = useStore((s) => s.phase);
   const setMetadataReveal = useStore((s) => s.setMetadataReveal);
@@ -274,6 +341,7 @@ export function Structure() {
                       {formatBytes(m.bytes)}
                     </span>
                   </button>
+                  {isGzip(m.path) && <MemberGunzipDownload path={m.path} bytes={m.bytes} />}
                   <MemberDownload path={m.path} bytes={m.bytes} />
                 </li>
               );
