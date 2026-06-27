@@ -57,17 +57,84 @@ function mzFromTof(cal: ImsCalibration, tof: number): number {
   return m * m;
 }
 
+/** The index `metadata` object (`store.fileIndex.metadata`), or `{}`. */
+function indexMeta(reader: Reader): Record<string, unknown> {
+  const m = (reader as unknown as { store?: { fileIndex?: { metadata?: unknown } } }).store?.fileIndex?.metadata;
+  return m && typeof m === "object" ? (m as Record<string, unknown>) : {};
+}
+/** A metadata value that may be an inlined object OR a JSON string → object, else null. */
+function asObj(v: unknown): Record<string, unknown> | null {
+  if (typeof v === "string") { try { v = JSON.parse(v); } catch { return null; } }
+  return v && typeof v === "object" ? (v as Record<string, unknown>) : null;
+}
+
 /** Parse `metadata.ims_calibration` (a JSON string OR an inlined object) to `{a,b}`, or null
  *  when the file isn't ims-compact / the calibration is malformed. */
 export function readImsCalibration(reader: Reader): ImsCalibration | null {
-  const meta = (reader as unknown as { store?: { fileIndex?: { metadata?: Record<string, unknown> } } })
-    .store?.fileIndex?.metadata;
-  let raw: unknown = meta?.["ims_calibration"];
-  if (raw == null) return null;
-  if (typeof raw === "string") { try { raw = JSON.parse(raw); } catch { return null; } }
-  if (!raw || typeof raw !== "object") return null;
-  const a = (raw as Record<string, unknown>)["a"], b = (raw as Record<string, unknown>)["b"];
+  const raw = asObj(indexMeta(reader)["ims_calibration"]);
+  if (!raw) return null;
+  const a = raw["a"], b = raw["b"];
   return typeof a === "number" && typeof b === "number" ? { a, b } : null;
+}
+
+/** A per-spectrum integer-axis → m/z map for SciEX/Agilent grid profile data (`tof_index`). */
+export type GridMz = (axis: number) => number;
+const GRID_AXIS_KEY = "tof_index"; // mzpeakts array_name for the integer grid axis (MS:1000519)
+
+type GridCal = { kind: "mz-grid"; scale: number } | { kind: "tof-grid" };
+
+/**
+ * Detect the grid calibration codec from the index metadata — COEFF-INDEPENDENT (no
+ * per-spectrum read), so it's a stable "is this a grid file" predicate regardless of which
+ * spectrum is inspected (a SciEX file's spectrum 0 is often an empty survey scan with null
+ * coefficients). Only the VERIFIED SciEX shapes are accepted; Agilent polynomial grids
+ * (`tof_calibration` with `calibrations[]`/`poly[]`) are rejected → null → fail loud.
+ */
+function gridCal(reader: Reader): GridCal | null {
+  const meta = indexMeta(reader);
+  const mzc = asObj(meta["mz_calibration"]);
+  if (mzc && mzc["codec"] === "mz-grid" && typeof mzc["scale"] === "number" && (mzc["scale"] as number) > 0) {
+    return { kind: "mz-grid", scale: mzc["scale"] as number };
+  }
+  const tofc = asObj(meta["tof_calibration"]);
+  // sciex_sqrt ONLY: per-spectrum (tof_c0,tof_c1), mz=(c0+c1·idx)². Reject Agilent's
+  // polynomial form (it carries `calibrations[]` and no `per_spectrum_columns`).
+  if (tofc && tofc["codec"] === "tof-grid" && tofc["model"] === "sciex_sqrt" && !("calibrations" in tofc)) {
+    const cols = tofc["per_spectrum_columns"];
+    const formula = String(tofc["tof_to_mz"] ?? "");
+    if (Array.isArray(cols) && cols.includes("tof_c0") && cols.includes("tof_c1")
+      && /\(\s*tof_c0\s*\+\s*tof_c1\s*\*\s*tof_index\s*\)\s*\^\s*2/.test(formula)) {
+      return { kind: "tof-grid" };
+    }
+  }
+  return null;
+}
+
+/** True when the file is a SciEX grid file (mz-grid OR tof-grid) — coeff-independent, so it's
+ *  the correct gate for "skip the bulk prefetch / don't trust the imaging ion cache". */
+export function isGridFile(reader: Reader): boolean {
+  return gridCal(reader) !== null;
+}
+
+/**
+ * Resolve the per-spectrum integer-axis → m/z map for a grid profile spectrum:
+ *  - **mz-grid** (sciex uniform): `mz = tof_index / scale`, run-wide.
+ *  - **tof-grid** (sciex sqrt): `mz = (c0 + c1·tof_index)²` with PER-SPECTRUM `c0,c1` from the
+ *    spectrum metadata (`MZP_1000003_tof_c0` / `MZP_1000004_tof_c1`).
+ * Returns null when the file isn't a grid file OR this spectrum lacks usable coefficients
+ * (e.g. an empty survey scan — which carries no `tof_index` to map anyway).
+ */
+export function resolveGridMz(reader: Reader, index: number): GridMz | null {
+  const g = gridCal(reader);
+  if (!g) return null;
+  if (g.kind === "mz-grid") { const s = g.scale; return (axis) => axis / s; }
+  const spectra = (reader as unknown as { spectrumMetadata?: { spectra?: { getChild?: (n: string) => { get(i: number): unknown } | null } } }).spectrumMetadata?.spectra;
+  const num = (name: string): number | null => {
+    const v = spectra?.getChild?.(name)?.get?.(index);
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  };
+  const c0 = num("MZP_1000003_tof_c0"), c1 = num("MZP_1000004_tof_c1");
+  return c0 != null && c1 != null ? (axis) => { const m = c0 + c1 * axis; return m * m; } : null;
 }
 
 // Standard centroid-object keys mzpeakts emits; any OTHER numeric key is the non-standard
@@ -117,6 +184,11 @@ export class EmptySpectrumError extends Error {
 
 function hasDataArrays(s: RawSpectrum): boolean {
   return !!(s.dataArrays && s.dataArrays[MZ_KEY] && s.dataArrays[INTENSITY_KEY]);
+}
+/** Grid profile data: integer `tof_index` + intensity (no `m/z array`) AND a resolver to map it. */
+function hasGridData(s: RawSpectrum, gridMz: GridMz | null): boolean {
+  const da = s.dataArrays;
+  return !!(gridMz && da && da[GRID_AXIS_KEY] && da[INTENSITY_KEY] && !da[MZ_KEY]);
 }
 function hasCentroids(s: RawSpectrum): boolean {
   return !!(s.centroids && s.centroids.length > 0);
@@ -173,8 +245,16 @@ type RawSignal = { mz: Float64Array; intensity: Float32Array; mobility?: ArrayLi
 
 /** Copy spectra_data (profile) arrays into the canonical dtypes (f64 m/z, f32 int), plus
  *  the optional ion-mobility array when the file carries it. */
-function readDataArrays(s: RawSpectrum): RawSignal {
+function readDataArrays(s: RawSpectrum, gridMz: GridMz | null): RawSignal {
   const da = s.dataArrays!;
+  // SciEX/Agilent grid: an integer `tof_index` replaces the `m/z array`; reconstruct m/z
+  // per point through the resolved grid map (mz-grid: idx/scale; tof-grid: (c0+c1·idx)²).
+  if (gridMz && da[GRID_AXIS_KEY] && !da[MZ_KEY]) {
+    const axis = da[GRID_AXIS_KEY]!, n = axis.length;
+    const mz = new Float64Array(n);
+    for (let i = 0; i < n; i++) mz[i] = gridMz(axis[i]!);
+    return { mz, intensity: Float32Array.from(da[INTENSITY_KEY]!) };
+  }
   const mob = da[MOBILITY_DATA_KEY];
   return {
     mz: Float64Array.from(da[MZ_KEY]!),
@@ -221,18 +301,30 @@ export function reconstructSpectrum(
   index: number,
   representation: SpectrumRepresentation,
   cal: ImsCalibration | null = null,
+  gridMz: GridMz | null = null,
 ): ReconstructedSpectrum {
+  // A genuinely-EMPTY scan: mzpeakts emits a 0-length `m/z array` (the file's own "0 data
+  // points" signal) and nothing else. Render it as an empty spectrum rather than throwing —
+  // SciEX/Agilent runs interleave empty survey scans with data scans, so the default-open
+  // spectrum is often empty. This is distinct from "no decodable arrays at all" (which still
+  // throws below): here the file explicitly declares zero points.
+  const mzArr = spectrum.dataArrays?.[MZ_KEY];
+  const daOk = hasDataArrays(spectrum) || hasGridData(spectrum, gridMz);
+  if (!daOk && !hasCentroids(spectrum) && mzArr && mzArr.length === 0) {
+    return { index, id: String(spectrum.id), mz: new Float64Array(0), intensity: new Float32Array(0), representation };
+  }
+
   // Route by representation, but fall through to the other source when empty.
   // `representation` is reported as-is regardless of which source supplied bytes.
-  // ims-compact peaks are centroids, so only the centroid reader takes `cal`.
+  // ims-compact peaks → centroid reader takes `cal`; SciEX grid profile → data reader takes `gridMz`.
   let raw: RawSignal;
   if (representation === "centroid") {
     if (hasCentroids(spectrum)) raw = readCentroids(spectrum, cal);
-    else if (hasDataArrays(spectrum)) raw = readDataArrays(spectrum);
+    else if (daOk) raw = readDataArrays(spectrum, gridMz);
     else throw new EmptySpectrumError(index);
   } else {
     // "profile" or null (unknown) → data-array default, centroid fall-through.
-    if (hasDataArrays(spectrum)) raw = readDataArrays(spectrum);
+    if (daOk) raw = readDataArrays(spectrum, gridMz);
     else if (hasCentroids(spectrum)) raw = readCentroids(spectrum, cal);
     else throw new EmptySpectrumError(index);
   }
@@ -269,7 +361,7 @@ export async function readEngineSpectrum(
   const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
   if (!spectrum) throw new Error(`No spectrum at index ${index}`);
 
-  const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader));
+  const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveGridMz(reader, index));
   return adaptSpectrum({
     index: recon.index,
     id: recon.id,
@@ -375,13 +467,16 @@ export async function prefetchSpectrumCache(
     return true;
   };
 
+  // ims-compact / SciEX-grid files: the bulk stream yields {index, mz, intensity} where the
+  // integer axis is either ABSENT (ims-compact `tof`) or NOT named "m/z array" (grid
+  // `tof_index`), so it never reconstructs true m/z — prefetching is useless/poisoning. Skip
+  // it entirely; the per-select getSpectrum path reconstructs + caches on demand. NOTE: gate on
+  // the coeff-INDEPENDENT `isGridFile`, not `resolveGridMz(reader,0)` — a grid file's spectrum 0
+  // is usually an empty survey scan with null c0/c1, which would make a per-spectrum probe miss.
+  if (readImsCalibration(reader) || isGridFile(reader)) return { cached: 0, stopped: false };
   // Profile/unknown spectra from spectra_data; centroid spectra from spectra_peaks.
   const okData = await drain(streamSpectraDataArrays(reader), (i) => isMs01(i) && reprOf(i) !== "centroid");
   if (!okData) return { cached, stopped: true };
-  // ims-compact: the bulk peaks stream yields {index, mz, intensity} with NO `tof`, so it
-  // can't reconstruct m/z — skip it (don't cache empty m/z). Per-select getSpectrum +
-  // reconstructSpectrum handles + caches these correctly on demand. Small file (500 frames).
-  if (readImsCalibration(reader)) return { cached, stopped: false };
   const okPeaks = await drain(streamSpectraPeaksArrays(reader), (i) => isMs01(i) && reprOf(i) === "centroid");
   return { cached, stopped: !okPeaks };
 }
@@ -426,14 +521,16 @@ export async function readEngineSpectrumCached(
   // random-access getSpectrum (which on large-row-group / no-page-index profile data costs
   // ~seconds per pixel). The ion cache holds f32 m/z — adaptSpectrum widens to f64; for
   // display that's lossless enough. Only when the cache is WARM and holds this index.
-  const ionHit = ionCache?.lookup(index);
+  // NOT for SciEX-grid files: the ion cache is filled from the raw bulk stream (`tof_index`,
+  // un-reconstructed), so trust only the getSpectrum reconstruction path below for those.
+  const ionHit = isGridFile(reader) ? undefined : ionCache?.lookup(index);
   if (ionHit) {
     return adaptSpectrum({ index, id, mz: ionHit.mz, intensity: ionHit.intensity, representation });
   }
 
   const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
   if (!spectrum) throw new Error(`No spectrum at index ${index}`);
-  const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader));
+  const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveGridMz(reader, index));
   // Cache the canonical decoded arrays (adaptSpectrum copies for the wire below).
   cache.set(index, { mz: recon.mz, intensity: recon.intensity, msLevel, ...(recon.mobility ? { mobility: recon.mobility } : {}) });
   return adaptSpectrum({

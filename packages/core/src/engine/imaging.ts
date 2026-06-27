@@ -20,7 +20,21 @@ import { harvestDataArraysOrNull } from "../reader/arrays";
 import { readMsLevels } from "../reader/columns";
 import { streamSpectraDataArrays, type Reader } from "../reader/openUrl";
 import { IonCacheBuilder, type SpectraArrayCache, type CompactSpectrum } from "./cache";
+import { isGridFile } from "./spectrum";
 import type { Mutex } from "./mutex";
+
+/**
+ * Fail loud on a SciEX/Agilent GRID-encoded file in any ion-image / mean / ROI path. These
+ * paths read the BULK `spectra_data` stream, which surfaces the raw integer `tof_index` axis
+ * (m/z requires per-spectrum reconstruction the bulk stream can't do — see resolveGridMz), so
+ * an image built here would be on un-reconstructed axes. Grid files are LC-MS (non-imaging) in
+ * practice, so this guard shouldn't trip; it exists so a hypothetical grid+imaging file errors
+ * instead of rendering wrong m/z.
+ */
+function assertNotGrid(reader: Reader): void {
+  if (isGridFile(reader))
+    throw new Error("Grid-encoded (SciEX/Agilent tof_index) files are not supported for ion images / mean / ROI: m/z needs per-spectrum reconstruction unavailable in the bulk stream.");
+}
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 const nowMs = (): number => (typeof performance !== "undefined" ? performance.now() : Date.now());
@@ -181,6 +195,7 @@ export async function engineRenderIonImage(
   tolDa: number,
   opts?: RenderIonImageOptions,
 ): Promise<{ ionImage: Float32Array; stats: IonImageStats; cache: SpectraArrayCache | null }> {
+  assertNotGrid(reader);
   const ionImage = new Float32Array(gridWire.width * gridWire.height);
   const mzStart = mz - tolDa;
   const mzEnd = mz + tolDa;
@@ -325,6 +340,7 @@ export async function engineRenderMultiChannel(
   channels: (MultiChannelSpec | null)[],
   opts?: RenderMultiChannelOptions,
 ): Promise<{ channels: (Float32Array | null)[]; cache: SpectraArrayCache | null }> {
+  assertNotGrid(reader);
   const dense = gridWire.width * gridWire.height;
   const images: (Float32Array | null)[] = channels.map((ch) => (ch ? new Float32Array(dense) : null));
   const active: number[] = [];
@@ -433,6 +449,7 @@ export async function prefetchIonCache(
   gridWire: ImagingGridWire,
   control: PrefetchControl,
 ): Promise<{ cache: SpectraArrayCache | null; stopped: boolean }> {
+  assertNotGrid(reader);
   const dense = gridWire.width * gridWire.height;
   const coordToSpectrum = rebuildCoordMap(gridWire);
   // MS1-only gate — the prefetch cache must be byte-identical to a render-built one, so it
@@ -702,6 +719,7 @@ export async function engineMeanSpectrum(
   reader: Reader,
   cache?: SpectraArrayCache | null,
 ): Promise<SpectrumArrays> {
+  assertNotGrid(reader);
   const total = readerSpectrumCount(reader);
   if (total <= 0) {
     return {
@@ -735,6 +753,7 @@ export async function engineRoiSpectrum(
   spectrumIndices: number[],
   cache?: SpectraArrayCache | null,
 ): Promise<SpectrumArrays> {
+  assertNotGrid(reader);
   const sorted = Array.from(new Set(spectrumIndices))
     .filter((i) => Number.isInteger(i) && i >= 0)
     .sort((a, b) => a - b);
