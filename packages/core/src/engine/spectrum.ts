@@ -130,11 +130,12 @@ function gridCal(reader: Reader): GridCal | null {
   const tofc = asObj(meta["tof_calibration"]);
   if (tofc && tofc["codec"] === "tof-grid") {
     // SciEX sqrt: per-spectrum (tof_c0,tof_c1), mz=(c0+c1·idx)². No `calibrations` block.
+    // Gate on `model` + columns ONLY (like the other 3 encodings) — the `model` string is the
+    // contract (converter treats model-reuse as breaking), so we do NOT parse the `tof_to_mz`
+    // formula string, whose formatting isn't a stable contract.
     if (tofc["model"] === "sciex_sqrt" && !("calibrations" in tofc)) {
       const cols = tofc["per_spectrum_columns"];
-      const formula = String(tofc["tof_to_mz"] ?? "");
-      if (Array.isArray(cols) && cols.includes("tof_c0") && cols.includes("tof_c1")
-        && /\(\s*tof_c0\s*\+\s*tof_c1\s*\*\s*tof_index\s*\)\s*\^\s*2/.test(formula)) {
+      if (Array.isArray(cols) && cols.includes("tof_c0") && cols.includes("tof_c1")) {
         return { kind: "tof-grid" };
       }
     }

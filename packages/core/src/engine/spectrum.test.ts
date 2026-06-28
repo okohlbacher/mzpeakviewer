@@ -263,6 +263,15 @@ describe("resolveGridMz — calibration-shape gating", () => {
     expect(f(1_000_000)).toBeCloseTo((0.05 + 0.0003 * 1_000_000) ** 2, 6);
   });
 
+  it("sciex_sqrt is gated on model+columns ONLY — not the tof_to_mz formula string", () => {
+    // A reformatted/absent formula must NOT break SciEX (we gate on `model` + per_spectrum_columns).
+    for (const tof_to_mz of [undefined, "", "m/z = (tof_c0+tof_c1*tof_index)**2 /* reformatted */"]) {
+      const meta = { tof_calibration: { codec: "tof-grid", model: "sciex_sqrt", per_spectrum_columns: ["tof_c0", "tof_c1"], ...(tof_to_mz === undefined ? {} : { tof_to_mz }) } };
+      expect(isGridFile(mkReader(meta))).toBe(true);
+      expect(resolveGridMz(mkReader(meta, { MZP_1000003_tof_c0: 1, MZP_1000004_tof_c1: 2 }), 0)!(3)).toBe((1 + 2 * 3) ** 2);
+    }
+  });
+
   it("tof-grid resolver is null for a spectrum whose c0/c1 are null (empty survey scan)", () => {
     expect(resolveGridMz(mkReader(tofGridMeta, { MZP_1000003_tof_c0: null as unknown as number, MZP_1000004_tof_c1: null as unknown as number }), 0)).toBeNull();
     // ...but isGridFile is coeff-INDEPENDENT, so the file is still recognised as a grid file.
