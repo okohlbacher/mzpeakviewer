@@ -9,6 +9,7 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+    tags: ["v*"] # a release tag rebuilds the page so the About box version tracks the tag
   workflow_dispatch:
 
 # Allow the job to push the built site to the gh-pages branch via GITHUB_TOKEN.
@@ -27,6 +28,17 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # Single-source the web __APP_VERSION__ (vite.config.ts reads tauri.conf.json) from the
+      # release tag: the tag name on a tag build, else the latest reachable tag on a main build.
+      - name: Set app version from git tag
+        run: |
+          git fetch --tags --force --quiet 2>/dev/null || true
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then VER="${GITHUB_REF_NAME#v}"; else VER="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')"; fi
+          if [ -n "$VER" ]; then
+            node -e "const f='app/src-tauri/tauri.conf.json',fs=require('fs');const c=JSON.parse(fs.readFileSync(f));c.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(c,null,2)+'\n')" "$VER"
+            echo "tauri.conf.json version → $VER"
+          else echo "no tag found; keeping committed version"; fi
 
       - uses: actions/setup-node@v4
         with:
