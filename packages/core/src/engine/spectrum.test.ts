@@ -241,13 +241,42 @@ describe("reconstructSpectrum SciEX grid tof_index→m/z (profile)", () => {
   it("without a grid resolver, a tof_index-only profile spectrum fails loud (no silent zeros)", () => {
     expect(() => reconstructSpectrum(gridRec, 0, "profile")).toThrow(EmptySpectrumError);
   });
+
+  it("CENTROID tof_index axis but NO resolver fails loud (not silent empty)", () => {
+    const rec = { id: "x", centroids: [{ intensity: 5, tof_index: 1000 }, { intensity: 9, tof_index: 2000 }] } as unknown as RawSpectrum;
+    expect(() => reconstructSpectrum(rec, 0, "centroid")).toThrow(EmptySpectrumError);
+  });
+
+  it("reconstructs grid m/z from a CENTROID tof_index spectrum (SciEX SWATH stores grid in peaks)", () => {
+    const gridMz = (i: number) => (0.05 + 0.0003 * i) ** 2;
+    // real mzpeakts mangles the 1-word "tof_index" to "" — test both the "" and named key.
+    for (const axisKey of ["tof_index", ""]) {
+      const rec = { id: "s", centroids: [{ intensity: 5, [axisKey]: 1_000_000 }, { intensity: 9, [axisKey]: 2_000_000 }] } as unknown as RawSpectrum;
+      const r = reconstructSpectrum(rec, 0, "centroid", null, gridMz);
+      expect(Array.from(r.mz)).toEqual([gridMz(1_000_000), gridMz(2_000_000)]);
+      expect(Array.from(r.intensity)).toEqual([5, 9]);
+    }
+  });
+
+  it("renders a no-signal scan (empty dataArrays, no centroids) as empty, not an error", () => {
+    const r = reconstructSpectrum({ id: "survey", dataArrays: {} } as unknown as RawSpectrum, 0, "profile");
+    expect(r.mz.length).toBe(0);
+  });
 });
 
 describe("resolveGridMz — calibration-shape gating", () => {
+  // coeffs are keyed by their full metadata field name (e.g. "MZP_1000003_tof_c0" or
+  // "MS_4000900_tof_c0"); the reader exposes them via getChild AND lists them in type.children
+  // so the suffix-based lookup (fieldBySuffix) can find them.
   const mkReader = (metadata: Record<string, unknown>, coeffs?: Record<string, number>): Reader =>
     ({
       store: { fileIndex: { metadata } },
-      spectrumMetadata: coeffs ? { spectra: { getChild: (n: string) => ({ get: () => coeffs[n] }) } } : undefined,
+      spectrumMetadata: coeffs ? {
+        spectra: {
+          getChild: (n: string) => ({ get: () => coeffs[n] }),
+          type: { children: Object.keys(coeffs).map((name) => ({ name })) },
+        },
+      } : undefined,
     }) as unknown as Reader;
 
   it("mz-grid → idx/scale", () => {
@@ -260,6 +289,27 @@ describe("resolveGridMz — calibration-shape gating", () => {
 
   it("tof-grid sqrt with per-spectrum (c0,c1) → (c0+c1·idx)²", () => {
     const f = resolveGridMz(mkReader(tofGridMeta, { MZP_1000003_tof_c0: 0.05, MZP_1000004_tof_c1: 0.0003 }), 0)!;
+    expect(f(1_000_000)).toBeCloseTo((0.05 + 0.0003 * 1_000_000) ** 2, 6);
+  });
+
+  it("accepts the CURRENT model name sciex_sqrt_per_spectrum", () => {
+    const meta = { tof_calibration: { codec: "tof-grid", model: "sciex_sqrt_per_spectrum", per_spectrum_columns: ["tof_c0", "tof_c1"] } };
+    expect(isGridFile(mkReader(meta))).toBe(true);
+    const f = resolveGridMz(mkReader(meta, { MZP_1000003_tof_c0: 0.05, MZP_1000004_tof_c1: 0.0003 }), 0)!;
+    expect(f(1_000_000)).toBeCloseTo((0.05 + 0.0003 * 1_000_000) ** 2, 6);
+  });
+
+  it("resolves per-spectrum coeffs by SUFFIX, surviving the MZP→MS accession drift", () => {
+    const meta = { tof_calibration: { codec: "tof-grid", model: "sciex_sqrt_per_spectrum", per_spectrum_columns: ["tof_c0", "tof_c1"] } };
+    // current corpus uses MS_4000900_tof_c0 / MS_4000901_tof_c1 (not MZP_1000003/4)
+    const f = resolveGridMz(mkReader(meta, { MS_4000900_tof_c0: 0.05, MS_4000901_tof_c1: 0.0003 }), 0)!;
+    expect(f(1_000_000)).toBeCloseTo((0.05 + 0.0003 * 1_000_000) ** 2, 6);
+  });
+
+  it("global sciex_sqrt (no per_spectrum_columns) → run-wide c0/c1 from the block", () => {
+    const meta = { tof_calibration: { codec: "tof-grid", model: "sciex_sqrt", c0: 0.05, c1: 0.0003 } };
+    expect(isGridFile(mkReader(meta))).toBe(true);
+    const f = resolveGridMz(mkReader(meta), 0)!; // no per-spectrum coeffs needed
     expect(f(1_000_000)).toBeCloseTo((0.05 + 0.0003 * 1_000_000) ** 2, 6);
   });
 
@@ -283,10 +333,10 @@ describe("resolveGridMz — calibration-shape gating", () => {
     expect(f(50)).toBe(10);
   });
 
-  it("rejects an UNRECOGNISED tof-grid model → null + isGridFile false (fail loud)", () => {
+  it("UNRECOGNISED tof-grid model → resolveGridMz null (fail loud per-select); isGridFile still gates", () => {
     const meta = { tof_calibration: { codec: "tof-grid", model: "some_future_model", calibrations: { "1": {} }, tof_to_mz: "mz = f(t)" } };
     expect(resolveGridMz(mkReader(meta), 0)).toBeNull();
-    expect(isGridFile(mkReader(meta))).toBe(false);
+    expect(isGridFile(mkReader(meta))).toBe(true); // grid-encoded → still skip prefetch / imaging cache
   });
 
   it("rejects a sciex_sqrt tof-grid that carries calibrations[] (wrong shape)", () => {
@@ -359,9 +409,15 @@ describe("resolveGridMz — calibration-shape gating", () => {
     ]) {
       const r = mkReader(withCal(bad), agilentCoeffs);
       expect(() => resolveGridMz(r, 0)).not.toThrow();
-      expect(resolveGridMz(r, 0)).toBeNull();
-      expect(isGridFile(r)).toBe(false);
+      expect(resolveGridMz(r, 0)).toBeNull();       // unresolvable → fail loud per-select
+      expect(isGridFile(r)).toBe(true);             // ...but still grid-encoded → gates fire
     }
+  });
+
+  it("isGridFile is true for an UNRESOLVABLE grid codec (gates fire), but resolveGridMz is null", () => {
+    const meta = { tof_calibration: { codec: "tof-grid", model: "future_unknown_model" } };
+    expect(isGridFile(mkReader(meta))).toBe(true);          // gate: skip prefetch / imaging ion cache
+    expect(resolveGridMz(mkReader(meta), 0)).toBeNull();    // resolver: can't reconstruct → fail loud per-select
   });
 
   it("isGridFile: true for mz-grid + tof-grid + agilent-grid, false otherwise", () => {
