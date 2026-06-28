@@ -274,20 +274,91 @@ describe("resolveGridMz — calibration-shape gating", () => {
     expect(f(50)).toBe(10);
   });
 
-  it("rejects an Agilent polynomial tof-grid (calibrations[]/poly[]) → null + isGridFile false", () => {
-    const meta = { tof_calibration: { codec: "tof-grid", model: "agilent_poly", calibrations: [{ poly: [1, 2, 3] }], tof_to_mz: "mz = (coeff*(t-base))^2 - poly(t)" } };
+  it("rejects an UNRECOGNISED tof-grid model → null + isGridFile false (fail loud)", () => {
+    const meta = { tof_calibration: { codec: "tof-grid", model: "some_future_model", calibrations: { "1": {} }, tof_to_mz: "mz = f(t)" } };
     expect(resolveGridMz(mkReader(meta), 0)).toBeNull();
     expect(isGridFile(mkReader(meta))).toBe(false);
   });
 
-  it("rejects a tof-grid that carries calibrations[] even alongside per_spectrum_columns", () => {
+  it("rejects a sciex_sqrt tof-grid that carries calibrations[] (wrong shape)", () => {
     const meta = { tof_calibration: { codec: "tof-grid", model: "sciex_sqrt", calibrations: [{}], per_spectrum_columns: ["tof_c0", "tof_c1"], tof_to_mz: "mz = (tof_c0 + tof_c1*tof_index)^2" } };
     expect(resolveGridMz(mkReader(meta), 0)).toBeNull();
   });
 
-  it("isGridFile: true for mz-grid + tof-grid, false otherwise", () => {
+  // Golden values from the Rust `calibrated_mz` reference applied to the REAL Agilent
+  // calibration (LMVCS24HC.mzpeak, cal id 1, use_flags 2784 → poly orders [5,6,7,9,11]).
+  const agilentMeta = {
+    tof_calibration: {
+      codec: "tof-grid", model: "agilent_sqrt_poly",
+      per_spectrum_columns: ["tof_c0", "tof_c1", "tof_calibration_id"],
+      calibrations: {
+        "1": {
+          base: 1009.2061455961, coeff: 0.000347598319421502,
+          left: 32271.5762139714, right: 151101.329002531, use_flags: 2784,
+          poly_coeffs: [-3.04810336539477e-27, 1.02446004110928e-31, -9.11947533177548e-37, 2.31622840884782e-47, -3.11029623231747e-58, 0.0],
+        },
+      },
+    },
+  };
+  const agilentCoeffs = { MZP_1000003_tof_c0: 9.999289198935587, MZP_1000004_tof_c1: 0.000173799159710751, MZP_1000005_tof_calibration_id: 1 };
+
+  it("agilent-grid sqrt+poly: matches the Rust calibrated_mz golden values (incl. left-clamp)", () => {
+    const f = resolveGridMz(mkReader(agilentMeta, agilentCoeffs), 0)!;
+    expect(f).toBeTypeOf("function");
+    // k=0: t (29776) < left (32271) → poly clamps to `left`. Golden from agilent_profile.rs.
+    expect(f(0)).toBeCloseTo(99.9858078304, 8);
+    expect(f(1_000)).toBeCloseTo(103.4917500992, 8);
+    expect(f(50_000)).toBeCloseTo(349.2879468214, 8);
+    expect(f(150_000)).toBeCloseTo(1300.9838444574, 7);
+    expect(f(300_000)).toBeCloseTo(3861.2612960494, 6);
+    expect(f(400_000)).toBeCloseTo(6323.2652622768, 6);
+  });
+
+  it("agilent-grid: use_flags=0 → pure quadratic (no poly correction)", () => {
+    const meta = { tof_calibration: { ...agilentMeta.tof_calibration, calibrations: { "1": { ...agilentMeta.tof_calibration.calibrations["1"], use_flags: 0 } } } };
+    const f = resolveGridMz(mkReader(meta, agilentCoeffs), 0)!;
+    const lin = agilentCoeffs.MZP_1000003_tof_c0 + agilentCoeffs.MZP_1000004_tof_c1 * 50_000;
+    expect(f(50_000)).toBeCloseTo(lin * lin, 10);
+  });
+
+  it("agilent-grid: null when the per-spectrum calibration_id has no calibration row", () => {
+    expect(resolveGridMz(mkReader(agilentMeta, { ...agilentCoeffs, MZP_1000005_tof_calibration_id: 99 }), 0)).toBeNull();
+  });
+
+  it("agilent-grid: resolves when calibration_id arrives as a BigInt (int64 Arrow column)", () => {
+    // Arrow-JS returns int64 cells as BigInt; the id must still map to the "1" calibration key.
+    const coeffs = { ...agilentCoeffs, MZP_1000005_tof_calibration_id: 1n as unknown as number };
+    const f = resolveGridMz(mkReader(agilentMeta, coeffs), 0)!;
+    expect(f).toBeTypeOf("function");
+    expect(f(50_000)).toBeCloseTo(349.2879468214, 8);
+  });
+
+  it("agilent-grid: malformed calibration metadata fails loud (null), never throws", () => {
+    const withCal = (cal: unknown) => ({ tof_calibration: { ...agilentMeta.tof_calibration, calibrations: { "1": cal } } });
+    const good = agilentMeta.tof_calibration.calibrations["1"];
+    // null row, non-finite/zero coeff, inverted window, bad use_flags, non-numeric poly → all reject.
+    for (const bad of [
+      null,
+      { ...good, coeff: 0 },
+      { ...good, coeff: "x" },
+      { ...good, base: NaN },
+      { ...good, left: 200000, right: 100000 }, // left > right
+      { ...good, use_flags: 2.5 },
+      { ...good, use_flags: -1 },
+      { ...good, poly_coeffs: "nope" },
+      { ...good, poly_coeffs: [1, "two", 3] },
+    ]) {
+      const r = mkReader(withCal(bad), agilentCoeffs);
+      expect(() => resolveGridMz(r, 0)).not.toThrow();
+      expect(resolveGridMz(r, 0)).toBeNull();
+      expect(isGridFile(r)).toBe(false);
+    }
+  });
+
+  it("isGridFile: true for mz-grid + tof-grid + agilent-grid, false otherwise", () => {
     expect(isGridFile(mkReader({ mz_calibration: { codec: "mz-grid", scale: 10_000 } }))).toBe(true);
     expect(isGridFile(mkReader(tofGridMeta))).toBe(true);
+    expect(isGridFile(mkReader(agilentMeta))).toBe(true);
     expect(isGridFile(mkReader({}))).toBe(false);
     expect(isGridFile(mkReader({ ims_calibration: { a: 1, b: 2 } }))).toBe(false);
   });

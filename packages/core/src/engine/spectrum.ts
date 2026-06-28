@@ -81,14 +81,45 @@ export function readImsCalibration(reader: Reader): ImsCalibration | null {
 export type GridMz = (axis: number) => number;
 const GRID_AXIS_KEY = "tof_index"; // mzpeakts array_name for the integer grid axis (MS:1000519)
 
-type GridCal = { kind: "mz-grid"; scale: number } | { kind: "tof-grid" };
+/** One Agilent calibration row (`tof_calibration.calibrations[id]`): the traditional quadratic
+ *  `(coeff·(t−base))²` plus a sub-ppm polynomial refinement evaluated at `clamp(t,left,right)`. */
+type AgilentCal = { base: number; coeff: number; left: number; right: number; poly: number[]; useFlags: number };
+type GridCal =
+  | { kind: "mz-grid"; scale: number }
+  | { kind: "tof-grid" }
+  | { kind: "agilent-grid"; calibrations: Record<string, AgilentCal> };
+
+const isFiniteNum = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
 
 /**
- * Detect the grid calibration codec from the index metadata — COEFF-INDEPENDENT (no
- * per-spectrum read), so it's a stable "is this a grid file" predicate regardless of which
- * spectrum is inspected (a SciEX file's spectrum 0 is often an empty survey scan with null
- * coefficients). Only the VERIFIED SciEX shapes are accepted; Agilent polynomial grids
- * (`tof_calibration` with `calibrations[]`/`poly[]`) are rejected → null → fail loud.
+ * Parse the `tof_calibration.calibrations` map (id → {base,coeff,left,right,poly_coeffs,use_flags}).
+ * Returns null (→ the file fails loud as un-decodable) on ANY malformed entry rather than
+ * silently reconstructing wrong m/z or throwing: a null/non-object row, a non-finite or zero
+ * `coeff`, an inverted `left>right` window, a non-integer/out-of-range `use_flags`, or a
+ * `poly_coeffs` that isn't an all-finite array. Valid converter output never trips these.
+ */
+function parseAgilentCals(raw: unknown): Record<string, AgilentCal> | null {
+  const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  if (!obj) return null;
+  const out: Record<string, AgilentCal> = {};
+  for (const [id, v] of Object.entries(obj)) {
+    const c = v && typeof v === "object" ? (v as Record<string, unknown>) : null;
+    if (!c) return null;
+    const base = c["base"], coeff = c["coeff"], left = c["left"], right = c["right"], uf = c["use_flags"], poly = c["poly_coeffs"];
+    if (!isFiniteNum(base) || !isFiniteNum(coeff) || coeff === 0 || !isFiniteNum(left) || !isFiniteNum(right) || left > right) return null;
+    if (!Number.isInteger(uf) || (uf as number) < 0 || (uf as number) > 0xffffffff) return null;
+    if (!Array.isArray(poly) || !poly.every(isFiniteNum)) return null;
+    out[id] = { base, coeff, left, right, poly: poly as number[], useFlags: uf as number };
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * Detect the grid calibration codec from the index metadata — COEFF-INDEPENDENT (no per-spectrum
+ * read), so it's a stable "is this a grid file" predicate regardless of which spectrum is
+ * inspected (a grid file's spectrum 0 may be an empty survey scan with null coefficients). Only
+ * the VERIFIED shapes are accepted (gated on the `model` field); any unrecognised grid → null →
+ * fail loud rather than reconstruct wrong m/z.
  */
 function gridCal(reader: Reader): GridCal | null {
   const meta = indexMeta(reader);
@@ -97,17 +128,42 @@ function gridCal(reader: Reader): GridCal | null {
     return { kind: "mz-grid", scale: mzc["scale"] as number };
   }
   const tofc = asObj(meta["tof_calibration"]);
-  // sciex_sqrt ONLY: per-spectrum (tof_c0,tof_c1), mz=(c0+c1·idx)². Reject Agilent's
-  // polynomial form (it carries `calibrations[]` and no `per_spectrum_columns`).
-  if (tofc && tofc["codec"] === "tof-grid" && tofc["model"] === "sciex_sqrt" && !("calibrations" in tofc)) {
-    const cols = tofc["per_spectrum_columns"];
-    const formula = String(tofc["tof_to_mz"] ?? "");
-    if (Array.isArray(cols) && cols.includes("tof_c0") && cols.includes("tof_c1")
-      && /\(\s*tof_c0\s*\+\s*tof_c1\s*\*\s*tof_index\s*\)\s*\^\s*2/.test(formula)) {
-      return { kind: "tof-grid" };
+  if (tofc && tofc["codec"] === "tof-grid") {
+    // SciEX sqrt: per-spectrum (tof_c0,tof_c1), mz=(c0+c1·idx)². No `calibrations` block.
+    if (tofc["model"] === "sciex_sqrt" && !("calibrations" in tofc)) {
+      const cols = tofc["per_spectrum_columns"];
+      const formula = String(tofc["tof_to_mz"] ?? "");
+      if (Array.isArray(cols) && cols.includes("tof_c0") && cols.includes("tof_c1")
+        && /\(\s*tof_c0\s*\+\s*tof_c1\s*\*\s*tof_index\s*\)\s*\^\s*2/.test(formula)) {
+        return { kind: "tof-grid" };
+      }
+    }
+    // Agilent sqrt+poly: per-spectrum (tof_c0,tof_c1,tof_calibration_id) selects a row in the
+    // `calibrations` map; mz=(coeff·(t−base))² − poly(clamp(t,left,right)). See agilent_profile.rs.
+    if (tofc["model"] === "agilent_sqrt_poly") {
+      const cols = tofc["per_spectrum_columns"];
+      const cals = parseAgilentCals(tofc["calibrations"]);
+      if (cals && Array.isArray(cols) && cols.includes("tof_c0") && cols.includes("tof_c1") && cols.includes("tof_calibration_id")) {
+        return { kind: "agilent-grid", calibrations: cals };
+      }
     }
   }
   return null;
+}
+
+/** Build the Horner coefficient list for an Agilent poly: `poly_coeffs` fill the orders whose
+ *  bits are set in `useFlags` (ascending). Mirrors `calibrated_mz` in agilent_profile.rs. */
+function agilentPoly(coeffs: number[], useFlags: number): number[] | null {
+  if (useFlags === 0) return null;
+  const poly: number[] = [];
+  let ci = 0;
+  for (let k = 0; k < 32; k++) {
+    if ((useFlags >>> k) & 1) {
+      while (poly.length <= k) poly.push(0);
+      if (ci < coeffs.length) poly[k] = coeffs[ci++]!;
+    }
+  }
+  return poly.length ? poly : null;
 }
 
 /** True when the file is a SciEX grid file (mz-grid OR tof-grid) — coeff-independent, so it's
@@ -119,10 +175,13 @@ export function isGridFile(reader: Reader): boolean {
 /**
  * Resolve the per-spectrum integer-axis → m/z map for a grid profile spectrum:
  *  - **mz-grid** (sciex uniform): `mz = tof_index / scale`, run-wide.
- *  - **tof-grid** (sciex sqrt): `mz = (c0 + c1·tof_index)²` with PER-SPECTRUM `c0,c1` from the
- *    spectrum metadata (`MZP_1000003_tof_c0` / `MZP_1000004_tof_c1`).
- * Returns null when the file isn't a grid file OR this spectrum lacks usable coefficients
- * (e.g. an empty survey scan — which carries no `tof_index` to map anyway).
+ *  - **tof-grid** (sciex sqrt): `mz = (c0 + c1·tof_index)²` with PER-SPECTRUM `c0,c1`.
+ *  - **agilent-grid** (sqrt + polynomial): `mz = (c0+c1·k)² − poly(clamp(t,left,right))`,
+ *    `t = base + (c0+c1·k)/coeff`, with PER-SPECTRUM `c0,c1,calibration_id` selecting the
+ *    calibration row; exact MassHunter m/z (mirrors `calibrated_mz` in agilent_profile.rs).
+ * Per-spectrum values come from the spectrum metadata (`MZP_1000003_tof_c0` /
+ * `MZP_1000004_tof_c1` / `MZP_1000005_tof_calibration_id`). Returns null when the file isn't a
+ * grid file OR this spectrum lacks usable coefficients (e.g. an empty survey scan).
  */
 export function resolveGridMz(reader: Reader, index: number): GridMz | null {
   const g = gridCal(reader);
@@ -134,7 +193,28 @@ export function resolveGridMz(reader: Reader, index: number): GridMz | null {
     return typeof v === "number" && Number.isFinite(v) ? v : null;
   };
   const c0 = num("MZP_1000003_tof_c0"), c1 = num("MZP_1000004_tof_c1");
-  return c0 != null && c1 != null ? (axis) => { const m = c0 + c1 * axis; return m * m; } : null;
+  if (c0 == null || c1 == null) return null;
+  if (g.kind === "tof-grid") return (axis) => { const m = c0 + c1 * axis; return m * m; };
+  // agilent-grid: select the calibration row for this spectrum, then mz = (c0+c1·k)² −
+  // poly(clamp(t,left,right)) with t = base + (c0+c1·k)/coeff (= the Rust calibrated_mz).
+  // `tof_calibration_id` is int64 → Arrow-JS yields a BigInt; coerce to the string map key.
+  const idRaw = spectra?.getChild?.("MZP_1000005_tof_calibration_id")?.get?.(index);
+  const calKey = typeof idRaw === "bigint" ? idRaw.toString()
+    : typeof idRaw === "number" && Number.isSafeInteger(idRaw) ? String(idRaw) : null;
+  const cal = calKey != null ? g.calibrations[calKey] : undefined;
+  if (!cal) return null;
+  const { base, coeff, left, right } = cal;
+  const poly = agilentPoly(cal.poly, cal.useFlags);
+  return (axis) => {
+    const lin = c0 + c1 * axis; // = coeff·(t−base)
+    const mz = lin * lin;
+    if (!poly) return mz;
+    const t = base + lin / coeff;
+    const tc = t < left ? left : t > right ? right : t;
+    let corr = 0;
+    for (let i = poly.length - 1; i >= 0; i--) corr = corr * tc + poly[i]!;
+    return mz - corr;
+  };
 }
 
 // Standard centroid-object keys mzpeakts emits; any OTHER numeric key is the non-standard
