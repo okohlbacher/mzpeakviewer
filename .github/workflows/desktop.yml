@@ -80,6 +80,7 @@ jobs:
       # version from drifting from the tag; on a v* tag the bundles are always named to match.
       - name: Set app version from release tag
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash # Windows defaults `run:` to PowerShell, which can't do `${VAR#v}` — force bash
         run: |
           VER="${GITHUB_REF_NAME#v}"
           node -e "const f='app/src-tauri/tauri.conf.json',fs=require('fs');const c=JSON.parse(fs.readFileSync(f));c.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(c,null,2)+'\n')" "$VER"
