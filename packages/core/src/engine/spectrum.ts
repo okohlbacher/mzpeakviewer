@@ -92,6 +92,7 @@ export function readImsCalibration(reader: Reader): ImsCalibration | null {
 /** A per-spectrum integer-axis → m/z map for SciEX/Agilent grid profile data (`tof_index`). */
 export type GridMz = (axis: number) => number;
 const GRID_AXIS_KEY = "tof_index"; // mzpeakts array_name for the integer grid axis (MS:1000519)
+const TOF_DATA_KEY = "tof"; // ims-compact tof axis (MS:1000786) as it appears in a chunked facet (Layout B)
 
 /** One Agilent calibration row (`tof_calibration.calibrations[id]`): the traditional quadratic
  *  `(coeff·(t−base))²` plus a sub-ppm polynomial refinement evaluated at `clamp(t,left,right)`. */
@@ -371,7 +372,7 @@ type RawSignal = { mz: Float64Array; intensity: Float32Array; mobility?: ArrayLi
 
 /** Copy spectra_data (profile) arrays into the canonical dtypes (f64 m/z, f32 int), plus
  *  the optional ion-mobility array when the file carries it. */
-function readDataArrays(s: RawSpectrum, gridMz: GridMz | null): RawSignal {
+function readDataArrays(s: RawSpectrum, gridMz: GridMz | null, cal: ImsCalibration | null = null): RawSignal {
   const da = s.dataArrays!;
   // SciEX/Agilent grid: an integer `tof_index` replaces the `m/z array`; reconstruct m/z
   // per point through the resolved grid map (mz-grid: idx/scale; tof-grid: (c0+c1·idx)²).
@@ -380,6 +381,21 @@ function readDataArrays(s: RawSpectrum, gridMz: GridMz | null): RawSignal {
     const mz = new Float64Array(n);
     for (let i = 0; i < n; i++) mz[i] = gridMz(axis[i]!);
     return { mz, intensity: Float32Array.from(da[INTENSITY_KEY]!) };
+  }
+  // ims-compact Layout B (m/z-chunked): the chunked facet carries a `tof` axis instead of an
+  // `m/z array`; reconstruct mz = (a + b·tof)². PROVISIONAL — the `--ims-chunked` writer schema is
+  // NOT yet frozen (IM-TOF handoff §6) and there is no real chunked file to verify against. This
+  // ASSUMES mzpeakts' chunk reader has already applied the per-chunk TOF delta decode (via
+  // chunk_encoding), so `tof` here is absolute; the engine does NOT repeat the per-chunk cumsum
+  // (chunk boundaries aren't exposed in the flattened array). Confirm both assumptions — the `tof`
+  // array name and the delta handling — against a real `--ims-chunked` file, then finalize.
+  const tof = da[TOF_DATA_KEY];
+  if (cal?.tofEncoding === "m/z-chunked" && tof && !da[MZ_KEY]) {
+    const n = tof.length;
+    const mz = new Float64Array(n);
+    for (let i = 0; i < n; i++) mz[i] = mzFromTof(cal, tof[i]!);
+    const mob = da[MOBILITY_DATA_KEY];
+    return { mz, intensity: Float32Array.from(da[INTENSITY_KEY]!), ...(mob ? { mobility: mob } : {}) };
   }
   const mob = da[MOBILITY_DATA_KEY];
   return {
@@ -456,7 +472,10 @@ export function reconstructSpectrum(
   // throws below): here the file explicitly declares zero points.
   const da = spectrum.dataArrays;
   const mzArr = da?.[MZ_KEY];
-  const daOk = hasDataArrays(spectrum) || hasGridData(spectrum, gridMz);
+  // ims-compact Layout B (m/z-chunked): the chunked facet's axis is `tof` (reconstructed via `cal`)
+  // instead of an `m/z array` — count it as decodable data so we don't false-empty. PROVISIONAL (§6).
+  const imsChunked = cal?.tofEncoding === "m/z-chunked" && !!da?.[TOF_DATA_KEY];
+  const daOk = hasDataArrays(spectrum) || hasGridData(spectrum, gridMz) || imsChunked;
   // mzpeakts decoded this spectrum to NO signal at all: a present `dataArrays` carrying no
   // intensity, no integer axis, and no (or a 0-length) m/z, and no centroids. Render it empty
   // rather than throwing — survey/empty scans interleave with data scans (SciEX/Agilent). A
@@ -473,11 +492,11 @@ export function reconstructSpectrum(
   let raw: RawSignal;
   if (representation === "centroid") {
     if (hasCentroids(spectrum)) raw = readCentroids(spectrum, cal, gridMz);
-    else if (daOk) raw = readDataArrays(spectrum, gridMz);
+    else if (daOk) raw = readDataArrays(spectrum, gridMz, cal);
     else throw new EmptySpectrumError(index);
   } else {
     // "profile" or null (unknown) → data-array default, centroid fall-through.
-    if (daOk) raw = readDataArrays(spectrum, gridMz);
+    if (daOk) raw = readDataArrays(spectrum, gridMz, cal);
     else if (hasCentroids(spectrum)) raw = readCentroids(spectrum, cal, gridMz);
     else throw new EmptySpectrumError(index);
   }

@@ -266,6 +266,46 @@ describe("reconstructSpectrum ims-compact Layout A (per-scan delta tof)", () => 
   });
 });
 
+describe("reconstructSpectrum ims-compact Layout B (m/z-chunked tof — PROVISIONAL)", () => {
+  // Layout B lives in the CHUNKED (data-array) facet with a `tof` axis instead of an `m/z array`.
+  // PROVISIONAL: the --ims-chunked schema isn't frozen; this asserts the (a+b·tof)² reconstruction
+  // in the data-array path, assuming mzpeakts already chunk-decoded the per-chunk tof deltas.
+  const A = 10, B = 0.0001;
+  const mzOf = (tof: number) => (A + B * tof) ** 2;
+  const chunkedCal = { a: A, b: B, tofEncoding: "m/z-chunked" as const };
+
+  it("reconstructs mz=(a+b·tof)² from a chunked-facet `tof` data array (mobility carried)", () => {
+    const rec = { id: "frame=0", dataArrays: {
+      tof: [50000, 80000, 120000],
+      "intensity array": [3, 5, 2],
+      "mean inverse reduced ion mobility array": [0.8, 0.9, 1.0],
+    } } as unknown as RawSpectrum;
+    const r = reconstructSpectrum(rec, 0, "profile", chunkedCal);
+    expect(Array.from(r.mz)).toEqual([mzOf(50000), mzOf(80000), mzOf(120000)]);
+    expect(Array.from(r.mz)).toEqual([225, 324, 484]);
+    expect(Array.from(r.intensity)).toEqual([3, 5, 2]);
+    expect(Array.from(r.mobility!.values)).toEqual([0.8, 0.9, 1.0]);
+  });
+
+  it("prefers a real `m/z array` even when tofEncoding is m/z-chunked (no hijack)", () => {
+    const rec = { id: "x", dataArrays: {
+      "m/z array": [111, 222], tof: [1, 2], "intensity array": [4, 5],
+    } } as unknown as RawSpectrum;
+    const r = reconstructSpectrum(rec, 0, "profile", chunkedCal);
+    expect(new Set(r.mz)).toEqual(new Set([111, 222]));
+  });
+
+  it("does NOT apply the tof transform for Layout A (per-scan-delta) in the data-array path", () => {
+    // Layout A is centroid-facet only; a per-scan-delta cal must not trigger the chunked tof branch.
+    const rec = { id: "x", dataArrays: {
+      tof: [50000], "intensity array": [9],
+    } } as unknown as RawSpectrum;
+    const perScan = { a: A, b: B, tofEncoding: "per-scan-delta" as const };
+    // tof branch requires tofEncoding==='m/z-chunked'; here it's skipped → no m/z array → fail loud.
+    expect(() => reconstructSpectrum(rec, 0, "profile", perScan)).toThrow(EmptySpectrumError);
+  });
+});
+
 describe("reconstructSpectrum SciEX grid tof_index→m/z (profile)", () => {
   // Profile spectrum carrying integer `tof_index` instead of an `m/z array`.
   const gridRec: RawSpectrum = {
