@@ -242,6 +242,9 @@ async function assembleEngineFile(reader: Reader): Promise<EngineFile> {
     // Wavelength (UV/VIS) count is known immediately — the wavelength metadata table is
     // loaded eagerly at open (reader.init), so numWavelengthSpectra is final here.
     wavelengthCount: reader.numWavelengthSpectra ?? 0,
+    // Per-peak ion mobility is known at open from the peaks-facet array index (capabilityGate
+    // eagerly opens spectra_peaks so its arrayIndex is populated).
+    mobilityPresent: ivCaps.mobilityPresent,
     layout: ivCaps.layout,
     encodings: ivCaps.encodings,
     unsupported: ivCaps.unsupported,

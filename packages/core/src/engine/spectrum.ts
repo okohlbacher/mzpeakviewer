@@ -50,7 +50,15 @@ const MOBILITY_DATA_KEY = "mean inverse reduced ion mobility array";
  * `ims_calibration` (the converter keeps this as the contract — tof in the *archive* is
  * absolute, a direct per-point map). See the mzPeakConverter compliance reply §2.
  */
-export type ImsCalibration = { a: number; b: number };
+export type ImsCalibration = {
+  a: number;
+  b: number;
+  // How `point.tof` is stored (ims-compact Layout A/B). "per-scan-delta": tof is a per-mobility-
+  // scan delta (first-of-scan absolute, rest deltas) → needs a cumsum with a reset at each scan
+  // boundary (a mobility-value change) before mzFromTof. "absolute": tof is the raw bin (--no-tof-
+  // delta). null: legacy files with no encoding declared → treat as absolute. See the IM-TOF handoff.
+  tofEncoding: "per-scan-delta" | "absolute" | "m/z-chunked" | null;
+};
 
 function mzFromTof(cal: ImsCalibration, tof: number): number {
   const m = cal.a + cal.b * tof;
@@ -74,7 +82,11 @@ export function readImsCalibration(reader: Reader): ImsCalibration | null {
   const raw = asObj(indexMeta(reader)["ims_calibration"]);
   if (!raw) return null;
   const a = raw["a"], b = raw["b"];
-  return typeof a === "number" && typeof b === "number" ? { a, b } : null;
+  if (typeof a !== "number" || typeof b !== "number") return null;
+  const te = raw["tof_encoding"];
+  const tofEncoding =
+    te === "per-scan-delta" || te === "absolute" || te === "m/z-chunked" ? te : null;
+  return { a, b, tofEncoding };
 }
 
 /** A per-spectrum integer-axis → m/z map for SciEX/Agilent grid profile data (`tof_index`). */
@@ -392,10 +404,29 @@ function readCentroids(s: RawSpectrum, cal: ImsCalibration | null, gridMz: GridM
   // `tof`/`tof_index` name, often to ""). gridMz (grid) takes precedence over cal (ims-compact).
   const axisKey = n > 0 && centroids[0]!["mz"] == null && (cal != null || gridMz != null)
     ? tofColumnKey(centroids[0]!) : null;
+  // ims-compact Layout A: `point.tof` is a per-mobility-scan delta. Reconstruct absolute TOF by
+  // cumulative sum in STORED order, resetting at each scan boundary — detected by the 1/K0 value
+  // changing (one stored f64 per scan, strictly monotonic across scans; the handoff's contract).
+  // Needs mobility to find boundaries; without it (not expected for Layout A) we fall through to
+  // absolute. gridMz (SciEX/Agilent) takes precedence and is never delta-decoded.
+  const perScanDelta =
+    axisKey !== null && !gridMz && cal?.tofEncoding === "per-scan-delta" && !!mobility;
+  let acc = 0, prevMob = NaN;
   for (let i = 0; i < n; i++) {
     const c = centroids[i]!;
     // axisKey may be "" — test for null, not truthiness.
-    mz[i] = axisKey !== null ? (gridMz ? gridMz(c[axisKey]!) : mzFromTof(cal!, c[axisKey]!)) : c["mz"]!;
+    if (axisKey === null) {
+      mz[i] = c["mz"]!;
+    } else if (gridMz) {
+      mz[i] = gridMz(c[axisKey]!);
+    } else if (perScanDelta) {
+      const m = c["mean_inverse_reduced_ion_mobility"]!;
+      acc = m !== prevMob ? c[axisKey]! : acc + c[axisKey]!; // absolute on scan start, else add delta
+      prevMob = m;
+      mz[i] = mzFromTof(cal!, acc);
+    } else {
+      mz[i] = mzFromTof(cal!, c[axisKey]!);
+    }
     intensity[i] = c["intensity"]!;
     if (mobility) mobility[i] = c["mean_inverse_reduced_ion_mobility"]!;
   }

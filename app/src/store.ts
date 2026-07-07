@@ -19,7 +19,7 @@ import type {
   WavelengthMatrix,
   SpectrumArrays,
 } from "@mzpeak/contracts";
-import { showChromatograms, showWavelength } from "@mzpeak/contracts";
+import { showChromatograms, showWavelength, showMobility } from "@mzpeak/contracts";
 import { rebuildCoordMap } from "@mzpeak/core";
 import type { View } from "@mzpeak/contracts";
 import { engine } from "./engine";
@@ -990,4 +990,4 @@ engine.on("ionIndexReady", () => {
 });
 
 // Re-export helpers so views can use them without importing contracts directly
-export { showChromatograms, showWavelength };
+export { showChromatograms, showWavelength, showMobility };

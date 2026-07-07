@@ -216,6 +216,56 @@ describe("reconstructSpectrum ims-compact tof→m/z", () => {
   });
 });
 
+describe("reconstructSpectrum ims-compact Layout A (per-scan delta tof)", () => {
+  // mz = (a + b·tof)² with a,b chosen so absolute tofs give round m/z. tof is stored as a
+  // per-mobility-scan delta: first-of-scan absolute, rest deltas; scan boundary = 1/K0 change.
+  const A = 10, B = 0.0001;
+  const mzOf = (tof: number) => (A + B * tof) ** 2;
+  // Frame: scan 0 (1/K0 0.80) abs tof 50k,80k,120k → deltas 50k,30k,40k; scan 1 (0.95) abs 60k,100k → 60k,40k.
+  const frame = {
+    id: "frame=0",
+    centroids: [
+      { tof: 50000, intensity: 1, mean_inverse_reduced_ion_mobility: 0.8 },
+      { tof: 30000, intensity: 2, mean_inverse_reduced_ion_mobility: 0.8 },
+      { tof: 40000, intensity: 3, mean_inverse_reduced_ion_mobility: 0.8 },
+      { tof: 60000, intensity: 4, mean_inverse_reduced_ion_mobility: 0.95 },
+      { tof: 40000, intensity: 5, mean_inverse_reduced_ion_mobility: 0.95 },
+    ],
+  } as unknown as RawSpectrum;
+  const deltaCal = { a: A, b: B, tofEncoding: "per-scan-delta" as const };
+
+  it("cumsums tof within a scan and resets on the 1/K0 change", () => {
+    const r = reconstructSpectrum(frame, 0, "centroid", deltaCal);
+    // absolute tof reconstructs to 50k,80k,120k (scan0) and 60k,100k (scan1) → these m/z, then m/z-sorted:
+    // 225(i1,.80) 256(i4,.95) 324(i2,.80) 400(i5,.95) 484(i3,.80)
+    expect(Array.from(r.mz)).toEqual([mzOf(50000), mzOf(60000), mzOf(80000), mzOf(100000), mzOf(120000)]);
+    expect(Array.from(r.mz)).toEqual([225, 256, 324, 400, 484]);
+    expect(Array.from(r.intensity)).toEqual([1, 4, 2, 5, 3]);
+    expect(Array.from(r.mobility!.values)).toEqual([0.8, 0.95]);
+    expect(Array.from(r.mobility!.index)).toEqual([0, 1, 0, 1, 0]);
+  });
+
+  it("differs from the naive no-cumsum read (proves the delta decode fires)", () => {
+    // Without cumsum, mzFromTof would be applied to the raw deltas → a WRONG spectrum.
+    const wrong = new Set([mzOf(30000), mzOf(40000)].map((x) => Math.round(x))); // 169, 196
+    const r = reconstructSpectrum(frame, 0, "centroid", deltaCal);
+    for (const m of r.mz) expect(wrong.has(Math.round(m))).toBe(false);
+  });
+
+  it("tofEncoding 'absolute' does NOT cumsum (raw tof used directly)", () => {
+    const absCal = { a: A, b: B, tofEncoding: "absolute" as const };
+    const r = reconstructSpectrum(frame, 0, "centroid", absCal);
+    // raw tofs 50k,30k,40k,60k,40k → m/z-sorted set of mzOf(raw)
+    expect(new Set(r.mz)).toEqual(new Set([50000, 30000, 40000, 60000, 40000].map(mzOf)));
+  });
+
+  it("per-scan-delta WITHOUT mobility falls back to absolute (no crash, no cumsum)", () => {
+    const noMob = { id: "f", centroids: [{ tof: 50000, intensity: 1 }, { tof: 30000, intensity: 2 }] } as unknown as RawSpectrum;
+    const r = reconstructSpectrum(noMob, 0, "centroid", deltaCal);
+    expect(new Set(r.mz)).toEqual(new Set([mzOf(50000), mzOf(30000)]));
+  });
+});
+
 describe("reconstructSpectrum SciEX grid tof_index→m/z (profile)", () => {
   // Profile spectrum carrying integer `tof_index` instead of an `m/z array`.
   const gridRec: RawSpectrum = {

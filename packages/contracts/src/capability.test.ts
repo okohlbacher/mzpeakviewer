@@ -10,6 +10,7 @@ const base: CapabilityModel = {
   chromatograms: { numChromatograms: 0, ticColumn: "unknown" },
   optical: { hasOptical: false, count: 0 },
   wavelength: { present: false, count: 0 },
+  mobility: { present: false },
   layout: "point",
   encodings: [],
   unsupported: [],

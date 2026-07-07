@@ -101,6 +101,17 @@ export type WavelengthCapability = {
 };
 
 /**
+ * Ion-mobility (IMS / timsTOF) capability — whether the file carries a PER-PEAK ion-mobility
+ * array (`mean inverse reduced ion mobility`, MS:1003006), which is what makes a 2-D frame
+ * (m/z × 1/K0) renderable. Known at open from the peaks-facet array index — a plain boolean.
+ * NOTE: strictly the per-peak array. Files that are ion-mobility by provenance but store mobility
+ * per-spectrum, or collapse it, are NOT `present` (they have no frame to draw). See the IM-TOF handoff.
+ */
+export type MobilityCapability = {
+  present: boolean;
+};
+
+/**
  * The unified capability model. The shell derives nav visibility ONLY from this:
  *   - Summary, Spectra            → always
  *   - Chromatograms               → `chromatograms.numChromatograms > 0 || chromatograms.hasTicColumn`
@@ -114,6 +125,8 @@ export type CapabilityModel = {
   optical: OpticalCapability;
   /** UV/VIS (wavelength) spectra — drives the UV/VIS navigation surface. */
   wavelength: WavelengthCapability;
+  /** Ion mobility (per-peak) — drives the Ion-mobility navigation surface. */
+  mobility: MobilityCapability;
   /** Storage layout + encodings (diagnostics). */
   /** "unknown" when the reader can't classify the layout. */
   layout: "point" | "chunked" | "mixed" | "unknown";
@@ -130,6 +143,11 @@ export function showChromatograms(c: CapabilityModel): boolean {
 /** True when the UV/VIS (wavelength) nav entry should be shown. */
 export function showWavelength(c: CapabilityModel): boolean {
   return c.wavelength.present;
+}
+
+/** True when the Ion-mobility (IMS) nav entry should be shown. */
+export function showMobility(c: CapabilityModel): boolean {
+  return c.mobility.present;
 }
 
 /** Whether auto-detection and the effective flag disagree (override in effect). */

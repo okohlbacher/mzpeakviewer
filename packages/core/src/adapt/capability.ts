@@ -29,6 +29,8 @@ export type CapabilityInput = {
   wavelengthCount: number;
   /** Observed wavelength range [minNm, maxNm], or null/omitted when unknown. */
   wavelengthRange?: [number, number] | null;
+  /** Whether the file carries a per-peak ion-mobility array (MS:1003006) — a renderable IMS frame. */
+  mobilityPresent: boolean;
   layout: "point" | "chunked" | "mixed" | "unknown";
   encodings: string[];
   unsupported: UnsupportedFinding[];
@@ -60,6 +62,9 @@ export function buildCapabilityModel(input: CapabilityInput): CapabilityModel {
       present: input.wavelengthCount > 0,
       count: input.wavelengthCount,
       range: input.wavelengthRange ?? null,
+    },
+    mobility: {
+      present: input.mobilityPresent,
     },
     layout: input.layout,
     encodings: input.encodings,

@@ -17,6 +17,8 @@ export type View =
   | "chromatograms"
   // capability-gated — UV/VIS (wavelength / PDA / DAD) spectra (its own sidebar entry)
   | "wavelength"
+  // capability-gated — ion mobility (IMS / timsTOF) per-peak frame view (its own sidebar entry)
+  | "ims"
   // Advanced accordion
   | "metadata"
   | "structure"
@@ -34,6 +36,7 @@ export const ALL_VIEWS: readonly View[] = [
   "spectra",
   "chromatograms",
   "wavelength",
+  "ims",
   "metadata",
   "structure",
   "overview",

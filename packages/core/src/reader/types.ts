@@ -36,6 +36,8 @@ export type Capabilities = {
   layout: "point" | "chunked" | "mixed";
   encodings: string[];
   isImaging: boolean;
+  /** File carries a per-peak ion-mobility array (MS:1003006) → a renderable IMS frame. */
+  mobilityPresent: boolean;
   unsupported: UnsupportedFinding[];
 };
 

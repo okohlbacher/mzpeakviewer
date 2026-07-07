@@ -8,10 +8,22 @@ const base: CapabilityInput = {
   ticColumn: "unknown",
   opticalCount: 0,
   wavelengthCount: 0,
+  mobilityPresent: false,
   layout: "point",
   encodings: [],
   unsupported: [],
 };
+
+describe("buildCapabilityModel mobility (IMS)", () => {
+  it("mobilityPresent flows to capabilities.mobility.present + showMobility", async () => {
+    const { showMobility } = await import("@mzpeak/contracts");
+    expect(buildCapabilityModel(base).mobility.present).toBe(false);
+    expect(showMobility(buildCapabilityModel(base))).toBe(false);
+    const m = buildCapabilityModel({ ...base, mobilityPresent: true });
+    expect(m.mobility.present).toBe(true);
+    expect(showMobility(m)).toBe(true);
+  });
+});
 
 describe("buildCapabilityModel", () => {
   it("non-imaging file: not imaging, no optical, chrom hidden", () => {

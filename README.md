@@ -3,9 +3,9 @@
 A fast, browser-based viewer for **[mzPeak](https://github.com/HUPO-PSI/mzPeak)**
 mass-spectrometry files — no install, no backend, nothing uploaded anywhere. Open a
 file from your computer or stream one straight from a URL, and explore its spectra,
-chromatograms, imaging (MSI) ion images, reporter-ion channels, metadata, and the
-underlying Parquet structure. The imaging layer activates automatically for imaging
-datasets.
+chromatograms, imaging (MSI) ion images, ion-mobility (timsTOF) frames, reporter-ion
+channels, metadata, and the underlying Parquet structure. The imaging and ion-mobility
+layers activate automatically for the file types that carry them.
 
 **[▶ Open the viewer](https://www.mzpeak.org/view/)**  ·
 **[📖 User manual](docs/index.html)**  ·
@@ -42,6 +42,10 @@ datasets.
   absorbance **spectrum**, a derived **chromatogram** (max-absorbance trace or a single extracted
   wavelength), and a 2-D time × wavelength **heatmap**. Click the heatmap or chromatogram to jump
   to the spectrum at that retention time.
+- **Ion mobility (IMS / timsTOF)** — for files that carry per-peak ion mobility, a dedicated view
+  that renders each frame as a 2-D **m/z × 1/K₀ heatmap** (viridis, log-intensity), with a frame
+  stepper to browse the run. The tab appears automatically for ion-mobility files; the same frame
+  heatmap is also shown inline beneath the 1-D plot in the Spectra view.
 - **Structure** — deep Parquet inspection: archive members, per-column footers,
   encodings, row-group layout, page-index status, and on-demand value distributions.
 - **Deep links, sharing & USI** — every view is a shareable URL (file, spectrum, scan, pixel,

@@ -143,6 +143,18 @@ export function computeCapabilities(
   collectIndex(arrayIndex);
   collectIndex(peakArrayIndex);
 
+  // Ion mobility (IMS) detection: the ims-compact converter writes an `ims_calibration` block into
+  // the JSON index for files carrying per-peak ion mobility (tof + 1/K0). Detect it from the
+  // already-parsed index metadata — NO facet I/O (eagerly opening the peaks facet here corrupts the
+  // reader for subsequent spectrum reads, and the peaks arrayIndex isn't loaded at open anyway).
+  const idxMeta = (reader as unknown as { store?: { fileIndex?: { metadata?: unknown } } })
+    ?.store?.fileIndex?.metadata;
+  const mobilityPresent = !!(
+    idxMeta &&
+    typeof idxMeta === "object" &&
+    (idxMeta as Record<string, unknown>)["ims_calibration"]
+  );
+
   // Fallback: try to infer from the store's spectrum data / peaks reader paths.
   // The array index may be null for the demo file until data is first read; use
   // the manifest as a hint: if the file has spectra_data, it likely is point layout.
@@ -168,6 +180,7 @@ export function computeCapabilities(
     layout,
     encodings: Array.from(encodingCuries).sort(),
     isImaging,
+    mobilityPresent,
     unsupported: [], // populated by capability.ts
   };
 }
