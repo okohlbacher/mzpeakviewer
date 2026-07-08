@@ -394,6 +394,30 @@ function ChunkStructure({ footer, numSpectra }: { footer: ParquetFooter; numSpec
     (maxB > MONOLITHIC_BYTES && maxB > 4 * Math.max(1, medB));
   const pageIdx = footer.hasPageIndex;
 
+  // m/z-chunk detail — only for a facet that actually stores chunked m/z (mz_chunk_start /
+  // mz_chunk_end per chunk; the standard chunked spectra layout and ims-compact Layout B).
+  // Footer-only, so `pts/chunk` is an exact average and the m/z range is exact; the per-chunk
+  // WIDTH can't be read per-row from the footer, so it's an estimate (m/z span ÷ chunks/spectrum).
+  const chunkStart = footer.columns.find((c) => c.name.includes("chunk_start"));
+  const chunkEnd = footer.columns.find((c) => c.name.includes("chunk_end"));
+  const chunked = !!(chunkStart && chunkEnd) && footer.numRows > 0;
+  const mzLo = chunkStart?.min != null ? Number(chunkStart.min) : NaN;
+  const mzHi = chunkEnd?.max != null ? Number(chunkEnd.max) : NaN;
+  // Total points = a per-point VALUE leaf (the chunk's m/z or intensity list), identified by a
+  // floating physical type whose value count exceeds the chunk (row) count. Robust to the leaf
+  // being named `item` and to missing min/max stats; the scalar chunk_start/chunk_end columns are
+  // excluded by the >numRows test, and byte/encoding leaves (numpress bytes, chunk_encoding) by type.
+  const valueLeaf = chunked
+    ? footer.columns.find(
+        (c) => c !== chunkStart && c !== chunkEnd && /DOUBLE|FLOAT/i.test(c.type || "") && (c.numValues ?? 0) > footer.numRows,
+      )
+    : undefined;
+  const ptsPerChunk = valueLeaf?.numValues != null ? valueLeaf.numValues / footer.numRows : null;
+  const widthEst =
+    chunked && chunksPerSpec && Number.isFinite(mzLo) && Number.isFinite(mzHi)
+      ? (mzHi - mzLo) / chunksPerSpec
+      : null;
+
   return (
     <div data-testid="structure-rowgroups" style={{ margin: "0 0 0.75rem", fontSize: "var(--text-sm, 0.8rem)", color: "var(--text-muted, #6b757e)" }}>
       <span style={{ fontFamily: "var(--font-mono, monospace)" }}>
@@ -407,6 +431,14 @@ function ChunkStructure({ footer, numSpectra }: { footer: ParquetFooter; numSpec
         </strong>
         {chunksPerSpec != null ? ` · ${chunksPerSpec.toFixed(1)} chunks/spectrum` : ""}
       </span>
+      {chunked && (
+        <span data-testid="structure-mz-chunks" style={{ fontFamily: "var(--font-mono, monospace)", display: "block", marginTop: "0.15rem" }}>
+          m/z-chunks: <strong>{footer.numRows.toLocaleString()}</strong>
+          {ptsPerChunk != null ? ` · ~${ptsPerChunk.toFixed(ptsPerChunk < 10 ? 1 : 0)} pts/chunk` : ""}
+          {widthEst != null ? ` · ~${widthEst.toFixed(widthEst < 10 ? 2 : 1)} Th/chunk (est)` : ""}
+          {Number.isFinite(mzLo) && Number.isFinite(mzHi) ? ` · m/z ${mzLo.toFixed(0)}–${mzHi.toFixed(0)}` : ""}
+        </span>
+      )}
       {monolithic && (
         <div
           data-testid="structure-monolithic-warning"
