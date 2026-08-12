@@ -39,8 +39,13 @@ import {
 } from "../reader/stats";
 import type { ImagingGrid } from "../reader/imagingTypes";
 
-// MS:1000285 = total ion current (promoted column name in the spectrum meta bag).
+// MS:1000285 = total ion current. The column name differs by writer layout: the nested
+// (legacy) layout promotes it as an accession-prefixed name; the flat (metadata-refactor)
+// layout uses the plain CV term. Try both so the vectorized TIC read works on every file —
+// otherwise imaging open falls back to a per-pixel record read that never finishes on a
+// large grid (a 34,840-pixel file took 370s → past the viewer's timeout).
 const TIC_COL = "MS_1000285_total_ion_current_unit_MS_1000131";
+const TIC_COLS = [TIC_COL, "total_ion_current"];
 
 /** What the engine `open` returns. The live reader stays in-process. */
 export type EngineFile = {
@@ -98,7 +103,11 @@ function readAllTics(reader: Reader): Float64Array | null {
     | undefined;
   const spectra = sm?.spectra;
   if (!spectra || typeof spectra.getChild !== "function") return null;
-  const ticCol = spectra.getChild(TIC_COL);
+  let ticCol = null;
+  for (const name of TIC_COLS) {
+    ticCol = spectra.getChild(name);
+    if (ticCol) break;
+  }
   if (!ticCol) return null;
   const n = sm?.length ?? spectra.length ?? 0;
   const tics = new Float64Array(n);
@@ -122,8 +131,12 @@ function readSpectrumTic(reader: Reader, index: number): number {
   if (!sm) return NaN;
   try {
     const rec = sm.get(index);
-    const meta = (rec.meta ?? {}) as Record<string, unknown>;
-    const v = meta[TIC_COL];
+    const meta = ((rec as { meta?: Record<string, unknown> }).meta ?? {}) as Record<string, unknown>;
+    let v: unknown;
+    for (const name of TIC_COLS) {
+      v = meta[name];
+      if (v != null) break;
+    }
     return typeof v === "number" && Number.isFinite(v) ? v : NaN;
   } catch {
     return NaN;

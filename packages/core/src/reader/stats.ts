@@ -20,8 +20,13 @@ import type {
 
 // IMS:1000050 = position x; IMS:1000051 = position y (imaging-mzpeak-spec v0.3).
 // Promoted column names in the scan table (authoritative path).
-const IMS_POS_X_COL = "IMS_1000050_position_x";
-const IMS_POS_Y_COL = "IMS_1000051_position_y";
+// Nested (legacy) and flat (`opt_`-prefixed, metadata-refactor) promoted-column names.
+const IMS_POS_COLS = [
+  "IMS_1000050_position_x",
+  "IMS_1000051_position_y",
+  "opt_IMS_1000050_position_x",
+  "opt_IMS_1000051_position_y",
+];
 // Accession strings (for fallback CV-param probing).
 const IMS_POS_X_ACC = "IMS:1000050";
 const IMS_POS_Y_ACC = "IMS:1000051";
@@ -220,10 +225,9 @@ export function probeIsImaging(reader: Reader): boolean {
     // Check promoted columns in the scan records' meta bag.
     if (rec.scans && rec.scans.length > 0) {
       for (const scan of rec.scans) {
-        const scanMeta = scan.meta ?? {};
+        const scanMeta = (scan as { meta?: Record<string, unknown> }).meta ?? {};
         if (
-          metaValue(scanMeta, IMS_POS_X_COL) !== undefined ||
-          metaValue(scanMeta, IMS_POS_Y_COL) !== undefined
+          IMS_POS_COLS.some((n) => metaValue(scanMeta, n) !== undefined)
         ) {
           return true;
         }
@@ -271,11 +275,10 @@ export function probeImagingSignals(reader: Reader): ImagingSignalName[] {
       const rec = safeRecord(sm, i);
       if (!rec || !rec.scans || rec.scans.length === 0) continue;
       for (const scan of rec.scans) {
-        const scanMeta = scan.meta ?? {};
+        const scanMeta = (scan as { meta?: Record<string, unknown> }).meta ?? {};
         // Source 1: promoted IMS position columns on scans.
         if (
-          metaValue(scanMeta, IMS_POS_X_COL) !== undefined ||
-          metaValue(scanMeta, IMS_POS_Y_COL) !== undefined
+          IMS_POS_COLS.some((n) => metaValue(scanMeta, n) !== undefined)
         ) {
           signals.add("ims-columns");
         }

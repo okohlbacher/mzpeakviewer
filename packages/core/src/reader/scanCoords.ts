@@ -12,9 +12,13 @@ import type { Reader } from "./openUrl";
 // ── CV accession constants ────────────────────────────────────────────────────
 
 // IMS:1000050 = position x; IMS:1000051 = position y (imaging-mzpeak-spec v0.3).
-// Promoted column names in the scan table (authoritative path).
-const IMS_POS_X_COL = "IMS_1000050_position_x";
-const IMS_POS_Y_COL = "IMS_1000051_position_y";
+// Promoted column names in the scan table (authoritative path). The name differs by writer
+// layout: the nested (legacy) layout uses the bare accession name; the flat (metadata-refactor)
+// layout prefixes optional columns with `opt_`. Try both — otherwise the fast vectorized read
+// misses and coordinate extraction falls back to a per-scan CV-param/id parse that is
+// O(pixel-count) with a huge constant (a 34,840-pixel file took 377s → past the viewer timeout).
+const IMS_POS_X_COLS = ["IMS_1000050_position_x", "opt_IMS_1000050_position_x"];
+const IMS_POS_Y_COLS = ["IMS_1000051_position_y", "opt_IMS_1000051_position_y"];
 // Accession strings (for fallback CV-param probing).
 const IMS_POS_X_ACC = "IMS:1000050";
 const IMS_POS_Y_ACC = "IMS:1000051";
@@ -100,8 +104,15 @@ function fromPromotedColumns(reader: Reader): CoordResult | null {
   const scans = getScans(reader);
   if (!scans) return null;
 
-  const xCol = scans.getChild(IMS_POS_X_COL);
-  const yCol = scans.getChild(IMS_POS_Y_COL);
+  const getFirst = (names: string[]) => {
+    for (const n of names) {
+      const c = scans.getChild(n);
+      if (c) return c;
+    }
+    return null;
+  };
+  const xCol = getFirst(IMS_POS_X_COLS);
+  const yCol = getFirst(IMS_POS_Y_COLS);
   if (!xCol || !yCol) return null;
 
   // source_index maps each scan row to its spectrum.index (the join key).

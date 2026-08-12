@@ -89,8 +89,10 @@ export function spectrumMeta(reader: Reader, index: number): SpectrumMeta {
   const sm = reader.spectrumMetadata;
   if (!sm) throw new Error("Reader has no spectrum metadata");
   const rec = sm.get(index);
-  // Spectrum.meta holds the raw promoted columns by accession-derived name.
-  const rawMeta = (rec.meta ?? {}) as Record<string, unknown>;
+  // Spectrum.meta holds the raw promoted columns by accession-derived name (nested/legacy
+  // reader). The flat reader exposes typed fields instead — meta is absent there, and the
+  // callers below fall back to rec.isProfile etc.
+  const rawMeta = ((rec as { meta?: Record<string, unknown> }).meta ?? {}) as Record<string, unknown>;
   const reprRaw =
     rawMeta[REPR_ACCESSION] ?? (rec.isProfile ? REPR_PROFILE : undefined);
   const msLevelRaw = rawMeta[MS_LEVEL_ACCESSION];
