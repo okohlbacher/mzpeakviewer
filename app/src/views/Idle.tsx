@@ -38,26 +38,20 @@ const DEMOS: Demo[] = [
     kind: "imaging",
     url: `${CDN}/imzml-examples/PXD001283-HR2MSI-urinary-bladder/HR2MSImouseurinarybladderS096.mzpeak`,
     download: "HR2MSI-mouse-urinary-bladder.mzpeak",
-    stats: ["~310 MB", "260 × 134 px", "optical"],
+    stats: ["~175 MB", "260 × 134 px", "optical"],
   },
   {
     id: "tmt",
     label: "TMT Example (10-plex)",
     desc: "PXD011799 TMT 10-plex fraction; SDRF channel/sample model",
     kind: "sdrf",
-    url: `${CDN}/sdrf-examples/PXD011799/mzml/20170131_Lumos_RSLC4_Maurer_Hartl_UW_MFPL_Global_TMT_fr1_MS2.mzpeak`,
-    download: "PXD011799-TMT10plex-fr1.mzpeak",
-    stats: ["~394 MB", "TMT 10-plex", "SDRF"],
+    url: `${CDN}/sdrf-examples/PXD011799/mzml/20170131_Lumos_RSLC4_Maurer_Hartl_UW_MFPL_TiO2_TMT_fr9.mzpeak`,
+    download: "PXD011799-TMT10plex-fr9.mzpeak",
+    stats: ["~87 MB", "TMT 10-plex", "SDRF"],
   },
-  {
-    id: "uv-pda",
-    label: "UV/VIS PDA - Waters LC-PDA",
-    desc: "Waters PDA/DAD run with both MS and UV/VIS spectra — shows the MS · UV/VIS subtabs",
-    kind: "uv",
-    url: `${CDN}/general-ms/waters-pda-uv/QC_LCMS2-2_23_268-1-1.mzpeak`,
-    download: "waters-pda-uv-QC_LCMS2.mzpeak",
-    stats: ["~150 KB", "PDA 210–400 nm", "MS + UV/VIS"],
-  },
+  // NOTE: the UV/VIS demo (Waters PDA, general-ms/waters-pda-uv/…) was dropped 2026-08-12 —
+  // the corpus reorg removed that dataset and no working UV/PDA replacement exists yet.
+  // Restore a UV demo here once a UV/PDA .mzpeak that renders the UV/VIS tab is back in the corpus.
 ];
 
 const KIND_COLOR: Record<Demo["kind"], string> = {
