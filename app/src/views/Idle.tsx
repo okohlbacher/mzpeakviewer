@@ -49,9 +49,15 @@ const DEMOS: Demo[] = [
     download: "PXD011799-TMT10plex-fr9.mzpeak",
     stats: ["~87 MB", "TMT 10-plex", "SDRF"],
   },
-  // NOTE: the UV/VIS demo (Waters PDA, general-ms/waters-pda-uv/…) was dropped 2026-08-12 —
-  // the corpus reorg removed that dataset and no working UV/PDA replacement exists yet.
-  // Restore a UV demo here once a UV/PDA .mzpeak that renders the UV/VIS tab is back in the corpus.
+  {
+    id: "uv-pda",
+    label: "UV/VIS PDA - Waters LC-PDA",
+    desc: "Waters PDA/DAD run with both MS and UV/VIS spectra — shows the MS · UV/VIS subtabs",
+    kind: "uv",
+    url: `${CDN}/general-ms/waters-pda-uv/QC_LCMS2-2_23_268-1-1.mzpeak`,
+    download: "waters-pda-uv-QC_LCMS2.mzpeak",
+    stats: ["~210 KB", "PDA 210–400 nm", "MS + UV/VIS"],
+  },
 ];
 
 const KIND_COLOR: Record<Demo["kind"], string> = {
