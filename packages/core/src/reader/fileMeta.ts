@@ -4,6 +4,7 @@
 // Imports only the opaque `Reader` handle from openUrl.ts — never `mzpeakts`
 // directly.
 import type { Reader } from "./openUrl";
+import { getCol } from "./explorer/cv";
 import type {
   FileMeta,
   ManifestEntry,
@@ -81,6 +82,20 @@ function toRepresentation(raw: unknown): SpectrumRepresentation {
 }
 
 /**
+ * Read the promoted spectrum_representation column value (its MS:1000127/MS:1000128 CURIE)
+ * for `index`, resolving the nested OR flat column name. This is the authoritative
+ * representation source. The flat (metadata-refactor) reader leaves rec.meta empty and maps
+ * rec.isProfile=false to "undefined" (→ representation null), so a centroid spectrum lost its
+ * "centroid" label and rendered as a connected profile LINE instead of sticks. Reading the
+ * column restores it. Returns undefined when the column is absent (caller falls back).
+ */
+function representationCurie(sm: unknown, index: number): unknown {
+  const spectra = (sm as { spectra?: unknown } | null | undefined)?.spectra;
+  const col = getCol<{ get(i: number): unknown }>(spectra as never, "representation");
+  return col?.get(index) ?? undefined;
+}
+
+/**
  * Per-spectrum metadata accessor: exposes `representation` as a typed field so
  * signal-file routing builds on the boundary. Reads the promoted MS:1000525
  * column from the spectrum record.
@@ -94,7 +109,9 @@ export function spectrumMeta(reader: Reader, index: number): SpectrumMeta {
   // callers below fall back to rec.isProfile etc.
   const rawMeta = ((rec as { meta?: Record<string, unknown> }).meta ?? {}) as Record<string, unknown>;
   const reprRaw =
-    rawMeta[REPR_ACCESSION] ?? (rec.isProfile ? REPR_PROFILE : undefined);
+    rawMeta[REPR_ACCESSION] ??
+    representationCurie(sm, index) ??
+    (rec.isProfile ? REPR_PROFILE : undefined);
   const msLevelRaw = rawMeta[MS_LEVEL_ACCESSION];
   return {
     index,
@@ -120,7 +137,10 @@ export function spectrumMetaTree(reader: Reader, index: number): unknown {
     precursors?: unknown; meta?: unknown; isProfile?: boolean;
   };
   const rawMeta = (rec.meta ?? {}) as Record<string, unknown>;
-  const reprRaw = rawMeta[REPR_ACCESSION] ?? (rec.isProfile ? REPR_PROFILE : undefined);
+  const reprRaw =
+    rawMeta[REPR_ACCESSION] ??
+    representationCurie(sm, index) ??
+    (rec.isProfile ? REPR_PROFILE : undefined);
   const msLevelRaw = rawMeta[MS_LEVEL_ACCESSION];
   return plainify({
     index,
