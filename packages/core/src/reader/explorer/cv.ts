@@ -17,6 +17,31 @@ export const COL = {
   mzHigh: "MS_1000527_highest_observed_mz_unit_MS_1000040",
 } as const;
 
+// The flat (metadata-refactor) layout promotes these columns under PLAIN names — no nested
+// accession prefix. The VALUES are identical (e.g. spectrum_representation still holds
+// "MS:1000127"), only the column name differs. Resolve either spelling so the summary scan —
+// which fills stats.msLevels (the MS-level filter), m/z range, TIC detection, representation
+// counts — works on both layouts. Without this, flat files read every column as absent:
+// msLevel becomes -1, the MS1/MS2 selector disappears, and m/z range shows "—".
+export const COL_FLAT = {
+  msLevel: "ms_level",
+  representation: "spectrum_representation",
+  time: "time",
+  id: "id",
+  tic: "total_ion_current",
+  mzLow: "lowest_observed_mz",
+  mzHigh: "highest_observed_mz",
+} as const;
+
+/** Resolve a promoted column by its nested name, falling back to the flat name. */
+export function getCol<T>(
+  vec: { getChild?: (n: string) => T | null } | null | undefined,
+  key: keyof typeof COL,
+): T | null {
+  if (!vec?.getChild) return null;
+  return vec.getChild(COL[key]) ?? vec.getChild(COL_FLAT[key]) ?? null;
+}
+
 /** Map a raw MS:1000525 value to the UI representation enum. */
 export function toRepresentation(raw: unknown): Representation {
   if (raw === REPR_PROFILE) return "profile";

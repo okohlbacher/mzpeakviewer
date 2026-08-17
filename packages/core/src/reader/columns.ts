@@ -3,7 +3,7 @@
 // The MS-level column ("MS_1000511_ms_level", canonicalized as COL.msLevel) was read by a
 // byte-identical helper in BOTH engine/open.ts (readAllMsLevels) and engine/imaging.ts
 // (readMsLevels). Centralized here so there is one reader and one column literal (COL).
-import { COL } from "./explorer/cv";
+import { getCol } from "./explorer/cv";
 import type { Reader } from "./openUrl";
 
 /**
@@ -20,7 +20,7 @@ export function readMsLevels(reader: Reader): Int16Array | null {
   }).spectrumMetadata;
   const spectra = sm?.spectra;
   if (!spectra || typeof spectra.getChild !== "function") return null;
-  const col = spectra.getChild(COL.msLevel);
+  const col = getCol<{ get(i: number): unknown }>(spectra, "msLevel");
   if (!col) return null;
   const n = sm?.length ?? 0;
   const levels = new Int16Array(n);

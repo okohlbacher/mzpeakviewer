@@ -5,7 +5,7 @@
 // The imaging discovery block and storage-layout/encoding detection are not part
 // of this FileStats path and are intentionally omitted here.
 import type { Reader } from "./open";
-import { COL, numOrNull, toRepresentation } from "./cv";
+import { getCol, numOrNull, toRepresentation } from "./cv";
 import type { FileSummary, ManifestEntry, SpectrumIndexRow } from "./types";
 
 /** Minimal shape of an Apache Arrow child vector (one column). */
@@ -129,14 +129,15 @@ async function scanByColumns(
   n: number,
   onProgress?: (done: number, total: number) => void,
 ): Promise<ScanResult> {
-  const get = (name: string): ArrowCol => vec.getChild!(name);
-  const msLevelCol = get(COL.msLevel);
-  const reprCol = get(COL.representation);
-  const timeCol = get(COL.time);
-  const idCol = get(COL.id);
-  const ticCol = get(COL.tic);
-  const mzLoCol = get(COL.mzLow);
-  const mzHiCol = get(COL.mzHigh);
+  // Resolve each promoted column by its nested OR flat name (getCol) — the flat
+  // (metadata-refactor) layout drops the accession prefix (ms_level, total_ion_current, …).
+  const msLevelCol = getCol<ArrowCol>(vec, "msLevel");
+  const reprCol = getCol<ArrowCol>(vec, "representation");
+  const timeCol = getCol<ArrowCol>(vec, "time");
+  const idCol = getCol<ArrowCol>(vec, "id");
+  const ticCol = getCol<ArrowCol>(vec, "tic");
+  const mzLoCol = getCol<ArrowCol>(vec, "mzLow");
+  const mzHiCol = getCol<ArrowCol>(vec, "mzHigh");
 
   const rows: SpectrumIndexRow[] = new Array(n);
   const msLevelCounts: Record<number, number> = {};
