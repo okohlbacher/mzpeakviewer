@@ -1,10 +1,13 @@
 // Engine: resolve isobaric (TMT/iTRAQ) channel assignments for the open run from the
 // mzpeak index `metadata` block. Projects sample_list ⋈ run_sample_binding, joined on
 // the MS:1002602 "sample label" parameter, plus the reagents reporter-ion table.
-// Projection path only (the producer-encoded channels); there is no SDRF/ISA-blob
-// fallback yet — label-free files just return no channels.
+// When the projection is empty but the archive embeds an SDRF TSV
+// (metadata.sample_metadata.member — `mzpeak-convert --sdrf` ≤0.7.7 embeds without
+// projecting), the channels are derived from the TSV's comment[label] column instead
+// (sdrfChannelsFallback below). Label-free files return no channels either way.
 import type { Reader } from "../reader/openUrl";
 import { plainify } from "../reader/fileMeta";
+import { engineArchiveMemberBytes } from "./structure";
 import type { StudyMeta, ChannelAssignment } from "@mzpeak/contracts";
 
 // ── Reagent reporter-ion m/z table (shipped constants; the file supplies only the
@@ -107,13 +110,113 @@ export async function engineStudyMeta(reader: Reader): Promise<StudyMeta> {
   // can be fetched on demand in the Study panel.
   const sampleMetadata = obj(meta.sample_metadata);
   const sdrfMember = str(sampleMetadata?.member);
+
+  // SDRF fallback: current converters (`mzpeak-convert --sdrf` ≤0.7.7) embed the SDRF TSV
+  // and back-references but do NOT project its rows into sample_list — so isobaric runs
+  // would show no channels. When the projection is empty but an SDRF member is embedded,
+  // derive the channels from the TSV itself: rows whose comment[data file] names this run
+  // (metadata.run.id, XML-id escapes decoded), their comment[label] resolved through the
+  // reagent table. The projection path stays authoritative when present.
+  let effectiveChannels = channels;
+  if (channels.length === 0 && sdrfMember) {
+    effectiveChannels = await sdrfChannelsFallback(reader, sdrfMember, str(obj(meta.run)?.id));
+  }
+
   return {
-    present: channels.length > 0,
-    channels,
+    present: effectiveChannels.length > 0,
+    channels: effectiveChannels,
     sdrf: null,
     isa: null,
     study: meta.study != null ? (plainify(study) as unknown) : null,
     samples: sampleList.length ? (plainify(sampleList) as unknown[]) : undefined,
     sdrfMember,
   };
+}
+
+// ── SDRF-member channel fallback ──────────────────────────────────────────────
+
+/** Cap for reading the embedded SDRF (they are small TSVs; PXD011799's is ~400 KB). */
+const SDRF_FALLBACK_MAX_BYTES = 8 * 1024 * 1024;
+
+/** Decode mzML XML-id escapes (`_x0032_` → "2") — run ids starting with a digit are escaped. */
+function decodeXmlId(s: string): string {
+  return s.replace(/_x([0-9a-fA-F]{4})_/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)));
+}
+
+/** Canonical run key: basename, XML-id decoded, common MS extensions stripped, lowercased. */
+function runKey(s: string): string {
+  const base = s.split(/[\\/]/).pop() ?? s;
+  return decodeXmlId(base)
+    .replace(/\.(raw|d|wiff2?|mzml|mzxml|mzpeak)(\.gz)?$/i, "")
+    .toLowerCase();
+}
+
+/** Decode member bytes to text, transparently gunzipping (`.sdrf.tsv.gz` members). */
+async function memberText(buf: ArrayBuffer): Promise<string> {
+  const u8 = new Uint8Array(buf);
+  if (u8.length > 2 && u8[0] === 0x1f && u8[1] === 0x8b && typeof DecompressionStream !== "undefined") {
+    const ds = new DecompressionStream("gzip");
+    return await new Response(new Blob([u8]).stream().pipeThrough(ds)).text();
+  }
+  return new TextDecoder().decode(u8);
+}
+
+/**
+ * Derive per-run isobaric channels from the embedded SDRF TSV: rows whose
+ * `comment[data file]` matches `runId` (all rows when the run id is unknown or nothing
+ * matches — fractions of a plex share one label set), `comment[label]` values resolved
+ * through the reagent table (label-free/SILAC rows resolve to null and are skipped).
+ * Deduplicated by label, sorted by reporter m/z. Never throws — a malformed/absent
+ * member degrades to no channels, exactly the pre-fallback behaviour.
+ */
+async function sdrfChannelsFallback(
+  reader: Reader,
+  member: string,
+  runId: string | null,
+): Promise<ChannelAssignment[]> {
+  try {
+    const { bytes, truncated } = await engineArchiveMemberBytes(reader, member, SDRF_FALLBACK_MAX_BYTES);
+    if (truncated) return [];
+    const text = await memberText(bytes);
+    const lines = text.split("\n").map((l) => l.replace(/\r$/, "")).filter((l) => l.length > 0);
+    if (lines.length < 2) return [];
+    const cols = lines[0]!.split("\t").map((c) => c.trim().toLowerCase());
+    const li = cols.indexOf("comment[label]");
+    const di = cols.indexOf("comment[data file]");
+    const si = cols.indexOf("source name");
+    if (li < 0) return []; // no label column → nothing isobaric to project
+    const want = runId ? runKey(runId) : null;
+
+    const collect = (matchRun: boolean): ChannelAssignment[] => {
+      const out: ChannelAssignment[] = [];
+      const seen = new Set<string>();
+      for (const line of lines.slice(1)) {
+        const f = line.split("\t");
+        if (matchRun && want != null && di >= 0 && runKey(f[di] ?? "") !== want) continue;
+        const label = (f[li] ?? "").trim();
+        const mz = reporterMzFor(label);
+        if (mz == null) continue; // not an isobaric label (label-free, SILAC, blank)
+        const key = label.toUpperCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({
+          channelLabel: label,
+          reporterMz: mz,
+          role: null,
+          sampleId: null,
+          sampleName: si >= 0 ? str(f[si]) : null,
+          boundToThisRun: true,
+        });
+      }
+      out.sort((a, b) => (a.reporterMz ?? 0) - (b.reporterMz ?? 0));
+      return out;
+    };
+
+    // Prefer the rows that name this run; fall back to the study-wide distinct label set
+    // (a fraction's data-file spelling may not match the run id exactly).
+    const matched = collect(true);
+    return matched.length > 0 ? matched : collect(false);
+  } catch {
+    return [];
+  }
 }

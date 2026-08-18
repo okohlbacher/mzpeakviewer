@@ -58,9 +58,74 @@ describe("engineStudyMeta — SDRF/TMT channel projection", () => {
     ]);
   });
 
-  it("returns no channels for an EMPTY sample_list (the 2026-08 corpus state)", async () => {
+  it("returns no channels for an EMPTY sample_list and no SDRF member", async () => {
     const s = await engineStudyMeta(fakeReader({ sample_list: [] }));
     expect(s.present).toBe(false);
     expect(s.channels).toHaveLength(0);
+  });
+});
+
+// ── SDRF-member fallback (converters ≤0.7.7 embed the TSV without projecting) ────
+
+/** Reader whose archive serves `sdrf.tsv` via store.open (the engineArchiveMemberBytes path). */
+function fakeSdrfReader(metadata: unknown, tsv: string): Reader {
+  const bytes = new TextEncoder().encode(tsv);
+  const blob = {
+    size: bytes.byteLength,
+    slice: (start: number, end: number) => ({
+      arrayBuffer: async () =>
+        bytes.slice(start, end).buffer as ArrayBuffer,
+    }),
+  };
+  return {
+    store: {
+      fileIndex: { metadata },
+      open: async (name: string) => (name === "sample_metadata/sdrf.tsv" ? blob : undefined),
+    },
+  } as unknown as Reader;
+}
+
+const SDRF_TSV = [
+  "source name\tcomment[data file]\tcomment[label]",
+  "sample A\t20170131_run_fr9.raw\tTMT126",
+  "sample B\t20170131_run_fr9.raw\tTMT127N",
+  "sample C\t20170131_run_fr8.raw\tTMT128C", // different fraction — excluded by run match
+  "sample D\t20170131_run_fr9.raw\tTMT126",  // duplicate label — deduped
+].join("\n");
+
+const META_WITH_SDRF = {
+  sample_list: [],
+  sample_metadata: { member: "sample_metadata/sdrf.tsv" },
+  // Leading digit XML-escaped, exactly as mzML-derived run ids are written.
+  run: { id: "_x0032_0170131_run_fr9" },
+};
+
+describe("engineStudyMeta — SDRF-member fallback", () => {
+  it("derives this run's channels from the embedded TSV (XML-id decode + data-file match + dedupe)", async () => {
+    const s = await engineStudyMeta(fakeSdrfReader(META_WITH_SDRF, SDRF_TSV));
+    expect(s.present).toBe(true);
+    expect(s.channels.map((c) => c.channelLabel)).toEqual(["TMT126", "TMT127N"]);
+    expect(s.channels[0]!.reporterMz).toBeCloseTo(126.127726, 5);
+    expect(s.channels.map((c) => c.sampleName)).toEqual(["sample A", "sample B"]);
+  });
+
+  it("falls back to the study-wide label set when no row names the run", async () => {
+    const meta = { ...META_WITH_SDRF, run: { id: "some_other_run" } };
+    const s = await engineStudyMeta(fakeSdrfReader(meta, SDRF_TSV));
+    expect(s.channels.map((c) => c.channelLabel)).toEqual(["TMT126", "TMT127N", "TMT128C"]);
+  });
+
+  it("yields no channels for a label-free SDRF", async () => {
+    const tsv = "source name\tcomment[data file]\tcomment[label]\ns1\trun.raw\tlabel free sample";
+    const s = await engineStudyMeta(fakeSdrfReader(META_WITH_SDRF, tsv));
+    expect(s.present).toBe(false);
+    expect(s.channels).toHaveLength(0);
+  });
+
+  it("projection stays authoritative: populated sample_list wins over the SDRF member", async () => {
+    const meta = { ...META_WITH_SDRF, sample_list: LABELED_SAMPLES };
+    const s = await engineStudyMeta(fakeSdrfReader(meta, SDRF_TSV));
+    // From sample_list (includes sample ids), not the TSV.
+    expect(s.channels.map((c) => c.sampleId)).toEqual(["s1", "s2"]);
   });
 });
