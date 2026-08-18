@@ -60,6 +60,8 @@ export type LabelScheme = {
 
 export type SdrfDesign = {
   columns: SdrfColumn[];
+  /** Column index of comment[data file] (the run-matching column), or null. */
+  dataFileColumnIndex: number | null;
   /** Raw rows, bounded to MAX_MODEL_ROWS (order preserved; cells NOT normalized). */
   rows: string[][];
   counts: { rows: number; sources: number; assays: number; dataFiles: number };
@@ -280,10 +282,14 @@ export function buildSdrfDesign(
   }
 
   // Factors.
-  const factors: SdrfFactor[] = colsBy("factor").map((c) => {
-    const { levels, total } = levelCounts(rows.map((r) => cell(r, c)));
-    return { name: c.key, columnIndex: c.index, levels: levels.slice(0, MAX_FACTOR_LEVELS), totalLevels: total };
-  });
+  const factors: SdrfFactor[] = colsBy("factor")
+    .map((c) => {
+      const { levels, total } = levelCounts(rows.map((r) => cell(r, c)));
+      return { name: c.key, columnIndex: c.index, levels: levels.slice(0, MAX_FACTOR_LEVELS), totalLevels: total };
+    })
+    // A factor whose column holds only sentinels/empties carries no design information —
+    // rendering it as a bare name confuses more than it informs (seen: MTBLS1129 "gene").
+    .filter((f) => f.totalLevels > 0);
 
   // Label scheme: this run's rows when matched, else study-wide (labeled as such).
   const labelValues = (idxs: number[] | null) => {
@@ -323,7 +329,30 @@ export function buildSdrfDesign(
     return [{ label, values: [...vals.values()].slice(0, 12) }];
   });
 
-  return { columns, rows, counts, runRowIndices, factors, scheme, highlights, protocol, warnings };
+  return {
+    columns,
+    dataFileColumnIndex: dataFileCol ? dataFileCol.index : null,
+    rows,
+    counts,
+    runRowIndices,
+    factors,
+    scheme,
+    highlights,
+    protocol,
+    warnings,
+  };
+}
+
+/** SDRF structured values are ;-separated KEY=value lists (NT=name, AC=accession, …).
+ *  For display, prefer the NT= (name) part; fall back to the raw string. Pure text — the
+ *  raw value stays available in the table. */
+export function sdrfValueName(v: string): string {
+  // Cells are sometimes shipped quoted ("NT=…;AC=…") — strip wrapping quotes first.
+  const unq = v.trim().replace(/^"(.*)"$/s, "$1").trim();
+  if (!unq.includes("=")) return unq;
+  const nt = unq.split(";").map((p) => p.trim()).find((p) => /^NT=/i.test(p));
+  if (nt) return nt.slice(3).trim() || unq;
+  return unq;
 }
 
 /** Visible columns for the table's "compact" mode: varying columns + the always-keep

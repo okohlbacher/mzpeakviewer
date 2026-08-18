@@ -17,7 +17,7 @@ import { engine } from "../engine";
 import { useStore, showStudy } from "../store";
 import { parseSdrf } from "../sdrf";
 import { gunzipBytes } from "../gunzip";
-import { buildSdrfDesign, compactColumns, type SdrfDesign } from "../sdrfDesign";
+import { buildSdrfDesign, compactColumns, sdrfValueName, type SdrfDesign } from "../sdrfDesign";
 import { Button } from "@mzpeak/ui-kit";
 
 const SDRF_MAX_BYTES = 8 * 1024 * 1024;
@@ -172,7 +172,7 @@ export function StudyDesign() {
             value={design.scheme.label}
             accent={design.scheme.kind !== "none"}
           />
-          <Card label="this run" value={design.runRowIndices.length > 0 ? `${design.runRowIndices.length} rows` : "not matched"} />
+          <Card label="this run" value={design.runRowIndices.length > 0 ? `${design.runRowIndices.length} row${design.runRowIndices.length === 1 ? "" : "s"}` : "not matched"} />
         </div>
       )}
 
@@ -330,7 +330,7 @@ function ProtocolRow({ label, values }: { label: string; values: string[] }) {
   return (
     <>
       <dt style={{ color: "var(--text-muted)" }}>{label}</dt>
-      <dd style={{ margin: 0, color: "var(--text-secondary)" }}>{values.join(" · ")}</dd>
+      <dd style={{ margin: 0, color: "var(--text-secondary)" }}>{values.map(sdrfValueName).join(" · ")}</dd>
     </>
   );
 }
@@ -418,6 +418,14 @@ function SampleTable({
                   {visibleCols.map((c) => (
                     <td key={c.index} style={{ ...tdStyle, ...(isRun ? { background: "var(--blue-50, #eef2ff)" } : {}) }}>
                       {row[c.index] ?? ""}
+                      {isRun && c.index === design.dataFileColumnIndex && (
+                        <span
+                          data-testid="study-this-file-pill"
+                          style={{ marginLeft: "0.4rem", border: "1px solid var(--blue-600, #3b54da)", color: "var(--blue-600, #3b54da)", borderRadius: 999, padding: "0 0.4rem", fontSize: "0.85em", fontFamily: "var(--font-sans)", whiteSpace: "nowrap" }}
+                        >
+                          this file
+                        </span>
+                      )}
                     </td>
                   ))}
                 </tr>
