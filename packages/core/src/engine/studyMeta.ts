@@ -9,35 +9,7 @@ import type { Reader } from "../reader/openUrl";
 import { plainify } from "../reader/fileMeta";
 import { engineArchiveMemberBytes } from "./structure";
 import type { StudyMeta, ChannelAssignment } from "@mzpeak/contracts";
-
-// ── Reagent reporter-ion m/z table (shipped constants; the file supplies only the
-//    label STRING, which we look up here). TMT 0/2/6/10/11 + TMTpro 16/18 + iTRAQ. ──
-const REPORTER_MZ: Record<string, number> = {
-  TMT126: 126.127726,
-  TMT127N: 127.124761, TMT127C: 127.131081,
-  TMT128N: 128.128116, TMT128C: 128.134436,
-  TMT129N: 129.131471, TMT129C: 129.13779,
-  TMT130N: 130.134825, TMT130C: 130.141145,
-  TMT131: 131.13818, TMT131N: 131.13818, TMT131C: 131.1445,
-  TMTPRO126: 126.127726,
-  TMTPRO127N: 127.124761, TMTPRO127C: 127.131081,
-  TMTPRO128N: 128.128116, TMTPRO128C: 128.134436,
-  TMTPRO129N: 129.131471, TMTPRO129C: 129.13779,
-  TMTPRO130N: 130.134825, TMTPRO130C: 130.141145,
-  TMTPRO131N: 131.13818, TMTPRO131C: 131.1445,
-  TMTPRO132N: 132.141535, TMTPRO132C: 132.147855,
-  TMTPRO133N: 133.14489, TMTPRO133C: 133.15121,
-  TMTPRO134N: 134.148245, TMTPRO134C: 134.154565,
-  TMTPRO135N: 135.1516,
-  ITRAQ113: 113.10788, ITRAQ114: 114.11123, ITRAQ115: 115.10826,
-  ITRAQ116: 116.11162, ITRAQ117: 117.11497, ITRAQ118: 118.11201,
-  ITRAQ119: 119.1153, ITRAQ121: 121.122,
-};
-function reporterMzFor(label: string | null): number | null {
-  if (!label) return null;
-  const v = REPORTER_MZ[label.trim().toUpperCase().replace(/[\s_-]+/g, "")];
-  return typeof v === "number" ? v : null;
-}
+import { reporterMzFor, sdrfRunKey } from "../adapt/sdrf";
 
 // ── small coercion helpers ─────────────────────────────────────────────────────
 function obj(v: unknown): Record<string, unknown> | null {
@@ -117,9 +89,13 @@ export async function engineStudyMeta(reader: Reader): Promise<StudyMeta> {
   // derive the channels from the TSV itself: rows whose comment[data file] names this run
   // (metadata.run.id, XML-id escapes decoded), their comment[label] resolved through the
   // reagent table. The projection path stays authoritative when present.
+  const runId = str(obj(meta.run)?.id);
   let effectiveChannels = channels;
+  let channelsSource: StudyMeta["channelsSource"] = channels.length > 0 ? "projected" : "none";
   if (channels.length === 0 && sdrfMember) {
-    effectiveChannels = await sdrfChannelsFallback(reader, sdrfMember, str(obj(meta.run)?.id));
+    const fb = await sdrfChannelsFallback(reader, sdrfMember, runId);
+    effectiveChannels = fb.channels;
+    if (fb.channels.length > 0) channelsSource = fb.matchedRun ? "sdrf-run" : "sdrf-study";
   }
 
   return {
@@ -130,6 +106,16 @@ export async function engineStudyMeta(reader: Reader): Promise<StudyMeta> {
     study: meta.study != null ? (plainify(study) as unknown) : null,
     samples: sampleList.length ? (plainify(sampleList) as unknown[]) : undefined,
     sdrfMember,
+    sdrfMeta: sampleMetadata
+      ? {
+          datasetAccession: str(sampleMetadata.dataset_accession),
+          sha256: str(sampleMetadata.sha256),
+          embedScope: str(sampleMetadata.embed_scope),
+          precedence: str(sampleMetadata.precedence),
+        }
+      : null,
+    channelsSource,
+    runId,
   };
 }
 
@@ -137,19 +123,6 @@ export async function engineStudyMeta(reader: Reader): Promise<StudyMeta> {
 
 /** Cap for reading the embedded SDRF (they are small TSVs; PXD011799's is ~400 KB). */
 const SDRF_FALLBACK_MAX_BYTES = 8 * 1024 * 1024;
-
-/** Decode mzML XML-id escapes (`_x0032_` → "2") — run ids starting with a digit are escaped. */
-function decodeXmlId(s: string): string {
-  return s.replace(/_x([0-9a-fA-F]{4})_/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)));
-}
-
-/** Canonical run key: basename, XML-id decoded, common MS extensions stripped, lowercased. */
-function runKey(s: string): string {
-  const base = s.split(/[\\/]/).pop() ?? s;
-  return decodeXmlId(base)
-    .replace(/\.(raw|d|wiff2?|mzml|mzxml|mzpeak)(\.gz)?$/i, "")
-    .toLowerCase();
-}
 
 /** Decode member bytes to text, transparently gunzipping (`.sdrf.tsv.gz` members). */
 async function memberText(buf: ArrayBuffer): Promise<string> {
@@ -173,26 +146,27 @@ async function sdrfChannelsFallback(
   reader: Reader,
   member: string,
   runId: string | null,
-): Promise<ChannelAssignment[]> {
+): Promise<{ channels: ChannelAssignment[]; matchedRun: boolean }> {
+  const NONE = { channels: [], matchedRun: false };
   try {
     const { bytes, truncated } = await engineArchiveMemberBytes(reader, member, SDRF_FALLBACK_MAX_BYTES);
-    if (truncated) return [];
+    if (truncated) return NONE;
     const text = await memberText(bytes);
     const lines = text.split("\n").map((l) => l.replace(/\r$/, "")).filter((l) => l.length > 0);
-    if (lines.length < 2) return [];
+    if (lines.length < 2) return NONE;
     const cols = lines[0]!.split("\t").map((c) => c.trim().toLowerCase());
     const li = cols.indexOf("comment[label]");
     const di = cols.indexOf("comment[data file]");
     const si = cols.indexOf("source name");
-    if (li < 0) return []; // no label column → nothing isobaric to project
-    const want = runId ? runKey(runId) : null;
+    if (li < 0) return NONE; // no label column → nothing isobaric to project
+    const want = runId ? sdrfRunKey(runId) : null;
 
     const collect = (matchRun: boolean): ChannelAssignment[] => {
       const out: ChannelAssignment[] = [];
       const seen = new Set<string>();
       for (const line of lines.slice(1)) {
         const f = line.split("\t");
-        if (matchRun && want != null && di >= 0 && runKey(f[di] ?? "") !== want) continue;
+        if (matchRun && want != null && di >= 0 && sdrfRunKey(f[di] ?? "") !== want) continue;
         const label = (f[li] ?? "").trim();
         const mz = reporterMzFor(label);
         if (mz == null) continue; // not an isobaric label (label-free, SILAC, blank)
@@ -213,10 +187,12 @@ async function sdrfChannelsFallback(
     };
 
     // Prefer the rows that name this run; fall back to the study-wide distinct label set
-    // (a fraction's data-file spelling may not match the run id exactly).
+    // (a fraction's data-file spelling may not match the run id exactly). The caller is
+    // told which case happened so the UI can label a study-wide set honestly.
     const matched = collect(true);
-    return matched.length > 0 ? matched : collect(false);
+    if (matched.length > 0) return { channels: matched, matchedRun: true };
+    return { channels: collect(false), matchedRun: false };
   } catch {
-    return [];
+    return NONE;
   }
 }

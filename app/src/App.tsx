@@ -20,9 +20,10 @@ import "@fontsource/ibm-plex-sans/500.css";
 import "@fontsource/ibm-plex-sans/600.css";
 import "@fontsource/ibm-plex-mono/400.css";
 
-import { useStore, showChromatograms, showWavelength, showMobility } from "./store";
+import { useStore, showChromatograms, showWavelength, showMobility, showStudy } from "./store";
 import type { View } from "@mzpeak/contracts";
 import { Summary } from "./views/Summary";
+import { StudyDesign } from "./views/StudyDesign";
 import { Spectra } from "./views/Spectra";
 import { Chromatograms } from "./views/Chromatograms";
 import { Wavelength } from "./views/Wavelength";
@@ -48,6 +49,7 @@ const NAV_ICON_PATHS: Record<View, string> = {
   chromatograms: "M3 17c3 0 3-8 6-8s3 6 6 6 3-4 6-4",
   wavelength: "M3 12c2.5-7 5-7 7.5 0s5 7 7.5 0",
   ims: "M4 20V6M9 20V10M14 20V4M19 20V12",
+  study: "M5 4h14v16H5zM8 9h8M8 13h8M8 17h5",
   metadata: "M4 5h16v6H4zM4 15h10",
   structure: "M4 6h16M4 12h16M4 18h16M9 4v16",
   overview: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
@@ -89,6 +91,7 @@ function Sidebar() {
 
   // Show chromatograms if the capability helper says so
   const showChrom = caps ? showChromatograms(caps) : false;
+  const showStudyTab = useStore(showStudy);
   // Show the UV/VIS (wavelength) entry only when the file carries wavelength spectra.
   const showWl = caps ? showWavelength(caps) : false;
   // Show the Ion-mobility (IMS) entry only when the file carries a per-peak mobility array.
@@ -103,6 +106,7 @@ function Sidebar() {
   if (showChrom) allTabs.push("chromatograms");
   if (showWl) allTabs.push("wavelength");
   if (showIms) allTabs.push("ims");
+  if (showStudyTab) allTabs.push("study");
   // MSI accordion items FIRST (only when imaging AND open) — Advanced is always last.
   // Optical/Overlay only appear when the file actually carries an optical image.
   if (isImaging && expanded.imaging) {
@@ -339,6 +343,13 @@ function Sidebar() {
             a per-peak ion-mobility array (a renderable m/z × 1/K0 frame). */}
         {showIms && (
           <TabButton id="ims" label="Ion mobility" data-testid="nav-tab-ims" />
+        )}
+
+        {/* Study design — shown when the file carries study metadata (embedded SDRF /
+            channels / sample list). ONE selector (showStudy) gates this tab, the Summary
+            CTA and the view's empty state, so they can never disagree. */}
+        {showStudyTab && (
+          <TabButton id="study" label="Study design" data-testid="nav-tab-study" />
         )}
 
         {/* MSI accordion — only when isImaging. Rendered BEFORE Advanced so Advanced is always
@@ -667,6 +678,7 @@ const VIEW_META: Record<View, { title: string; subtitle: string }> = {
   chromatograms: { title: "Chromatograms", subtitle: "Total-ion / extracted chromatograms over time" },
   wavelength: { title: "UV/VIS", subtitle: "Wavelength (PDA/DAD optical) spectra, chromatogram and heatmap" },
   ims: { title: "Ion mobility", subtitle: "timsTOF frames as 2-D m/z × 1/K₀ heatmaps — step through frames" },
+  study: { title: "Study design", subtitle: "Sample annotations, experimental factors and channel map from the embedded SDRF" },
   metadata: { title: "Metadata", subtitle: "File-level metadata (file description, instruments, software)" },
   structure: { title: "Structure", subtitle: "Parquet members and column footers" },
   overview: { title: "Overview (TIC)", subtitle: "Per-pixel total-ion-current heatmap" },
@@ -727,6 +739,7 @@ function ViewRouter() {
       {view === "chromatograms" && <Chromatograms />}
       {view === "wavelength" && <Wavelength />}
       {view === "ims" && <Ims />}
+      {view === "study" && <StudyDesign />}
       {view === "metadata" && <Metadata />}
       {view === "structure" && <Structure />}
       {view === "overview" && <Imaging mode="overview" />}

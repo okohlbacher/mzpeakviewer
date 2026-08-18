@@ -17,4 +17,5 @@ export * from "./adapt/browse";
 export * from "./adapt/chrom";
 export * from "./adapt/footer";
 export * from "./adapt/grid";
+export * from "./adapt/sdrf";
 export * from "./adapt/ionImage";

@@ -405,6 +405,20 @@ export type StudyMeta = {
    *  from the index `metadata.sample_metadata.member`. The full SDRF characteristics
    *  table is fetched ON DEMAND from this member. Null when absent. */
   sdrfMember?: string | null;
+  /** Embedded-SDRF provenance from the index `metadata.sample_metadata` block, as the
+   *  file DECLARES it (the sha256 is not verified against the member bytes). */
+  sdrfMeta?: {
+    datasetAccession?: string | null;
+    sha256?: string | null;
+    embedScope?: string | null;
+    precedence?: string | null;
+  } | null;
+  /** Where the channels came from: the producer-encoded sample_list projection, the
+   *  embedded SDRF rows matching this run, the study-wide SDRF label set (run not
+   *  matched), or absent. Lets the UI label a study-wide fallback honestly. */
+  channelsSource?: "projected" | "sdrf-run" | "sdrf-study" | "none";
+  /** The run identity used for SDRF row matching (index metadata.run.id, raw). */
+  runId?: string | null;
 };
 
 /** Error classes the reader can raise (carried across the boundary). */

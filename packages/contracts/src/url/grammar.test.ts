@@ -128,6 +128,9 @@ describe("round-trip: serialize → parse → resolve is stable", () => {
     { mode: "imaging", v: vs({ view: "ion", ion: { mz: 200.05, tolDa: 0.1 } }) },
     { mode: "imaging", v: vs({ view: "overlay", opticalRef: "0" }) },
     { mode: "lc", v: vs({ view: "spectra", selector: { by: "spectrum", index: 12, id: null }, spectrumZoom: [100, 500], msLevelFilter: 2 }) },
+    // Study-design tab: ?view=study must survive resolve (it is in VALID_VIEWS — the
+    // separate hardcoded allowlist an adversarial review caught the plan omitting).
+    { mode: "lc", v: vs({ view: "study" }) },
   ];
   for (const [i, c] of cases.entries()) {
     it(`case ${i} round-trips`, () => {

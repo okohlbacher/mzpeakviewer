@@ -19,6 +19,9 @@ export type View =
   | "wavelength"
   // capability-gated — ion mobility (IMS / timsTOF) per-peak frame view (its own sidebar entry)
   | "ims"
+  // capability-gated — study design (SDRF/sample metadata) view, shown when the file
+  // carries study metadata (embedded SDRF member, channels, or a sample list)
+  | "study"
   // Advanced accordion
   | "metadata"
   | "structure"
@@ -37,6 +40,7 @@ export const ALL_VIEWS: readonly View[] = [
   "chromatograms",
   "wavelength",
   "ims",
+  "study",
   "metadata",
   "structure",
   "overview",

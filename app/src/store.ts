@@ -145,6 +145,12 @@ export interface AppState {
    *  "sample_metadata/sdrf.tsv"), so the Study panel can fetch the full
    *  characteristics table on demand. Null when absent. */
   sdrfMember: string | null;
+  /** Declared SDRF provenance (accession/sha256/scope) from the index metadata. */
+  sdrfMeta: { datasetAccession?: string | null; sha256?: string | null; embedScope?: string | null; precedence?: string | null } | null;
+  /** Where the channels came from (projection vs SDRF run rows vs study-wide set). */
+  channelsSource: "projected" | "sdrf-run" | "sdrf-study" | "none";
+  /** The run identity used for SDRF row matching (index metadata.run.id, raw). */
+  studyRunId: string | null;
 
   // Imaging deep-link round-trip: the m/z+tolerance last entered in the
   // Ion-image view, and the RGB channel list from the multi-channel view. Mirrored
@@ -320,6 +326,9 @@ const INITIAL_OPEN_STATE = {
   study: null,
   studySamples: null,
   sdrfMember: null,
+  sdrfMeta: null,
+  channelsSource: "none",
+  studyRunId: null,
   ionRequest: null,
   rgbChannels: [],
   roiRect: null,
@@ -412,7 +421,7 @@ async function finishOpen(
 
   // Isobaric (TMT/iTRAQ) channels for the run, off the critical path.
   void engine.studyMeta().then((s) => {
-    if (seq === currentOpenSeq) set({ channels: s.channels, study: s.study ?? null, studySamples: s.samples ?? null, sdrfMember: s.sdrfMember ?? null });
+    if (seq === currentOpenSeq) set({ channels: s.channels, study: s.study ?? null, studySamples: s.samples ?? null, sdrfMember: s.sdrfMember ?? null, sdrfMeta: s.sdrfMeta ?? null, channelsSource: s.channelsSource ?? "none", studyRunId: s.runId ?? null });
   }).catch(() => {});
 
   // Pre-load spectrum 0 when the file has spectra — but route=false so the view STAYS on
@@ -563,6 +572,9 @@ export const useStore = create<AppState>((set, get) => ({
   study: null,
   studySamples: null,
   sdrfMember: null,
+  sdrfMeta: null,
+  channelsSource: "none",
+  studyRunId: null,
 
   // imaging deep-link round-trip
   ionRequest: null,
@@ -683,6 +695,9 @@ export const useStore = create<AppState>((set, get) => ({
       study: null,
       studySamples: null,
       sdrfMember: null,
+      sdrfMeta: null,
+      channelsSource: "none",
+      studyRunId: null,
       ionRequest: null,
       rgbChannels: [],
       roiRect: null,
@@ -991,3 +1006,9 @@ engine.on("ionIndexReady", () => {
 
 // Re-export helpers so views can use them without importing contracts directly
 export { showChromatograms, showWavelength, showMobility };
+
+/** ONE gating selector for the Study-design tab — used by the nav, the Summary CTA and
+ *  the view's own empty state, so they can never disagree (adversarial-review finding). */
+export function showStudy(s: { sdrfMember: string | null; channels: ChannelAssignment[]; studySamples: unknown[] | null; study: unknown }): boolean {
+  return !!(s.sdrfMember || s.channels.length > 0 || (s.studySamples?.length ?? 0) > 0 || s.study != null);
+}
