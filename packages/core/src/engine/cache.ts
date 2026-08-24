@@ -19,6 +19,10 @@ export type CachedSpectrum = {
   intensity: Float32Array;
   msLevel: number | null;
   mobility?: MobilityCodec;
+  /** Facet provenance + dual-availability, stamped at write time (cold read or prefetch).
+   *  Absent = unknown (e.g. legacy writers) — the Signal selector stays hidden. */
+  sourceUsed?: "profile" | "centroid";
+  altAvailable?: boolean;
 };
 
 /** Bytes a cached spectrum occupies (f64 m/z + f32 intensity + optional mobility codec). */

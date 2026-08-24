@@ -35,6 +35,10 @@ export type SpectrumInput = {
   /** Dictionary-encoded per-peak ion mobility for IMS spectra. Copied at the boundary
    *  (like mz/intensity) so transferring the wire result never detaches the cached codec. */
   mobility?: MobilityCodec;
+  /** Facet that supplied the arrays (profile = spectra_data, centroid = spectra_peaks). */
+  sourceUsed?: "profile" | "centroid";
+  /** The OTHER facet also holds a non-empty signal (dual-stored spectrum). */
+  altAvailable?: boolean;
 };
 
 /** Map the raw representation indicator to the contract enum (null = unknown). */
@@ -68,6 +72,8 @@ export function adaptSpectrum(input: SpectrumInput): SpectrumArrays {
     mz: toF64(input.mz),
     intensity: toF32(input.intensity),
     representation: mapRepresentation(input.representation),
+    ...(input.sourceUsed ? { sourceUsed: input.sourceUsed } : {}),
+    ...(input.altAvailable != null ? { altAvailable: input.altAvailable } : {}),
     ...(input.mobility ? { mobility: copyMobility(input.mobility) } : {}),
   };
 }

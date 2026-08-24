@@ -68,6 +68,11 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
   // right within-level numbering for the deep-linked spectrum.
   if (v.msLevelFilter != null) st.setMsLevelFilter(v.msLevelFilter);
 
+  // 1c. Signal-source preference (?sig=) — stored BEFORE the selection so the deep-linked
+  // spectrum loads with the preferred facet (no spectrum is loaded yet, so setSignalSource's
+  // re-read is a no-op here; the selection below picks the preference up).
+  if (v.signalSource !== "auto") st.setSignalSource(v.signalSource);
+
   // 2. Selection (spectrum/scan → selectSpectrum). Defensive: only when numeric.
   // selectSpectrum routes to the Spectra view by default; suppress that when the deep
   // link targets a non-Spectra view (chromatograms/imaging) — otherwise the selection
@@ -230,6 +235,8 @@ export function currentShareUrl(): string {
     // ?ms= — round-trip the Spectra MS-level filter so a shared within-level view
     // (e.g. "MS2 #5") reloads filtered, not as "All".
     msLevelFilter: s.msLevelFilter,
+    // ?sig= — round-trip the dual-source Signal preference ("share what I see").
+    signalSource: s.signalSource,
     chromMode,
     xic: chromXic,
     chromStoredId,

@@ -328,7 +328,7 @@ export class EngineClient {
    * new select SUPERSEDES any pending select (its Promise rejects with
    * SupersededError) so no awaiting caller hangs and no resolver leaks.
    */
-  selectSpectrum(index: number): Promise<SpectrumArrays> {
+  selectSpectrum(index: number, source?: "profile" | "centroid"): Promise<SpectrumArrays> {
     // Supersede any pending select(s) — there should be at most one, but clear all.
     for (const [sid, pending] of this.pendingBySelectId) {
       this.pendingBySelectId.delete(sid);
@@ -342,7 +342,7 @@ export class EngineClient {
         resolve: resolve as (v: unknown) => void,
         reject,
       });
-      this.send({ type: "selectSpectrum", index, selectId });
+      this.send({ type: "selectSpectrum", index, selectId, ...(source ? { source } : {}) });
     });
   }
 

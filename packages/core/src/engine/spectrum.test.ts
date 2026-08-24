@@ -522,3 +522,66 @@ describe("resolveGridMz — calibration-shape gating", () => {
     expect(resolveGridMz(mkReader({}), 0)).toBeNull();
   });
 });
+
+// ── Dual-source (Signal toggle) — adversarial-review-shaped cases ─────────────────
+describe("reconstructSpectrum — forced signal source (dual-stored spectra)", () => {
+  const dual: RawSpectrum = {
+    id: "s0",
+    dataArrays: {
+      "m/z array": [100, 200, 300],
+      "intensity array": [10, 20, 30],
+    },
+    centroids: [{ mz: 200, intensity: 25 }],
+  } as unknown as RawSpectrum;
+
+  it("force centroid on a declared-profile dual record: centroid arrays, declaration kept", () => {
+    const r = reconstructSpectrum(dual, 0, "profile", null, null, "centroid");
+    expect(Array.from(r.mz)).toEqual([200]);
+    expect(r.sourceUsed).toBe("centroid");
+    expect(r.representation).toBe("profile"); // never rewritten
+    expect(r.altAvailable).toBe(true);
+  });
+
+  it("force profile on a declared-centroid dual record: profile arrays, declaration kept", () => {
+    const r = reconstructSpectrum(dual, 0, "centroid", null, null, "profile");
+    expect(r.mz.length).toBe(3);
+    expect(r.sourceUsed).toBe("profile");
+    expect(r.representation).toBe("centroid");
+  });
+
+  it("forcing onto an EMPTY facet falls back with a truthful sourceUsed (never throws, never lies)", () => {
+    const centroidOnly = { id: "s1", centroids: [{ mz: 150, intensity: 5 }] } as unknown as RawSpectrum;
+    const r = reconstructSpectrum(centroidOnly, 1, "centroid", null, null, "profile");
+    expect(r.sourceUsed).toBe("centroid"); // fell back — reported honestly
+    expect(r.altAvailable).toBe(false);
+  });
+
+  it("a present-but-0-length profile facet is NOT 'available' (length-checked predicate)", () => {
+    const zeroProfile = {
+      id: "s2",
+      dataArrays: { "m/z array": [], "intensity array": [] },
+      centroids: [{ mz: 150, intensity: 5 }],
+    } as unknown as RawSpectrum;
+    const r = reconstructSpectrum(zeroProfile, 2, "centroid", null, null, null);
+    expect(r.altAvailable).toBe(false); // 0-length profile is the file's "0 data points"
+    expect(r.sourceUsed).toBe("centroid");
+  });
+
+  it("single-source records: altAvailable false, auto path unchanged", () => {
+    const profOnly = {
+      id: "s3",
+      dataArrays: { "m/z array": [100, 200], "intensity array": [1, 2] },
+    } as unknown as RawSpectrum;
+    const r = reconstructSpectrum(profOnly, 3, "profile", null, null, null);
+    expect(r.sourceUsed).toBe("profile");
+    expect(r.altAvailable).toBe(false);
+  });
+
+  it("genuinely-empty spectrum: sourceUsed omitted, altAvailable false", () => {
+    const empty = { id: "s4", dataArrays: { "m/z array": [] } } as unknown as RawSpectrum;
+    const r = reconstructSpectrum(empty, 4, "profile", null, null, "centroid");
+    expect(r.mz.length).toBe(0);
+    expect(r.sourceUsed).toBeUndefined();
+    expect(r.altAvailable).toBe(false);
+  });
+});

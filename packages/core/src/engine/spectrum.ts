@@ -295,6 +295,10 @@ export type ReconstructedSpectrum = {
   /** Dictionary-encoded per-peak ion mobility (1/K0), present only for IMS spectra that
    *  carry the MS:1003006 array; aligned with the post-sanitize `mz`/`intensity`. */
   mobility?: MobilityCodec;
+  /** Facet that actually supplied the arrays (omitted for genuinely-empty spectra). */
+  sourceUsed?: "profile" | "centroid";
+  /** The OTHER facet also holds a non-empty signal (dual-stored spectrum). */
+  altAvailable?: boolean;
 };
 
 /**
@@ -319,6 +323,23 @@ function hasGridData(s: RawSpectrum, gridMz: GridMz | null): boolean {
 }
 function hasCentroids(s: RawSpectrum): boolean {
   return !!(s.centroids && s.centroids.length > 0);
+}
+
+/**
+ * LENGTH-CHECKED profile availability (adversarial-review finding: `hasDataArrays` tests
+ * key presence only, and a present-but-0-length m/z array is the file's explicit "0 data
+ * points" encoding — it must NOT count as an available signal for the dual-source toggle
+ * or the forced-read fallback). Grid (`tof_index`) and ims-chunked (`tof`) axes count as
+ * profile signal when non-empty and resolvable.
+ */
+function profileNonEmpty(s: RawSpectrum, cal: ImsCalibration | null, gridMz: GridMz | null): boolean {
+  const da = s.dataArrays;
+  if (!da) return false;
+  const len = (a: ArrayLike<number> | undefined) => (a ? a.length : 0);
+  if (len(da[MZ_KEY]) > 0 && len(da[INTENSITY_KEY]) > 0) return true;
+  if (gridMz && len(da[GRID_AXIS_KEY]) > 0 && len(da[INTENSITY_KEY]) > 0 && !da[MZ_KEY]) return true;
+  if (cal?.tofEncoding === "m/z-chunked" && len(da[TOF_DATA_KEY]) > 0) return true;
+  return false;
 }
 
 /**
@@ -464,6 +485,9 @@ export function reconstructSpectrum(
   representation: SpectrumRepresentation,
   cal: ImsCalibration | null = null,
   gridMz: GridMz | null = null,
+  // TRAILING on purpose (review: inserting mid-signature would silently re-bind the
+  // existing positional cal/gridMz call sites).
+  forceSource: "profile" | "centroid" | null = null,
 ): ReconstructedSpectrum {
   // A genuinely-EMPTY scan: mzpeakts emits a 0-length `m/z array` (the file's own "0 data
   // points" signal) and nothing else. Render it as an empty spectrum rather than throwing —
@@ -483,21 +507,35 @@ export function reconstructSpectrum(
   // (fail-loud, not silent zeros), as does a truly absent `dataArrays` (undefined).
   const noSignal = !!da && !da[INTENSITY_KEY] && !da[GRID_AXIS_KEY] && (!mzArr || mzArr.length === 0);
   if (!daOk && !hasCentroids(spectrum) && noSignal) {
-    return { index, id: String(spectrum.id), mz: new Float64Array(0), intensity: new Float32Array(0), representation };
+    // Genuinely empty: no source supplied bytes → sourceUsed omitted, altAvailable false.
+    return { index, id: String(spectrum.id), mz: new Float64Array(0), intensity: new Float32Array(0), representation, altAvailable: false };
   }
 
   // Route by representation, but fall through to the other source when empty.
   // `representation` is reported as-is regardless of which source supplied bytes. ims-compact AND
   // SciEX grid can live in EITHER facet, so both readers take `cal`+`gridMz`.
+  const profOk = profileNonEmpty(spectrum, cal, gridMz);
+  const centOk = hasCentroids(spectrum);
+  const altAvailable = profOk && centOk;
+
   let raw: RawSignal;
-  if (representation === "centroid") {
-    if (hasCentroids(spectrum)) raw = readCentroids(spectrum, cal, gridMz);
-    else if (daOk) raw = readDataArrays(spectrum, gridMz, cal);
+  let sourceUsed: "profile" | "centroid";
+  // A forced source is honoured only when that facet holds a NON-EMPTY signal; otherwise
+  // fall through to auto routing and report the truthful sourceUsed (the UI shows what IS
+  // displayed — a toggle onto an empty facet never throws and never lies).
+  const want =
+    forceSource === "centroid" && centOk ? "centroid"
+    : forceSource === "profile" && profOk ? "profile"
+    : representation === "centroid" ? "centroid"
+    : "profile";
+  if (want === "centroid") {
+    if (hasCentroids(spectrum)) { raw = readCentroids(spectrum, cal, gridMz); sourceUsed = "centroid"; }
+    else if (daOk) { raw = readDataArrays(spectrum, gridMz, cal); sourceUsed = "profile"; }
     else throw new EmptySpectrumError(index);
   } else {
     // "profile" or null (unknown) → data-array default, centroid fall-through.
-    if (daOk) raw = readDataArrays(spectrum, gridMz, cal);
-    else if (hasCentroids(spectrum)) raw = readCentroids(spectrum, cal, gridMz);
+    if (daOk) { raw = readDataArrays(spectrum, gridMz, cal); sourceUsed = "profile"; }
+    else if (hasCentroids(spectrum)) { raw = readCentroids(spectrum, cal, gridMz); sourceUsed = "centroid"; }
     else throw new EmptySpectrumError(index);
   }
 
@@ -514,6 +552,8 @@ export function reconstructSpectrum(
     mz: clean.mz,
     intensity: clean.intensity,
     representation, // metadata value, preserved across any fallback
+    sourceUsed,
+    altAvailable,
     ...(clean.mobility ? { mobility: packMobility(clean.mobility) } : {}),
   };
 }
@@ -525,6 +565,7 @@ export function reconstructSpectrum(
 export async function readEngineSpectrum(
   reader: Reader,
   index: number,
+  source: "profile" | "centroid" | null = null,
 ): Promise<WireSpectrumArrays> {
   // Resolve representation from the metadata row (MS:1000525), null when unknown.
   let representation: SpectrumRepresentation = null;
@@ -537,13 +578,15 @@ export async function readEngineSpectrum(
   const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
   if (!spectrum) throw new Error(`No spectrum at index ${index}`);
 
-  const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveGridMz(reader, index));
+  const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveGridMz(reader, index), source);
   return adaptSpectrum({
     index: recon.index,
     id: recon.id,
     mz: recon.mz,
     intensity: recon.intensity,
     representation: recon.representation,
+    ...(recon.sourceUsed ? { sourceUsed: recon.sourceUsed } : {}),
+    ...(recon.altAvailable != null ? { altAvailable: recon.altAvailable } : {}),
     ...(recon.mobility ? { mobility: recon.mobility } : {}),
   });
 }
@@ -614,6 +657,7 @@ export async function prefetchSpectrumCache(
   const drain = async (
     stream: AsyncGenerator<StreamedSpectrumArrays>,
     accept: (index: number) => boolean,
+    onRow?: (index: number, mz: ArrayLike<number>, cachedEntry: boolean) => void,
   ): Promise<boolean> => {
     const it = stream[Symbol.asyncIterator]();
     let done = false;
@@ -626,12 +670,17 @@ export async function prefetchSpectrumCache(
             const res = await it.next();
             if (res.done) { done = true; return; }
             const { index, mz, intensity } = res.value;
-            if (accept(index)) {
+            const doCache = accept(index);
+            if (doCache) {
               // The spectrum-display prefetch streams full f64 m/z (default, no mzFloat32) for
-              // display fidelity, so mz is a Float64Array here.
+              // display fidelity, so mz is a Float64Array here. sourceUsed/altAvailable are
+              // stamped by the caller's onRow hook — prefetch entries MUST carry the same
+              // provenance as cold reads, or a prefetch-warmed LRU hit hides the Signal
+              // toggle on exactly the dual files it exists for (adversarial-review finding).
               cache.set(index, { mz: mz as Float64Array, intensity, msLevel: msLevelOf(index) });
               cached++;
             }
+            onRow?.(index, mz, doCache);
             if (nowMs() - start > PREFETCH_SLICE_MS) return;
           }
         });
@@ -651,9 +700,39 @@ export async function prefetchSpectrumCache(
   // is usually an empty survey scan with null c0/c1, which would make a per-spectrum probe miss.
   if (readImsCalibration(reader) || isGridFile(reader)) return { cached: 0, stopped: false };
   // Profile/unknown spectra from spectra_data; centroid spectra from spectra_peaks.
-  const okData = await drain(streamSpectraDataArrays(reader), (i) => isMs01(i) && reprOf(i) !== "centroid");
+  // Facet-provenance stamping: the data drain marks every non-empty profile index; the
+  // peaks drain then (a) flips altAvailable on already-cached profile entries whose index
+  // also appears with centroids, and (b) stamps centroid entries with altAvailable from
+  // the profile-presence set. An early-stopped drain leaves later entries unstamped
+  // (fields absent → Signal toggle hidden until a cold read) — honest degradation.
+  const profileSeen = new Set<number>();
+  const okData = await drain(
+    streamSpectraDataArrays(reader),
+    (i) => isMs01(i) && reprOf(i) !== "centroid",
+    (i, mz, cachedEntry) => {
+      if (mz.length > 0) profileSeen.add(i);
+      if (cachedEntry) {
+        const e = cache.get(i);
+        if (e) e.sourceUsed = "profile";
+      }
+    },
+  );
   if (!okData) return { cached, stopped: true };
-  const okPeaks = await drain(streamSpectraPeaksArrays(reader), (i) => isMs01(i) && reprOf(i) === "centroid");
+  const okPeaks = await drain(
+    streamSpectraPeaksArrays(reader),
+    (i) => isMs01(i) && reprOf(i) === "centroid",
+    (i, mz, cachedEntry) => {
+      if (mz.length === 0) return;
+      const e = cache.get(i);
+      if (!e) return;
+      if (cachedEntry) {
+        e.sourceUsed = "centroid";
+        e.altAvailable = profileSeen.has(i);
+      } else if (e.sourceUsed === "profile") {
+        e.altAvailable = true; // profile-cached entry whose index also has centroids
+      }
+    },
+  );
   return { cached, stopped: !okPeaks };
 }
 
@@ -673,6 +752,7 @@ export async function readEngineSpectrumCached(
   index: number,
   cache: SpectrumLruCache,
   ionCache?: { lookup(index: number): { mz: Float32Array; intensity: Float32Array } | undefined },
+  source: "profile" | "centroid" | null = null,
 ): Promise<WireSpectrumArrays> {
   // Light metadata is always cheap (in-memory metadata table): id, representation, msLevel.
   let representation: SpectrumRepresentation = null;
@@ -687,9 +767,41 @@ export async function readEngineSpectrumCached(
     // keep defaults
   }
 
+  // FORCED-SOURCE read (the Spectra view's Signal toggle). Poisoning-safe by design:
+  //  - an LRU entry whose stamped sourceUsed matches the request is served (its arrays
+  //    came from exactly that facet — no re-read needed, no lie possible);
+  //  - otherwise a cold read with the forced source, NOT written to the LRU (a forced
+  //    entry must never be served for a later auto request) and never via the ion fast
+  //    path (it holds profile-stream arrays with no per-facet provenance).
+  if (source) {
+    const fhit = cache.get(index);
+    if (fhit && fhit.sourceUsed === source) {
+      return adaptSpectrum({
+        index, id, mz: fhit.mz, intensity: fhit.intensity, representation,
+        sourceUsed: fhit.sourceUsed,
+        ...(fhit.altAvailable != null ? { altAvailable: fhit.altAvailable } : {}),
+        ...(fhit.mobility ? { mobility: fhit.mobility } : {}),
+      });
+    }
+    const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
+    if (!spectrum) throw new Error(`No spectrum at index ${index}`);
+    const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveGridMz(reader, index), source);
+    return adaptSpectrum({
+      index, id: recon.id, mz: recon.mz, intensity: recon.intensity, representation: recon.representation,
+      ...(recon.sourceUsed ? { sourceUsed: recon.sourceUsed } : {}),
+      ...(recon.altAvailable != null ? { altAvailable: recon.altAvailable } : {}),
+      ...(recon.mobility ? { mobility: recon.mobility } : {}),
+    });
+  }
+
   const hit = cache.get(index);
   if (hit) {
-    return adaptSpectrum({ index, id, mz: hit.mz, intensity: hit.intensity, representation, ...(hit.mobility ? { mobility: hit.mobility } : {}) });
+    return adaptSpectrum({
+      index, id, mz: hit.mz, intensity: hit.intensity, representation,
+      ...(hit.sourceUsed ? { sourceUsed: hit.sourceUsed } : {}),
+      ...(hit.altAvailable != null ? { altAvailable: hit.altAvailable } : {}),
+      ...(hit.mobility ? { mobility: hit.mobility } : {}),
+    });
   }
 
   // Imaging fast path: the background ion prefetch has already DECODED every grid-pixel
@@ -707,14 +819,21 @@ export async function readEngineSpectrumCached(
   const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
   if (!spectrum) throw new Error(`No spectrum at index ${index}`);
   const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveGridMz(reader, index));
-  // Cache the canonical decoded arrays (adaptSpectrum copies for the wire below).
-  cache.set(index, { mz: recon.mz, intensity: recon.intensity, msLevel, ...(recon.mobility ? { mobility: recon.mobility } : {}) });
+  // Cache the canonical decoded arrays + facet provenance (adaptSpectrum copies for the wire).
+  cache.set(index, {
+    mz: recon.mz, intensity: recon.intensity, msLevel,
+    ...(recon.sourceUsed ? { sourceUsed: recon.sourceUsed } : {}),
+    ...(recon.altAvailable != null ? { altAvailable: recon.altAvailable } : {}),
+    ...(recon.mobility ? { mobility: recon.mobility } : {}),
+  });
   return adaptSpectrum({
     index,
     id: recon.id,
     mz: recon.mz,
     intensity: recon.intensity,
     representation: recon.representation,
+    ...(recon.sourceUsed ? { sourceUsed: recon.sourceUsed } : {}),
+    ...(recon.altAvailable != null ? { altAvailable: recon.altAvailable } : {}),
     ...(recon.mobility ? { mobility: recon.mobility } : {}),
   });
 }

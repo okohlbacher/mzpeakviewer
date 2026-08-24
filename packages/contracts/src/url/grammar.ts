@@ -33,6 +33,7 @@ export type RawParams = {
   spectrum?: string;
   px?: string;
   ms?: string;
+  sig?: string;
   mz?: string;
   preload?: string;
   cache?: string;
@@ -90,7 +91,7 @@ export function parseSearch(search: string): RawParams {
   if (file) out.file = file;
   const view = p.get("view") ?? p.get("tab");
   if (view) out.view = view;
-  for (const k of ["scan", "spectrum", "px", "ms", "mz", "chrom", "xic", "xicmz", "rt", "ion", "roi", "optical", "overlay"] as const) {
+  for (const k of ["scan", "spectrum", "px", "ms", "sig", "mz", "chrom", "xic", "xicmz", "rt", "ion", "roi", "optical", "overlay"] as const) {
     const v = p.get(k);
     if (v != null) out[k] = v;
   }
@@ -271,6 +272,8 @@ export function resolve(raw: RawParams, mode: FileMode): Resolution {
   v.selector = selector;
 
   v.msLevelFilter = intOf(raw.ms);
+  // sig= preferred signal source for dual-stored spectra (absent/invalid = auto).
+  v.signalSource = raw.sig === "profile" || raw.sig === "centroid" ? raw.sig : "auto";
   v.spectrumZoom = ascPairOf(raw.mz);
 
   // --- LC params -----------------------------------------------------------
@@ -362,6 +365,7 @@ export function serialize(v: ViewState, mode: FileMode): URLSearchParams {
     }
   }
   if (v.msLevelFilter != null) p.set("ms", String(v.msLevelFilter));
+  if (v.signalSource !== "auto") p.set("sig", v.signalSource);
   if (v.spectrumZoom) p.set("mz", `${num(v.spectrumZoom[0])},${num(v.spectrumZoom[1])}`);
 
   // LC

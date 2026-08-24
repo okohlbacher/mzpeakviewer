@@ -131,6 +131,8 @@ describe("round-trip: serialize → parse → resolve is stable", () => {
     // Study-design tab: ?view=study must survive resolve (it is in VALID_VIEWS — the
     // separate hardcoded allowlist an adversarial review caught the plan omitting).
     { mode: "lc", v: vs({ view: "study" }) },
+    // Signal-source toggle (dual-stored spectra): ?sig= round-trips; auto stays absent.
+    { mode: "lc", v: vs({ view: "spectra", signalSource: "centroid", selector: { by: "spectrum", index: 3, id: null } }) },
   ];
   for (const [i, c] of cases.entries()) {
     it(`case ${i} round-trips`, () => {

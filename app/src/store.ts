@@ -175,6 +175,11 @@ export interface AppState {
     | null;
   /** Spectra-view MS-level filter (null = all). Only levels present in the file. */
   msLevelFilter: number | null;
+  /** Preferred signal source for dual-stored spectra ("auto" = declared representation).
+   *  Applied to Spectra-view selections only — NEVER to imaging pixel-picks or IMS frame
+   *  steps (adversarial-review: a forced read bypasses the ion fast path and would turn
+   *  warm pixel-picks into multi-second cold reads). */
+  signalSource: "auto" | "profile" | "centroid";
   /** Transient: Structure → "view index.json" jump asks the Metadata view to scroll
    *  to + highlight its Manifest section. The Metadata view clears it once consumed. */
   metadataReveal: "manifest" | null;
@@ -230,6 +235,8 @@ export interface AppState {
    *  screen (drop-zone + demo datasets + URL field) shows again. */
   reset: () => void;
   setMsLevelFilter: (level: number | null) => void;
+  /** Set the preferred signal source and re-read the current spectrum with it. */
+  setSignalSource: (src: "auto" | "profile" | "centroid") => void;
   /** Structure → "view index.json": switch to the Metadata view and ask it to scroll
    *  to + highlight its Manifest section. Pass null (from Metadata) to clear once done. */
   setMetadataReveal: (section: "manifest" | null) => void;
@@ -336,6 +343,7 @@ const INITIAL_OPEN_STATE = {
   view: "summary",
   selector: null,
   msLevelFilter: null,
+  signalSource: "auto",
   metadataReveal: null,
   spectrum: null,
   spectrumLoading: false,
@@ -587,6 +595,7 @@ export const useStore = create<AppState>((set, get) => ({
   // spectrum
   selector: null,
   msLevelFilter: null,
+  signalSource: "auto",
   metadataReveal: null,
   spectrum: null,
   spectrumLoading: false,
@@ -707,6 +716,7 @@ export const useStore = create<AppState>((set, get) => ({
       view: "summary",
       selector: null,
       msLevelFilter: null,
+  signalSource: "auto",
       metadataReveal: null,
       spectrum: null,
       spectrumLoading: false,
@@ -728,6 +738,17 @@ export const useStore = create<AppState>((set, get) => ({
 
   setMsLevelFilter: (level: number | null) => {
     set({ msLevelFilter: level });
+  },
+  setSignalSource: (src: "auto" | "profile" | "centroid") => {
+    set({ signalSource: src });
+    // Re-read the CURRENT spectrum with the new preference (route=false: stay put).
+    // Pixel selectors keep their provenance; hydration (no spectrum yet) just stores
+    // the preference and the first selection picks it up.
+    const st = get();
+    const cur = st.spectrum?.index ?? st.selector?.index ?? null;
+    if (cur == null) return;
+    const px = st.selector && st.selector.by === "pixel" ? { x: st.selector.x, y: st.selector.y } : undefined;
+    void reselectWithSource(cur, px, src, set);
   },
 
   setMetadataReveal: (section: "manifest" | null) => {
@@ -766,9 +787,13 @@ export const useStore = create<AppState>((set, get) => ({
     const selector = pixel
       ? ({ by: "pixel", x: pixel.x, y: pixel.y, index } as const)
       : ({ by: "index", index } as const);
+    // Forced signal source applies ONLY to Spectra-view selections (Prev/Next/Go/dropdown)
+    // — pixel-picks and other views stay on the auto path (warm caches, honest defaults).
+    const sigPref = get().signalSource;
+    const src = !pixel && get().view === "spectra" && sigPref !== "auto" ? sigPref : undefined;
     set({ spectrumLoading: true, selector });
     try {
-      const spectrum = await engine.selectSpectrum(index);
+      const spectrum = await engine.selectSpectrum(index, src);
       // Drop if a newer file was opened while we waited.
       if (seq !== currentOpenSeq) {
         set({ spectrumLoading: false });
@@ -1005,6 +1030,30 @@ engine.on("ionIndexReady", () => {
 });
 
 // Re-export helpers so views can use them without importing contracts directly
+/** Re-select `index` applying `src` explicitly (setSignalSource path — the view-based
+ *  rule in selectSpectrum doesn't cover a pixel-provenance re-read). */
+async function reselectWithSource(
+  index: number,
+  _pixel: { x: number; y: number } | undefined, // provenance kept by NOT touching `selector`
+  src: "auto" | "profile" | "centroid",
+  set: (partial: Record<string, unknown>) => void,
+): Promise<void> {
+  const seq = currentOpenSeq;
+  set({ spectrumLoading: true });
+  try {
+    const spectrum = await engine.selectSpectrum(index, src === "auto" ? undefined : src);
+    if (seq !== currentOpenSeq) { set({ spectrumLoading: false }); return; }
+    set({ spectrum, spectrumLoading: false });
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "";
+    if (name !== "SupersededError" && name !== "CancelledError") {
+      set({ spectrumLoading: false });
+    } else {
+      set({ spectrumLoading: false });
+    }
+  }
+}
+
 export { showChromatograms, showWavelength, showMobility };
 
 /** ONE gating selector for the Study-design tab — used by the nav, the Summary CTA and

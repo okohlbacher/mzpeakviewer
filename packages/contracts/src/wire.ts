@@ -99,6 +99,19 @@ export type SpectrumArrays = {
    */
   representation: SpectrumRepresentation;
   /**
+   * Which FACET supplied the displayed arrays: "profile" = spectra_data, "centroid" =
+   * spectra_peaks. Distinct from `representation` (the file's DECLARED value, never
+   * rewritten): they differ on fallback reads and forced-source reads. Omitted when
+   * unknown (cache paths that lack provenance) or when the spectrum is empty.
+   */
+  sourceUsed?: "profile" | "centroid";
+  /**
+   * True when the OTHER facet also holds a non-empty signal for this spectrum
+   * (dual-stored file) — gates the Spectra view's Signal selector. Omitted when
+   * unknown (e.g. imaging ion-cache hits, which carry no per-facet provenance).
+   */
+  altAvailable?: boolean;
+  /**
    * Full per-spectrum metadata as a plain, structured-clone-safe tree (scan time,
    * polarity, base peak, TIC, m/z range, precursor / selected-ion, promoted CV
    * columns) for the "Spectrum metadata" panel in the Spectra view. Read fresh on

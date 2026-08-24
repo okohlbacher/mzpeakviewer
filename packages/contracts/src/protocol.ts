@@ -80,7 +80,7 @@ export type WorkerRequest =
 
   // --- spectra / aggregate browse ------------------------------------------
   // selectId monotonically orders rapid clicks; the worker echoes it.
-  | { type: "selectSpectrum"; index: number; selectId: number }
+  | { type: "selectSpectrum"; index: number; selectId: number; source?: "profile" | "centroid" }
   // Time-sliced aggregate pass: MS-level counts, mz/rt range, browse index.
   | { type: "scanBreakdown"; requestId: number }
   | { type: "meanSpectrum"; requestId: number }

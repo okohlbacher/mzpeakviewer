@@ -75,6 +75,9 @@ export type ViewState = {
   view: View;
   selector: SpectrumSelector;
   msLevelFilter: number | null;
+  /** Preferred signal source for dual-stored spectra: "auto" = the file's declared
+   *  representation (default). Round-trips as ?sig= (absent = auto). */
+  signalSource: "auto" | "profile" | "centroid";
   /** Spectrum-plot m/z zoom [lo, hi], or null at full range. */
   spectrumZoom: [number, number] | null;
   // chromatogram sub-state
@@ -129,6 +132,7 @@ export const DEFAULT_VIEW_STATE: ViewState = {
   view: "summary",
   selector: null,
   msLevelFilter: null,
+  signalSource: "auto",
   spectrumZoom: null,
   chromMode: "tic",
   xic: null,

@@ -32,6 +32,8 @@ export function Spectra() {
   const selectSpectrum = useStore((s) => s.selectSpectrum);
   const msLevelFilter = useStore((s) => s.msLevelFilter);
   const setMsLevelFilter = useStore((s) => s.setMsLevelFilter);
+  const signalSource = useStore((s) => s.signalSource);
+  const setSignalSource = useStore((s) => s.setSignalSource);
   const channels = useStore((s) => s.channels);
   const setIonRequest = useStore((s) => s.setIonRequest);
   const setView = useStore((s) => s.setView);
@@ -97,6 +99,13 @@ export function Spectra() {
 
   const currentIndex = selector?.index ?? 0;
 
+  // What is ACTUALLY displayed: the facet that supplied the arrays (sourceUsed), falling
+  // back to the declared representation for cache paths without provenance. Rendering
+  // (plot mode, peak table, footer) follows THIS; the declared value stays available for
+  // the pill tooltip. (Adversarial review: SpectrumPlot branches internally on
+  // `representation`, so the plot receives an overridden copy below.)
+  const effectiveRepr = spectrum?.sourceUsed ?? spectrum?.representation ?? null;
+
   // MS-level filter (only levels actually present in the file populate the dropdown;
   // filled by scanBreakdown). Filtering reads the prebuilt per-level mapping arrays.
   const availableLevels = stats.msLevels ?? [];
@@ -137,7 +146,7 @@ export function Spectra() {
         id: spectrum.id,
         mz: spectrum.mz,
         intensity: spectrum.intensity,
-        representation: spectrum.representation,
+        representation: effectiveRepr,
         msLevel: curLevel,
         time: null,
       }
@@ -243,6 +252,29 @@ export function Spectra() {
           </label>
         )}
 
+        {/* Signal source (dual-stored spectra): shown when the current spectrum has both
+            facets, or whenever a non-auto preference is active (escape hatch back to Auto). */}
+        {(spectrum?.altAvailable === true || signalSource !== "auto") && (
+          <label
+            title="Preferred signal for dual-stored spectra — falls back (and says so) when the chosen facet is unavailable"
+            style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}
+          >
+            Signal
+            <Select
+              data-testid="signal-source-select"
+              value={signalSource}
+              onChange={(val) => !spectrumLoading && setSignalSource(val as "auto" | "profile" | "centroid")}
+              options={[
+                { value: "auto", label: "Auto" },
+                { value: "profile", label: "Profile" },
+                { value: "centroid", label: "Centroid" },
+              ]}
+              ariaLabel="Signal source for dual-stored spectra"
+              size="sm"
+            />
+          </label>
+        )}
+
         {hasLargeFile ? (
           <>
             <label
@@ -325,9 +357,11 @@ export function Spectra() {
           <span
             data-testid="spectrum-representation"
             title={
-              spectrum.representation === "centroid"
-                ? "Centroid (stick) spectrum"
-                : "Profile (continuous) spectrum"
+              spectrum.sourceUsed && spectrum.sourceUsed !== spectrum.representation
+                ? `Showing the ${spectrum.sourceUsed} facet — the file declares ${spectrum.representation}`
+                : effectiveRepr === "centroid"
+                  ? "Centroid (stick) spectrum"
+                  : "Profile (continuous) spectrum"
             }
             style={{
               marginLeft: "auto",
@@ -335,14 +369,14 @@ export function Spectra() {
               alignItems: "center",
               padding: "0.1rem 0.5rem",
               border: `1px solid ${
-                spectrum.representation === "centroid"
+                effectiveRepr === "centroid"
                   ? "var(--blue-600, #3b54da)"
                   : "var(--green-600, #2e9e5b)"
               }`,
               borderRadius: "var(--radius-pill, 999px)",
               background: "var(--surface-card, #fff)",
               color:
-                spectrum.representation === "centroid"
+                effectiveRepr === "centroid"
                   ? "var(--blue-600, #3b54da)"
                   : "var(--green-600, #2e9e5b)",
               fontSize: "var(--text-xs, 0.72rem)",
@@ -352,7 +386,8 @@ export function Spectra() {
               whiteSpace: "nowrap",
             }}
           >
-            {spectrum.representation}
+            {effectiveRepr}
+            {spectrum.sourceUsed && spectrum.sourceUsed !== spectrum.representation ? " *" : ""}
           </span>
         )}
         {spectrum && (
@@ -393,7 +428,7 @@ export function Spectra() {
         style={{ height: 320, position: "relative" }}
       >
         <SpectrumPlot
-          spectrum={spectrum}
+          spectrum={spectrum ? { ...spectrum, representation: effectiveRepr } : spectrum}
           xicWindow={null}
           reporters={reporterMarkers}
           zoom={channelZoom}
@@ -464,7 +499,7 @@ export function Spectra() {
         >
           <span data-testid="spectrum-points">{spectrum.mz.length}</span>
           {" points · "}
-          {spectrum.representation === "centroid"
+          {effectiveRepr === "centroid"
             ? "centroid (stick spectrum)"
             : "profile (line)"}
           {" · scroll to zoom · double-click to reset"}
@@ -497,7 +532,7 @@ export function Spectra() {
           spectra are continuous traces and have no discrete peak list. Rows are
           sorted by descending intensity and capped (the cap is noted in the UI).
           Clicking a row jumps to the ion image via the shared handler. */}
-      {spectrum && spectrum.representation === "centroid" && (
+      {spectrum && effectiveRepr === "centroid" && (
         <PeakTable spectrum={spectrum} onPeakClick={goToIonImage} />
       )}
 
