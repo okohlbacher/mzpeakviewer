@@ -1,5 +1,19 @@
 # Backlog — full adversarial review + corpus UI sweep (2026-08-26)
 
+> **Status update (v0.9.0, 2026-08-26):** the P0 correctness tier is fixed — items
+> 1–13 all addressed (RT units, prefetch, select/hydration/open-seq races, mean/ROI,
+> wavelengthMatrix transfer, XIC/TIC facet routing, dia= URL grammar, engine
+> robustness, and the small-items cluster; only the share-URL provenance/zoom
+> plumbing in item 13 remains: spectrumZoom/opticalRef aren't store-tracked and a
+> deep-linked ?scan= re-serializes as spectrum=). From P1: 15 (silent failures),
+> 18, 19, 22 (missing tokens + AA green + banner colors; forced-colors/dark-mode
+> remain), 23, and the mislabel + matrix-retry-loop from 24 are fixed. From P2:
+> 25 (deepColumn) and 29 (mixedRepresentationWarning) deleted. Everything else —
+> P1 items 14, 16, 17, 20, 21, rest of 24; P2 26–28, 30–32; P3 — remains open.
+> P3 item 33 note: the legacy `imaging.mzpeak` fixture also breaks 5 interaction
+> e2e tests (error banner "Cannot read properties of null (reading 'get')") —
+> verified pre-existing at the v0.8.8 baseline; regenerate the fixture flat.
+
 **Baseline:** v0.8.8 @ `3f139f7` (clean).
 **Sources** (verbatim outputs in `.planning/reviews/2026-08-26-full-adversarial/`):
 codex 0.147.0 ×2 (correctness; ponytail+UI), kimi 0.34.0 ×2 (same splits, isolated
