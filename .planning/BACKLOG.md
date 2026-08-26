@@ -1,5 +1,9 @@
 # mzpeakviewer — Consolidated Backlog
 
+> **2026-08-26:** a full adversarial review (kimi+codex+internal workflow) + 63-file
+> corpus UI sweep produced a NEW ranked backlog superseding the open items here:
+> see [BACKLOG-adversarial-2026-08-26.md](BACKLOG-adversarial-2026-08-26.md).
+
 Backlog for the merged app, consolidating both source projects. **Phase work
 (Phases 0–6 in ROADMAP.md) is NOT repeated here** — this is the post-parity /
 deferred / inherited backlog. Verbatim source backlogs are preserved under
