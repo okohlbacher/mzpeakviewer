@@ -226,13 +226,22 @@ export class EngineClient {
   constructor(worker: WorkerLike) {
     this.worker = worker;
     this.worker.addEventListener("message", (ev) => this.handleMessage(ev.data));
-    // Worker INITIALIZATION failures (missing WASM asset, CSP rejection, module load
-    // error) never post a message — without this listener every request buffered
-    // behind the ready handshake stayed pending forever and open() hung silently
-    // (adversarial-review finding). Reject everything with an actionable error.
+    // Uncaught worker errors: initialization failures (missing WASM asset, CSP
+    // rejection, module load error) never post a message — without this listener every
+    // request buffered behind the ready handshake stayed pending forever and open()
+    // hung silently (adversarial-review finding). The same event also fires for a
+    // LATER uncaught crash (e.g. a WASM panic mid-read), whose in-flight requests
+    // would equally never resolve — so reject everything, with a message that doesn't
+    // misattribute a mid-session crash to startup.
     this.worker.addEventListener("error", (ev) => {
+      const detail = ev.message ?? "unknown worker error";
       this.rejectAllPending(
-        () => new Error(`Engine worker failed to start: ${ev.message ?? "unknown worker error"}`),
+        () =>
+          new Error(
+            this.ready
+              ? `Engine worker crashed: ${detail}`
+              : `Engine worker failed to start: ${detail}`,
+          ),
       );
     });
   }
