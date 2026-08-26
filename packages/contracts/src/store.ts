@@ -83,6 +83,8 @@ export type ViewState = {
   // chromatogram sub-state
   chromMode: ChromMode;
   xic: { mz: number; tolDa: number; msLevel?: number } | null;
+  /** DIA fragment-XIC cards (`dia=precursorMz,fragmentMz,tolDa`, repeatable). */
+  diaXic: { precursorMz: number; mz: number; tolDa: number }[];
   chromStoredId: string | null;
   chromTimeRange: [number, number] | null;
   // imaging sub-state
@@ -136,6 +138,7 @@ export const DEFAULT_VIEW_STATE: ViewState = {
   spectrumZoom: null,
   chromMode: "tic",
   xic: null,
+  diaXic: [],
   chromStoredId: null,
   chromTimeRange: null,
   ion: null,

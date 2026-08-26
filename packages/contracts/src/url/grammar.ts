@@ -40,6 +40,8 @@ export type RawParams = {
   // LC
   chrom?: string;
   xic?: string;
+  /** Repeatable: `dia=precursorMz,fragmentMz,tolDa`. */
+  dia?: string[];
   xicmz?: string;
   rt?: string;
   // imaging
@@ -101,6 +103,8 @@ export function parseSearch(search: string): RawParams {
   if (cache != null) out.cache = cache;
   const ch = p.getAll("ch");
   if (ch.length) out.ch = ch;
+  const dia = p.getAll("dia");
+  if (dia.length) out.dia = dia;
   return out;
 }
 
@@ -188,6 +192,16 @@ function xicOf(s: string | undefined): { mz: number; tolDa: number; msLevel?: nu
   return { mz, tolDa: d, ...(Number.isInteger(lvl) && lvl >= 1 ? { msLevel: lvl } : {}) };
 }
 
+/** `dia=precursorMz,fragmentMz,tolDa` → one DIA fragment-XIC card. All three fields
+ *  required, finite and positive — malformed entries are dropped. */
+function diaOf(s: string): { precursorMz: number; mz: number; tolDa: number } | null {
+  const f = s.split(",");
+  if (f.length !== 3) return null;
+  const [prec, mz, tol] = f.map((x) => Number(x.trim()));
+  if (![prec, mz, tol].every((n) => Number.isFinite(n) && n! > 0)) return null;
+  return { precursorMz: prec!, mz: mz!, tolDa: tol! };
+}
+
 /** `chrom=tic | id:<id> | ix:<n> | <id>` → mode + id. */
 function chromOf(s: string | undefined): { mode: ChromMode; id: string | null } | null {
   if (s == null) return null;
@@ -214,8 +228,9 @@ export function inferView(raw: RawParams, mode: FileMode): View {
   }
   if (mode === "lc") {
     if (raw.xicmz != null || raw.xic != null) return "chromatograms";
-    if (raw.chrom != null) return "chromatograms";
+    if (raw.dia && raw.dia.length) return "chromatograms";
   }
+  if (raw.chrom != null) return "chromatograms"; // stored/TIC — valid on imaging files too
   if (raw.scan != null || raw.px != null || raw.spectrum != null) return "spectra";
   return "summary";
 }
@@ -223,6 +238,9 @@ export function inferView(raw: RawParams, mode: FileMode): View {
 /** Is `view` meaningful for this file mode? (cross-mode views are ignored). */
 function viewAllowedInMode(view: View, mode: FileMode): boolean {
   if (mode === "unknown") return true;
+  // Chromatograms are capability-gated, not mode-gated: imaging files can carry STORED
+  // chromatograms (the in-app tab shows for them) — the deep link must match.
+  if (view === "chromatograms") return true;
   if (IMAGING_VIEW_SET.has(view)) return mode === "imaging";
   if (LC_VIEW_SET.has(view)) return mode === "lc";
   return true; // summary/spectra/metadata/structure always allowed
@@ -281,9 +299,16 @@ export function resolve(raw: RawParams, mode: FileMode): Resolution {
   const xicmz = ascPairOf(raw.xicmz);
   const chrom = chromOf(raw.chrom);
   const rt = ascPairOf(raw.rt);
-  if (mode === "imaging" && (xic || xicmz || chrom)) {
-    ignore("lc-cross-mode", "This link asked for a chromatogram, but this file is imaging — ignoring it.");
+  const dia = (raw.dia ?? []).map(diaOf).filter((d): d is NonNullable<typeof d> => d != null);
+  if (mode === "imaging" && (xic || xicmz || dia.length)) {
+    ignore("lc-cross-mode", "This link asked for an extracted chromatogram, but this file is imaging — ignoring it.");
+    // STORED chromatograms (and TIC) still apply — imaging files can carry them.
+    if (chrom) {
+      v.chromMode = chrom.mode;
+      v.chromStoredId = chrom.id;
+    }
   } else {
+    if (dia.length) v.diaXic = dia;
     if (xicmz) {
       v.chromMode = "xic";
       v.xic = { mz: (xicmz[0] + xicmz[1]) / 2, tolDa: (xicmz[1] - xicmz[0]) / 2 };
@@ -294,7 +319,7 @@ export function resolve(raw: RawParams, mode: FileMode): Resolution {
       v.chromMode = chrom.mode;
       v.chromStoredId = chrom.id;
     }
-    if (rt && (v.chromMode === "xic" || (v.chromMode === "tic" && raw.chrom === "tic"))) {
+    if (rt && (v.chromMode === "xic" || v.diaXic.length > 0 || (v.chromMode === "tic" && raw.chrom === "tic"))) {
       v.chromTimeRange = rt;
     }
   }
@@ -335,7 +360,10 @@ export function resolve(raw: RawParams, mode: FileMode): Resolution {
 
 /** Trim a number to ≤4 decimals without trailing zeros. */
 function num(v: number): string {
-  return Number(v.toFixed(4)).toString();
+  // 8 significant digits (not 4 decimals): a fixed decimal cut collapses sub-mDa
+  // tolerances to 0 and tight zooms to equal endpoints — dropped or degenerate on
+  // hydration. 8 sig-figs is ppm-accurate for m/z and still strips float noise.
+  return Number(v.toPrecision(8)).toString();
 }
 
 /**
@@ -369,10 +397,11 @@ export function serialize(v: ViewState, mode: FileMode): URLSearchParams {
   if (v.spectrumZoom) p.set("mz", `${num(v.spectrumZoom[0])},${num(v.spectrumZoom[1])}`);
 
   // LC
+  for (const d of v.diaXic) p.append("dia", `${num(d.precursorMz)},${num(d.mz)},${num(d.tolDa)}`);
   if (v.chromMode === "xic" && v.xic) p.set("xic", `${num(v.xic.mz)},${num(v.xic.tolDa)}${v.xic.msLevel != null ? `,${v.xic.msLevel}` : ""}`);
   else if (v.chromMode === "stored" && v.chromStoredId) p.set("chrom", canonicalChrom(v.chromStoredId));
-  else if (v.chromMode === "tic" && v.view === "chromatograms") p.set("chrom", "tic");
-  if (v.chromTimeRange && (p.has("xic") || p.get("chrom") === "tic")) {
+  else if (v.chromMode === "tic" && v.view === "chromatograms" && v.diaXic.length === 0) p.set("chrom", "tic");
+  if (v.chromTimeRange && (p.has("xic") || p.has("dia") || p.get("chrom") === "tic")) {
     p.set("rt", `${num(v.chromTimeRange[0])},${num(v.chromTimeRange[1])}`);
   }
 

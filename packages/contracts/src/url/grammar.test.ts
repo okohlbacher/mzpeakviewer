@@ -133,6 +133,9 @@ describe("round-trip: serialize → parse → resolve is stable", () => {
     { mode: "lc", v: vs({ view: "study" }) },
     // Signal-source toggle (dual-stored spectra): ?sig= round-trips; auto stays absent.
     { mode: "lc", v: vs({ view: "spectra", signalSource: "centroid", selector: { by: "spectrum", index: 3, id: null } }) },
+    // DIA fragment-XIC card: ?dia=prec,frag,tol round-trips (it used to serialize as a
+    // silent wrong-data `chrom=tic` — adversarial review 2026-08-26, P0 item 10).
+    { mode: "lc", v: vs({ view: "chromatograms", diaXic: [{ precursorMz: 622.3, mz: 302.15, tolDa: 0.02 }], chromTimeRange: [100, 200] }) },
   ];
   for (const [i, c] of cases.entries()) {
     it(`case ${i} round-trips`, () => {
@@ -143,6 +146,59 @@ describe("round-trip: serialize → parse → resolve is stable", () => {
       expect(reparsed.view.view).toBe(c.v.view);
     });
   }
+});
+
+describe("dia= grammar (DIA fragment XICs)", () => {
+  it("parses repeatable dia= and infers the chromatograms view", () => {
+    const raw = parseSearch("?dia=622.3,302.15,0.02&dia=750.4,401.2,0.05");
+    expect(raw.dia).toEqual(["622.3,302.15,0.02", "750.4,401.2,0.05"]);
+    const { view } = resolve(raw, "lc");
+    expect(view.view).toBe("chromatograms");
+    expect(view.diaXic).toEqual([
+      { precursorMz: 622.3, mz: 302.15, tolDa: 0.02 },
+      { precursorMz: 750.4, mz: 401.2, tolDa: 0.05 },
+    ]);
+  });
+  it("rejects malformed entries (arity/garbage/non-positive) and never emits chrom=tic alongside dia", () => {
+    expect(resolve({ dia: ["622.3,302.15"] }, "lc").view.diaXic).toEqual([]);
+    expect(resolve({ dia: ["622.3,abc,0.02"] }, "lc").view.diaXic).toEqual([]);
+    expect(resolve({ dia: ["622.3,302.15,0"] }, "lc").view.diaXic).toEqual([]);
+    const p = serialize(vs({ view: "chromatograms", diaXic: [{ precursorMz: 1, mz: 2, tolDa: 0.1 }] }), "lc");
+    expect(p.get("chrom")).toBeNull(); // an active DIA card must not claim a TIC
+  });
+  it("is dropped with a notice on an imaging file", () => {
+    const { view, notices } = resolve({ dia: ["622.3,302.15,0.02"] }, "imaging");
+    expect(view.diaXic).toEqual([]);
+    expect(notices.map((n) => n.code)).toContain("lc-cross-mode");
+  });
+});
+
+describe("num() precision — tight tolerances/zooms survive the URL (P0 item 13)", () => {
+  it("a sub-0.1-mDa XIC tolerance round-trips instead of collapsing to 0", () => {
+    const q = serialize(vs({ view: "chromatograms", chromMode: "xic", xic: { mz: 445.12007, tolDa: 0.00002 } }), "lc").toString();
+    const back = resolve(parseSearch(`?${q}`), "lc").view;
+    expect(back.xic).toEqual({ mz: 445.12007, tolDa: 0.00002 });
+  });
+  it("a tight m/z zoom keeps distinct endpoints (4-decimal cut made them equal → dropped)", () => {
+    const q = serialize(vs({ view: "spectra", spectrumZoom: [500.12341, 500.12349] }), "lc").toString();
+    const back = resolve(parseSearch(`?${q}`), "lc").view;
+    expect(back.spectrumZoom).toEqual([500.12341, 500.12349]);
+  });
+});
+
+describe("imaging files with stored chromatograms (P0 item 13 / K M-h)", () => {
+  it("?view=chromatograms + chrom=id: survives on an imaging file (tab exists in-app)", () => {
+    const { view, notices } = resolve({ view: "chromatograms", chrom: "id:TIC" }, "imaging");
+    expect(view.view).toBe("chromatograms");
+    expect(view.chromMode).toBe("stored");
+    expect(view.chromStoredId).toBe("TIC");
+    expect(notices.map((n) => n.code)).not.toContain("view-cross-mode");
+  });
+  it("extracted forms (xic) are still dropped on imaging", () => {
+    const { view, notices } = resolve({ xic: "445,0.1" }, "imaging");
+    expect(view.xic).toBeNull();
+    expect(notices.map((n) => n.code)).toContain("lc-cross-mode");
+  });
 });
 
 describe("buildShareUrl", () => {

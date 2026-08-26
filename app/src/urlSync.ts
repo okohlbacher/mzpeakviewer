@@ -25,7 +25,7 @@ import {
   type UsiIndexFlag,
   DEFAULT_VIEW_STATE,
 } from "@mzpeak/contracts";
-import { useStore } from "./store";
+import { useStore, getOpenSeq } from "./store";
 import { idsCarryScans, resolveScanToIndex, scanNumberOf } from "./scan";
 
 // ---------------------------------------------------------------------------
@@ -58,8 +58,18 @@ function modeFromCapabilities(): FileMode {
  * Chromatogram modes tic / xic / stored each add a card to the managed list; the
  * active card is mirrored into chromReq for the reverse share-link round-trip.
  */
-async function applyViewState(v: ViewState, notices: { code: string; message: string }[]) {
+async function applyViewState(
+  v: ViewState,
+  notices: { code: string; message: string }[],
+  explicitView = false,
+) {
   const st = useStore.getState();
+  // Cross-file guard: if the user opens a DIFFERENT file while this hydration's awaits
+  // are in flight, everything after the await would pollute the new file's state (XIC
+  // cards, imaging params, notices — adversarial-review finding). Capture the open
+  // generation and bail at every continuation point.
+  const seq = getOpenSeq();
+  const stale = () => getOpenSeq() !== seq;
 
   // 1. View first (so the panel is correct even if selection is a no-op).
   if (v.view) st.setView(v.view);
@@ -68,10 +78,11 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
   // right within-level numbering for the deep-linked spectrum.
   if (v.msLevelFilter != null) st.setMsLevelFilter(v.msLevelFilter);
 
-  // 1c. Signal-source preference (?sig=) — stored BEFORE the selection so the deep-linked
-  // spectrum loads with the preferred facet (no spectrum is loaded yet, so setSignalSource's
-  // re-read is a no-op here; the selection below picks the preference up).
-  if (v.signalSource !== "auto") st.setSignalSource(v.signalSource);
+  // 1c. Signal-source preference (?sig=) — store the RAW preference; the deep-linked
+  // selection below picks it up. NOT setSignalSource(): the open's preselect already
+  // loaded spectrum 0, so the action's re-read would race (and supersede) the
+  // deep-linked selection (adversarial-review, confirmed).
+  if (v.signalSource !== "auto") useStore.setState({ signalSource: v.signalSource });
 
   // 2. Selection (spectrum/scan → selectSpectrum). Defensive: only when numeric.
   // selectSpectrum routes to the Spectra view by default; suppress that when the deep
@@ -82,6 +93,7 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
   if (sel) {
     if (sel.by === "spectrum" && Number.isInteger(sel.index) && sel.index >= 0) {
       await st.selectSpectrum(sel.index, routeToSpectra).catch(() => {});
+      if (stale()) return;
     } else if (sel.by === "scan" && Number.isInteger(sel.scan) && sel.scan >= 0) {
       // Native scan → absolute index. The app store selects by absolute index,
       // but native scan ≠ index for Bruker/Thermo (scan = index + 1), so a naive
@@ -93,6 +105,7 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
       const resolved = carriesScans ? resolveScanToIndex(browse!, sel.scan) : null;
       if (resolved != null) {
         await st.selectSpectrum(resolved, routeToSpectra).catch(() => {});
+        if (stale()) return;
       } else if (!carriesScans) {
         // Fallback ONLY when ids don't carry scans (or browse absent): treat the scan
         // as an absolute index (correct when scan==index). Range-guarded. When ids DO
@@ -101,12 +114,14 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
         const n = browse?.id.length ?? null;
         if (n == null || sel.scan < n) {
           await st.selectSpectrum(sel.scan, routeToSpectra).catch(() => {});
+          if (stale()) return;
         }
       }
     } else if (sel.by === "pixel" && Number.isInteger(sel.x) && Number.isInteger(sel.y)) {
       // Imaging pixel deep link: resolve (x,y) → spectrum via the loaded grid.
       // route=false keeps the imaging view (already set above) and fills the dock.
       await st.selectPixel(sel.x, sel.y, false).catch(() => {});
+      if (stale()) return;
     }
   }
 
@@ -125,6 +140,11 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
       st.addXic({ mz: v.xic.mz, tolDa: v.xic.tolDa, ...(rt ? { rt } : {}), ...(v.xic.msLevel != null ? { msLevel: v.xic.msLevel } : {}) });
     } else if (v.chromMode === "stored" && v.chromStoredId) {
       await st.addStoredChromById(v.chromStoredId).catch(() => {});
+      if (stale()) return;
+    } else if (v.diaXic.length) {
+      for (const d of v.diaXic) {
+        st.addDiaXic({ precursorMz: d.precursorMz, fragmentMzs: [d.mz], tolDa: d.tolDa, ...(rt ? { rt } : {}) });
+      }
     } else if (v.chromMode === "tic") {
       st.addTic(rt);
     }
@@ -140,8 +160,12 @@ async function applyViewState(v: ViewState, notices: { code: string; message: st
   // ?roi= link to "spectra" — so for an imaging file, land on an imaging view.
   if (v.roi) {
     st.setRoiRect(v.roi);
+    // Reroute to an imaging view ONLY when the link didn't name a view itself — an
+    // explicit ?view= must win over this convenience (adversarial-review finding).
     const IMAGING_VIEWS = ["overview", "ion", "multi", "optical", "overlay"];
-    if (modeFromCapabilities() === "imaging" && !IMAGING_VIEWS.includes(v.view)) st.setView("overview");
+    if (!explicitView && modeFromCapabilities() === "imaging" && !IMAGING_VIEWS.includes(v.view)) {
+      st.setView("overview");
+    }
   }
 
   // 4. Cross-mode / dropped-param notices → the store's non-blocking banner.
@@ -184,7 +208,7 @@ export async function hydrateFromLocation(): Promise<void> {
 
   const mode = modeFromCapabilities();
   const { view, notices } = resolve(raw, mode);
-  await applyViewState(view, notices);
+  await applyViewState(view, notices, raw.view != null);
 }
 
 /**
@@ -217,11 +241,13 @@ export function currentShareUrl(): string {
   let chromXic = DEFAULT_VIEW_STATE.xic;
   let chromStoredId = DEFAULT_VIEW_STATE.chromStoredId;
   let chromTimeRange = DEFAULT_VIEW_STATE.chromTimeRange;
+  let diaXic = DEFAULT_VIEW_STATE.diaXic;
   if (s.view === "chromatograms" && s.chromReq) {
     const r = s.chromReq;
     if (r.mode === "xic") { chromMode = "xic"; chromXic = { mz: r.mz, tolDa: r.tolDa, ...(r.msLevel != null ? { msLevel: r.msLevel } : {}) }; }
     else if (r.mode === "xicRange") { chromMode = "xic"; chromXic = { mz: (r.mzLo + r.mzHi) / 2, tolDa: (r.mzHi - r.mzLo) / 2 }; }
     else if (r.mode === "stored") { chromMode = "stored"; chromStoredId = r.id; }
+    else if (r.mode === "diaXic") { diaXic = [{ precursorMz: r.precursorMz, mz: r.mz, tolDa: r.tolDa }]; }
     else chromMode = "tic";
     // rt window round-trips for tic + xic (the grammar re-applies it for those modes).
     if ("rt" in r && r.rt) chromTimeRange = r.rt;
@@ -239,6 +265,7 @@ export function currentShareUrl(): string {
     signalSource: s.signalSource,
     chromMode,
     xic: chromXic,
+    diaXic,
     chromStoredId,
     chromTimeRange,
     // imaging: emit the last Ion-image request + RGB channels so ?ion=/?ch=
