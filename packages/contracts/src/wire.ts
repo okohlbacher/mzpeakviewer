@@ -324,22 +324,8 @@ export type ParquetFooter = {
   hasPageIndex?: boolean | null;
 };
 
-/**
- * A page of a deeply-read parquet column — actual VALUES for the Structure preview.
- *
- * The three column operations are split by result shape: footer stats →
- * ParquetFooter columns above; paged values → ColumnPage; histogram →
- * ColumnSample.histogram.
- */
-export type ColumnPage = {
-  archivePath: string;
-  column: string;
-  offset: number;
-  /** Stringified cell values for display (the engine renders typed → string). */
-  values: Uint8Array; // length-prefixed UTF-8 blob; decoded by the shell adapter
-  count: number;
-  hasMore: boolean;
-};
+/** The two column operations are split by result shape: footer stats →
+ * ParquetFooter columns above; histogram → ColumnSample.histogram. */
 
 /** Computed numeric statistics over a column's sampled values. */
 export type ColumnStats = {

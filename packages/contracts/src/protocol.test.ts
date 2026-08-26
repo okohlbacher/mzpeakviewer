@@ -18,7 +18,6 @@ const REQUEST_TYPES: RequestType[] = [
   "chromatogramList",
   "archiveList",
   "parquetFooter",
-  "deepColumn",
   "sampleColumn",
   "archiveMemberBytes",
   "studyMeta",

@@ -14,9 +14,33 @@
   /* JSON/CV syntax colors for the metadata tree. */
   --syntax-key: #b026d3; /* object keys (brand purple) */
   --syntax-cv: #3b54da;  /* CV accessions (accent blue) */
-  --syntax-num: #2e9e5b; /* numeric / boolean (green) */
+  --syntax-num: #1a8249; /* numeric / boolean — a11y: #2e9e5b was ~3.4:1 on white (AA fail) */
   --syntax-str: #c2410c; /* string values (burnt orange) */
 
   /* Hover-readout chip over a uPlot cursor overlay. */
   --tooltip-bg: rgba(14, 18, 22, 0.82);
+
+  /* ── Referenced-but-undefined tokens (adversarial review 2026-08-26): every name
+     below was already used in views with an inline fallback — these definitions
+     promote those fallbacks to one source of truth. ───────────────────────── */
+  --text-primary: var(--gray-900);
+  --text-secondary: var(--gray-600);
+  --text-danger: var(--danger);
+  --surface-input: var(--gray-0);
+  --surface-page: var(--gray-50);
+  --border: var(--gray-200);
+  --border-subtle: var(--gray-150);
+  --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.14);
+  --weight-normal: 400;
+  --green-600: var(--success); /* a11y: the old inline #2e9e5b fallback failed AA */
+  --violet-600: #8a3ffc;
+  --accent-soft: rgba(59, 130, 246, 0.1);
+  --amber-50: #fffbeb;
+  --amber-300: #fcd34d;
+  --amber-900: #78350f;
+  --warning-soft: #fffbeb;
+  --warning-subtle: #fef3c7;
+  --warning-text: #92400e;
+  --info-soft: #eff6ff;
+  --success-subtle: #eafaf0;
 }

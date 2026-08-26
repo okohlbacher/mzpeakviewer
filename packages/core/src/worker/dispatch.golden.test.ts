@@ -72,9 +72,8 @@ describe("worker dispatch — real imaging fixture", () => {
     expect(res.selectId).toBe(1);
   });
 
-  it("an unimplemented message errors with class 'unsupported'", async () => {
-    // deepColumn (paged column values) isn't wired yet → fail loud, not silent.
-    const res = await run(ctx, { type: "deepColumn", archivePath: "spectra_data.parquet", column: "mz", offset: 0, limit: 10, requestId: 9 });
+  it("an unknown message errors with class 'unsupported' (fail loud, not silent)", async () => {
+    const res = await run(ctx, { type: "noSuchRequest", requestId: 9 } as never);
     expect(res.type).toBe("error");
     if (res.type !== "error") return;
     expect(res.class).toBe("unsupported");

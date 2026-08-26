@@ -66,6 +66,7 @@ export function SpectrumPlot({
   onZoomChange,
   onPeakClick,
   onPeakContextMenu,
+  height = HEIGHT,
 }: {
   spectrum: SpectrumArrays | null;
   xicWindow: { mz: number; tolDa: number } | null;
@@ -80,6 +81,9 @@ export function SpectrumPlot({
   /** Optional: a RIGHT-click resolves the nearest peak m/z + reports it with the cursor
    *  position (the Spectra view opens a "create chromatogram" popover there). */
   onPeakContextMenu?: (mz: number, clientX: number, clientY: number) => void;
+  /** Plot height in CSS px. @default 320 — pass a smaller value in constrained docks
+   *  (the imaging spectrum docks are 200px; a fixed 320 plot was clipped there). */
+  height?: number;
 }) {
   const specRef = useRef<SpectrumArrays | null>(spectrum);
   specRef.current = spectrum;
@@ -105,7 +109,7 @@ export function SpectrumPlot({
       if (data[0].length === 0) return null;
       const opts: uPlot.Options = {
         width,
-        height: HEIGHT,
+        height,
         scales: { x: { time: false, range: xRange } },
         legend: { show: false },
         plugins: [wheelZoomPlugin({ factor: 0.8 })],
@@ -175,8 +179,8 @@ export function SpectrumPlot({
       });
       return plot;
     },
-    HEIGHT,
-    [spectrum],
+    height,
+    [spectrum, height],
     [xicWindow],
   );
 
@@ -200,7 +204,31 @@ export function SpectrumPlot({
     plotRef.current?.redraw(false, false);
   }, [activeSig]);
 
-  return <div ref={hostRef} className="chart-host" />;
+  // Explicit empty state: a loaded spectrum with zero points renders a message, not a
+  // silently blank chart (several corpus files open onto hundreds of empty survey scans).
+  const isEmpty = spectrum != null && spectrum.mz.length === 0;
+  return (
+    <div style={{ position: "relative" }}>
+      <div ref={hostRef} className="chart-host" style={{ minHeight: isEmpty ? height : undefined }} />
+      {isEmpty && (
+        <div
+          data-testid="spectrum-empty-state"
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "var(--text-muted, #6b757e)",
+            fontSize: "var(--text-sm, 0.85rem)",
+            pointerEvents: "none",
+          }}
+        >
+          This spectrum has no data points.
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Report the live x-axis (m/z) view to the store, debounced to one frame.

@@ -6,7 +6,7 @@
 // arrays / ImageData-like RGBA / plain JSON only.
 //
 // This union covers both the imaging/worker messages and the data-access messages
-// (archiveList, parquetFooter, deepColumn, sampleColumn, scanBreakdown,
+// (archiveList, parquetFooter, sampleColumn, scanBreakdown,
 //  extractChrom, studyMeta).
 //
 // Every long-running request carries a `requestId`; the matching response echoes
@@ -29,7 +29,6 @@ import type {
   ChromatogramSeries,
   ChromatogramInfo,
   ParquetFooter,
-  ColumnPage,
   ColumnSample,
   ArchiveMemberList,
   StudyMeta,
@@ -103,8 +102,6 @@ export type WorkerRequest =
   // --- archive / parquet structure (Structure tab) -------------------------
   | { type: "archiveList"; requestId: number }
   | { type: "parquetFooter"; archivePath: string; requestId: number }
-  // Paged deep column read; offset/limit page large columns (no 256 MB clone).
-  | { type: "deepColumn"; archivePath: string; column: string; offset: number; limit: number; requestId: number }
   | { type: "sampleColumn"; archivePath: string; column: string; n: number; requestId: number }
   // Raw member bytes, capped; the result ArrayBuffer is TRANSFERRED, never cloned.
   | { type: "archiveMemberBytes"; archivePath: string; maxBytes: number; requestId: number }
@@ -139,7 +136,6 @@ export type WorkerResponse =
       tic: Float32Array | null;
       opticalImages: OpticalImageMeta[];
       fileSize: number | null;
-      mixedRepresentationWarning: string | null;
     }
   // spectrum mz/intensity buffers TRANSFERRED; selectId echoed for ordering.
   | { type: "spectrumResult"; spectrum: SpectrumArrays; selectId: number }
@@ -155,8 +151,6 @@ export type WorkerResponse =
   | { type: "chromatogramListResult"; requestId: number; chromatograms: ChromatogramInfo[] }
   | { type: "archiveListResult"; requestId: number; members: ArchiveMemberList }
   | { type: "parquetFooterResult"; requestId: number; footer: ParquetFooter }
-  // Paged: `page.values.buffer` TRANSFERRED; `hasMore` signals further pages.
-  | { type: "deepColumnResult"; requestId: number; page: ColumnPage }
   | { type: "sampleColumnResult"; requestId: number; sample: ColumnSample }
   // member bytes TRANSFERRED (up to the request's maxBytes cap).
   | { type: "archiveMemberBytesResult"; requestId: number; archivePath: string; bytes: ArrayBuffer; truncated: boolean }
@@ -244,7 +238,6 @@ export const MESSAGE_POLICY: Record<RequestType, MessagePolicy> = {
   chromatogramList: { cancellation: "stale-drop", transfersResult: false, paged: false },
   archiveList: { cancellation: "stale-drop", transfersResult: false, paged: false },
   parquetFooter: { cancellation: "stale-drop", transfersResult: false, paged: false },
-  deepColumn: { cancellation: "abort", transfersResult: true, paged: true },
   sampleColumn: { cancellation: "stale-drop", transfersResult: true, paged: false },
   archiveMemberBytes: { cancellation: "abort", transfersResult: true, paged: false, sizeCapBytes: MAX_MEMBER_BYTES },
   studyMeta: { cancellation: "stale-drop", transfersResult: false, paged: false },
