@@ -213,7 +213,11 @@ export function startIonPrefetch(ctx: EngineContext, respond?: Respond): void {
 export function startSpectrumPrefetch(ctx: EngineContext): void {
   const ef = ctx.active;
   const gen = ctx.gen;
-  if (!ef || ef.grid || !ctx.preloadEnabled || ctx.remote) return; // imaging → ion prefetch; remote → skip
+  // imaging → ion prefetch; remote → skip; per-peak-mobility files → skip: the bulk
+  // stream carries no mobility column, so a prefetched hit would silently LOSE the
+  // ion-mobility panel that a cold read provides (adversarial-review P0 finding).
+  if (!ef || ef.grid || !ctx.preloadEnabled || ctx.remote) return;
+  if (ef.capabilities?.mobility?.present) return;
   void prefetchSpectrumCache(ef.reader, ctx.spectrumCache, {
     mutex: ctx.mutex,
     shouldStop: () => ctx.gen !== gen,
@@ -277,7 +281,6 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
             tic: ef.tic,
             opticalImages: ef.opticalImages,
             fileSize: req.source.kind === "file" ? req.source.blob.size : null,
-            mixedRepresentationWarning: null,
           },
           // Transfer ONLY the fresh TIC; the worker RETAINS the grid arrays (needed
           // for renders) so they are structured-cloned, never detached.
@@ -360,7 +363,17 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         if (!ctx.wavelengthMatrix) {
           ctx.wavelengthMatrix = await buildWavelengthMatrix(reader);
         }
-        const matrix = ctx.wavelengthMatrix;
+        // COPY before transfer: transferring the cached buffers detaches them, so a second
+        // wavelengthMatrix request in the same session would read detached arrays and die
+        // with a misleading "internal" DataCloneError (adversarial-review finding — every
+        // other cached-payload path copies at the boundary).
+        const cachedMatrix = ctx.wavelengthMatrix;
+        const matrix = {
+          ...cachedMatrix,
+          time: cachedMatrix.time.slice(),
+          wavelength: cachedMatrix.wavelength.slice(),
+          intensity: cachedMatrix.intensity.slice(),
+        };
         respond(
           { type: "wavelengthMatrixResult", requestId: req.requestId, matrix },
           buffersOf(matrix.time, matrix.wavelength, matrix.intensity),
@@ -557,7 +570,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
           type: "error",
           ...(requestId !== undefined ? { requestId } : {}),
           class: "unsupported",
-          message: `engine: "${req.type}" not implemented in this slice`,
+          message: `engine: "${(req as { type?: string }).type}" not implemented in this slice`,
         });
         return;
       }

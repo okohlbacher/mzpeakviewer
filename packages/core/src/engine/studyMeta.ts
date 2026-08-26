@@ -92,10 +92,16 @@ export async function engineStudyMeta(reader: Reader): Promise<StudyMeta> {
   const runId = str(obj(meta.run)?.id);
   let effectiveChannels = channels;
   let channelsSource: StudyMeta["channelsSource"] = channels.length > 0 ? "projected" : "none";
-  if (channels.length === 0 && sdrfMember) {
+  // The projection is authoritative only when it yielded at least one channel WITH a
+  // reporter m/z — label params whose labels resolve to no reporter (non-isobaric or
+  // unknown reagent names) must not suppress an SDRF fallback that can do better.
+  const projectedUsable = channels.some((c) => c.reporterMz != null);
+  if (!projectedUsable && sdrfMember) {
     const fb = await sdrfChannelsFallback(reader, sdrfMember, runId);
-    effectiveChannels = fb.channels;
-    if (fb.channels.length > 0) channelsSource = fb.matchedRun ? "sdrf-run" : "sdrf-study";
+    if (fb.channels.length > 0) {
+      effectiveChannels = fb.channels;
+      channelsSource = fb.matchedRun ? "sdrf-run" : "sdrf-study";
+    }
   }
 
   return {
@@ -188,8 +194,11 @@ async function sdrfChannelsFallback(
 
     // Prefer the rows that name this run; fall back to the study-wide distinct label set
     // (a fraction's data-file spelling may not match the run id exactly). The caller is
-    // told which case happened so the UI can label a study-wide set honestly.
-    const matched = collect(true);
+    // told which case happened so the UI can label a study-wide set honestly. With no
+    // run id or no data-file column the "matched" pass filters nothing — that is the
+    // study-wide set and must NOT be reported as run-matched.
+    const canMatchRun = want != null && di >= 0;
+    const matched = canMatchRun ? collect(true) : [];
     if (matched.length > 0) return { channels: matched, matchedRun: true };
     return { channels: collect(false), matchedRun: false };
   } catch {

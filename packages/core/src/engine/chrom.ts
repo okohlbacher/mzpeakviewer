@@ -111,7 +111,12 @@ export function engineChromatogramList(reader: Reader): ChromatogramInfo[] {
       index: i,
       id: String(rec.id ?? i),
       typeAccession: typeof typeRaw === "string" ? typeRaw : null,
-      polarity: polRaw === -1 ? "-" : polRaw === 1 ? "+" : null,
+      // Arrow int columns can surface as bigint — Number() folds both before comparing.
+      polarity: (() => {
+        const p =
+          typeof polRaw === "number" || typeof polRaw === "bigint" ? Number(polRaw) : NaN;
+        return p === -1 ? "-" : p === 1 ? "+" : null;
+      })(),
       nPoints:
         typeof nPtsRaw === "number" ? nPtsRaw : typeof nPtsRaw === "bigint" ? Number(nPtsRaw) : null,
       // Prefer the reader's typed fields (isolation-window target / selected-ion m/z);
@@ -171,6 +176,51 @@ export function pickUseProfileForLevel(ctx: ChromContext | undefined, msLevel: n
   return profile >= centroid;
 }
 
+/**
+ * All-level XIC on a MIXED-representation file: a single-facet read silently drops the
+ * minority representation's signal (those spectra may not exist in the majority facet
+ * at all). Read BOTH facets and take each spectrum's points from its DECLARED
+ * representation's facet — no double-counting on dual-stored files. Falls back to the
+ * unchanged single majority-facet read when the file isn't mixed, scan rows are
+ * unavailable, or the minority facet can't be read.
+ */
+async function extractAllLevels(
+  reader: Reader,
+  opts: { mz: number | null; tolDa: number | null; timeRange: [number, number] | null },
+  ctx?: ChromContext,
+): Promise<ChromPoint[]> {
+  const counts = ctx?.representationCounts;
+  const rows = ctx?.rows;
+  const mixed = (counts?.profile ?? 0) > 0 && (counts?.centroid ?? 0) > 0;
+  const majorityProfile = pickUseProfile(ctx);
+  if (!mixed || !rows || rows.length === 0) {
+    return extractChromatogram(reader, { ...opts, useProfile: majorityProfile });
+  }
+  const major = await extractChromatogram(reader, { ...opts, useProfile: majorityProfile });
+  let minor: ChromPoint[];
+  try {
+    minor = await extractChromatogram(reader, { ...opts, useProfile: !majorityProfile });
+  } catch {
+    return major; // minority facet unreadable — keep the majority-only trace
+  }
+  // Per-spectrum facet routing by declared representation; unknown rows follow the majority.
+  const wantsProfile = new Map<number, boolean>();
+  for (const r of rows) {
+    if (r.representation === "profile") wantsProfile.set(r.index, true);
+    else if (r.representation === "centroid") wantsProfile.set(r.index, false);
+  }
+  const merged: ChromPoint[] = [];
+  for (const p of major) {
+    const wp = wantsProfile.get(p.index);
+    if (wp === undefined || wp === majorityProfile) merged.push(p);
+  }
+  for (const p of minor) {
+    if (wantsProfile.get(p.index) === !majorityProfile) merged.push(p);
+  }
+  merged.sort((a, b) => a.time - b.time);
+  return merged;
+}
+
 /** MS1 rows if any carry msLevel 1, else all rows. */
 function ticRows(rows: readonly SpectrumIndexRow[]): SpectrumIndexRow[] {
   const ms1 = rows.filter((r) => r.msLevel === 1);
@@ -221,7 +271,10 @@ async function buildTic(
     if (rows.length > AUTO_SCAN_LIMIT) return null; // too expensive to sum
   }
 
-  const useProfile = pickUseProfile(ctx);
+  // The summed trace is MS1-filtered below, so choose the facet from the MS1 rows'
+  // representation — the whole-file majority can be an MS2-dominated facet that holds
+  // none of the MS1 spectra (empty TIC despite valid MS1 signal).
+  const useProfile = pickUseProfileForLevel(ctx, 1);
   const all = await extractChromatogram(reader, {
     mz: null,
     tolDa: null,
@@ -294,13 +347,18 @@ export async function engineExtractChrom(
     tolDa = (req.mzHi - req.mzLo) / 2;
   }
 
-  let points = await extractChromatogram(reader, {
-    mz,
-    tolDa,
-    timeRange: rt,
-    // For an MS-level-limited XIC, choose the source from the requested level's representation.
-    useProfile: pickUseProfileForLevel(ctx, req.mode === "xic" ? (req.msLevel ?? null) : null),
-  });
+  // For an MS-level-limited XIC, choose the source from the requested level's
+  // representation; an all-level XIC merges both facets on mixed files instead.
+  const wantLevel = req.mode === "xic" ? (req.msLevel ?? null) : null;
+  let points =
+    wantLevel != null
+      ? await extractChromatogram(reader, {
+          mz,
+          tolDa,
+          timeRange: rt,
+          useProfile: pickUseProfileForLevel(ctx, wantLevel),
+        })
+      : await extractAllLevels(reader, { mz, tolDa, timeRange: rt }, ctx);
   // MS-level limit (xic only): keep only points from spectra of the requested level — a
   // peak picked in an MS2 spectrum yields an MS2-only XIC. ALWAYS filter when a level is
   // requested (honest contract): if the scan rows are unavailable or the level is absent,

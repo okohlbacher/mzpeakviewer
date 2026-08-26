@@ -34,7 +34,6 @@ import type {
   ChromatogramInfo,
   ArchiveMemberList,
   ParquetFooter,
-  ColumnPage,
   ColumnSample,
   StudyMeta,
   IonImageStats,
@@ -59,6 +58,10 @@ export interface WorkerLike {
     type: "message",
     listener: (ev: { data: WorkerResponse }) => void,
   ): void;
+  addEventListener(
+    type: "error",
+    listener: (ev: { message?: string }) => void,
+  ): void;
   terminate?(): void;
 }
 
@@ -77,7 +80,6 @@ export type OpenedResult = {
   tic: Float32Array | null;
   opticalImages: OpticalImageMeta[];
   fileSize: number | null;
-  mixedRepresentationWarning: string | null;
 };
 
 export type ScanBreakdownResult = { stats: FileStats; browse: BrowseIndex; ticColumn: Presence };
@@ -180,7 +182,6 @@ const RESOLVE_TYPE: Partial<Record<WorkerRequest["type"], WorkerResponse["type"]
   chromatogramList: "chromatogramListResult",
   archiveList: "archiveListResult",
   parquetFooter: "parquetFooterResult",
-  deepColumn: "deepColumnResult",
   sampleColumn: "sampleColumnResult",
   archiveMemberBytes: "archiveMemberBytesResult",
   studyMeta: "studyMetaResult",
@@ -225,6 +226,15 @@ export class EngineClient {
   constructor(worker: WorkerLike) {
     this.worker = worker;
     this.worker.addEventListener("message", (ev) => this.handleMessage(ev.data));
+    // Worker INITIALIZATION failures (missing WASM asset, CSP rejection, module load
+    // error) never post a message — without this listener every request buffered
+    // behind the ready handshake stayed pending forever and open() hung silently
+    // (adversarial-review finding). Reject everything with an actionable error.
+    this.worker.addEventListener("error", (ev) => {
+      this.rejectAllPending(
+        () => new Error(`Engine worker failed to start: ${ev.message ?? "unknown worker error"}`),
+      );
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -419,23 +429,6 @@ export class EngineClient {
   /** Read a parquet member's footer/schema. */
   parquetFooter(archivePath: string): Promise<ParquetFooter> {
     return this.request<ParquetFooter>((requestId) => ({ type: "parquetFooter", archivePath, requestId }));
-  }
-
-  /** Paged deep column read. */
-  deepColumn(
-    archivePath: string,
-    column: string,
-    offset: number,
-    limit: number,
-  ): Promise<ColumnPage> {
-    return this.request<ColumnPage>((requestId) => ({
-      type: "deepColumn",
-      archivePath,
-      column,
-      offset,
-      limit,
-      requestId,
-    }));
   }
 
   /** Sample `n` values from a column. */
@@ -746,8 +739,6 @@ export class EngineClient {
         return msg.members;
       case "parquetFooterResult":
         return msg.footer;
-      case "deepColumnResult":
-        return msg.page;
       case "sampleColumnResult":
         return msg.sample;
       case "archiveMemberBytesResult":

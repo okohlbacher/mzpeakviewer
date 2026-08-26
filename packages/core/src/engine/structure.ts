@@ -176,7 +176,12 @@ export async function engineArchiveMemberBytes(
   const rb = store?.open ? await store.open(archivePath) : undefined;
   if (!rb) throw new Error(`archive member not found: ${archivePath}`);
   const size = num(rb.size);
-  const cap = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : size;
+  // Clamp to the protocol's hard 256 MiB member cap regardless of what the caller asks —
+  // a hostile/oversized member must not be fully materialized in the worker (the app was
+  // passing 2 GiB here; adversarial-review finding).
+  const HARD_CAP = 256 * 1024 * 1024;
+  const askedRaw = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : size;
+  const cap = Math.min(askedRaw, HARD_CAP);
   const truncated = size > cap;
   const end = truncated ? cap : size;
   const bytes = await rb.slice(0, end).arrayBuffer();

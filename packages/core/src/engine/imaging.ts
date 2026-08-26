@@ -136,7 +136,10 @@ export function windowSumScan(
   let sum = 0;
   for (let i = 0; i < n; i++) {
     const m = mz[i]!;
-    if (m < lo || m > hi) continue;
+    // NB: written as a positive in-window test so a NaN m/z is EXCLUDED — `m < lo || m > hi`
+    // is false-false for NaN, which summed unpositioned points into every window
+    // (adversarial-review finding).
+    if (!(m >= lo && m <= hi)) continue;
     const v = intensity[i]!;
     if (Number.isFinite(v)) sum += v;
   }
@@ -156,6 +159,7 @@ export function windowSumSorted(
   let sum = 0;
   for (let i = lowerBound(mz, lo); i < n; i++) {
     const m = mz[i]!;
+    if (!Number.isFinite(m)) continue; // NaN neither breaks nor sums (see windowSumScan)
     if (m > hi) break;
     const v = intensity[i]!;
     if (Number.isFinite(v)) sum += v;
@@ -573,15 +577,27 @@ function accumulate(
   if (n === 0) return;
 
   if (acc.refMz === null) {
-    // First spectrum defines the reference axis (sorted ascending). f32 axis: an f64 source
-    // is downcast here so the axis is f32-precision regardless of cache state (see type doc).
-    const ref = new Float32Array(n);
-    const sum = new Float64Array(n);
-    const cnt = new Int32Array(n);
+    // First spectrum defines the reference axis. FINITE PAIRS ONLY (one NaN would poison
+    // its bin forever — the ion path guards, this path must too), and SORTED ascending:
+    // nearestBin binary-searches this axis, so an unsorted source (valid but rare) would
+    // silently mis-bin every later spectrum (adversarial-review P0 finding; the axis-
+    // truncation limitation — peaks outside pixel 0's range are dropped — is documented
+    // in the backlog and unchanged here).
+    const idx: number[] = [];
     for (let i = 0; i < n; i++) {
-      ref[i] = mz[i]!;
-      sum[i] = intensity[i]!;
-      cnt[i] = 1;
+      if (Number.isFinite(mz[i]!) && Number.isFinite(intensity[i]!)) idx.push(i);
+    }
+    idx.sort((a, b) => mz[a]! - mz[b]!);
+    const m = idx.length;
+    if (m === 0) return;
+    const ref = new Float32Array(m);
+    const sum = new Float64Array(m);
+    const cnt = new Int32Array(m);
+    for (let k = 0; k < m; k++) {
+      const i = idx[k]!;
+      ref[k] = mz[i]!;
+      sum[k] = intensity[i]!;
+      cnt[k] = 1;
     }
     acc.refMz = ref;
     acc.intensitySum = sum;
@@ -595,9 +611,11 @@ function accumulate(
   const cnt = acc.countPerBin!;
   for (let j = 0; j < n; j++) {
     const mzVal = mz[j]!;
+    const iv = intensity[j]!;
+    if (!Number.isFinite(mzVal) || !Number.isFinite(iv)) continue; // NaN/Inf never poisons a bin
     const bi = nearestBin(ref, mzVal);
     if (Math.abs(ref[bi]! - mzVal) <= BIN_TOL_DA) {
-      sum[bi] = sum[bi]! + intensity[j]!;
+      sum[bi] = sum[bi]! + iv;
       cnt[bi] = cnt[bi]! + 1;
     }
   }
@@ -730,9 +748,13 @@ export async function engineMeanSpectrum(
       representation: null,
     };
   }
-  // Uniform subsample of [0, total) to at most MAX_SAMPLES indices.
+  // MS1 ONLY (fallback: all when the file declares no MS1 — same rule as the ion
+  // image and TIC paths): averaging fragment spectra into a "mean spectrum" mixes
+  // incompatible populations (adversarial-review P0 finding).
   const all = Array.from({ length: total }, (_, i) => i);
-  const indices = uniformSubsample(all, MAX_SAMPLES);
+  const isMs1 = makeMs1Only(reader, all);
+  const pool = all.filter(isMs1);
+  const indices = uniformSubsample(pool.length > 0 ? pool : all, MAX_SAMPLES);
   return meanSpectrumOver(reader, indices, "mean-sampled", cache);
 }
 

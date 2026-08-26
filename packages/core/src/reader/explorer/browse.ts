@@ -137,8 +137,12 @@ export async function extractChromatogram(
     mz != null && tolDa != null
       ? { start: mz - tolDa, end: mz + tolDa }
       : null;
+  // App-side RT is SECONDS; the file's time column is MINUTES (mzPeak/mzML scan-start-time
+  // convention, unit UO:0000031 — same convention the wavelength path converts). The reader
+  // compares against raw file values, so the window converts s→min going in and every point
+  // converts min→s coming out. This is the ONE boundary where MS times enter the app.
   const tRange =
-    timeRange != null ? { start: timeRange[0], end: timeRange[1] } : null;
+    timeRange != null ? { start: timeRange[0] / 60, end: timeRange[1] / 60 } : null;
 
   const xic = await reader.extractXIC(tRange, mzRange, useProfile);
   if (!xic) return [];
@@ -155,7 +159,8 @@ export async function extractChromatogram(
     }
     out.push({
       index: Number(p.index),
-      time: typeof p.time === "number" ? p.time : Number(p.index),
+      // minutes → seconds (see tRange note above); index fallback stays unitless.
+      time: typeof p.time === "number" ? p.time * 60 : Number(p.index),
       intensity: sum,
     });
   }
@@ -185,7 +190,9 @@ export async function getStoredChromatogram(
   if (!t || !inten) return null;
   // Drop non-finite pairs and sort by time (clicking maps time → nearest spectrum).
   const clean = sanitizePairs(Float64Array.from(t), Float32Array.from(inten));
-  return { index, id: String(chrom.id), time: clean.x, intensity: clean.y };
+  // Stored chromatogram time axis is file MINUTES → wire SECONDS (wire.ts contract).
+  const timeSec = clean.x.map((v) => v * 60);
+  return { index, id: String(chrom.id), time: timeSec, intensity: clean.y };
 }
 
 export function chromatogramIds(reader: Reader): { index: number; id: string }[] {

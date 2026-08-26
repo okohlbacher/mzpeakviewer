@@ -55,6 +55,11 @@ describe("scanSpectra — promoted columns resolve on both layouts (MS-level sel
         centroid: 2,
         unknown: 0,
       });
+      // RT UNITS (adversarial review 2026-08-26, P0 item 1): the file's `time` column is
+      // MINUTES (UO:0000031) but BrowseIndex.rt / rtRange are SECONDS (wire.ts contract).
+      // A regression here shifts every retention time 60× in the Browse list and Summary.
+      expect(rows.map((r) => r.time)).toEqual([6, 12, 18]);
+      expect(aggregates.rtRange).toEqual([6, 18]);
     });
   }
 });

@@ -18,6 +18,7 @@ import type { SpectrumArrays as WireSpectrumArrays, MobilityCodec } from "@mzpea
 import { adaptSpectrum } from "../adapt/spectrum";
 import { packMobility } from "../reader/mobility";
 import { spectrumMeta } from "../reader/fileMeta";
+import { getCol } from "../reader/explorer/cv";
 import { streamSpectraDataArrays, streamSpectraPeaksArrays, type Reader, type StreamedSpectrumArrays } from "../reader/openUrl";
 import type { SpectrumRepresentation } from "../reader/types";
 import type { SpectrumLruCache } from "./cache";
@@ -25,8 +26,6 @@ import type { PrefetchControl } from "./imaging";
 
 // Promoted per-spectrum columns (CV-accession-derived names) read vectorized for the
 // LC prefetch — no per-record materialization.
-const MS_LEVEL_COL = "MS_1000511_ms_level";
-const REPR_COL = "MS_1000525_spectrum_representation";
 const REPR_PROFILE_ACC = "MS:1000128";
 const REPR_CENTROID_ACC = "MS:1000127";
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -599,9 +598,15 @@ function readCols(reader: Reader): { n: number; lvl: Col; repr: Col } {
     | null
     | undefined;
   const spectra = sm?.spectra;
-  const get = (name: string): Col =>
-    spectra && typeof spectra.getChild === "function" ? spectra.getChild(name) : null;
-  return { n: sm?.length ?? 0, lvl: get(MS_LEVEL_COL), repr: get(REPR_COL) };
+  // Resolve nested OR flat column names via getCol — hardcoding the nested names made the
+  // prefetch treat every flat-file spectrum as unknown-level/unknown-representation:
+  // MS2 spectra were prefetched and centroid-declared spectra were cached from the
+  // PROFILE facet with wrong provenance (adversarial-review P0 finding).
+  return {
+    n: sm?.length ?? 0,
+    lvl: getCol<NonNullable<Col>>(spectra as never, "msLevel"),
+    repr: getCol<NonNullable<Col>>(spectra as never, "representation"),
+  };
 }
 
 /**
@@ -670,6 +675,12 @@ export async function prefetchSpectrumCache(
             const res = await it.next();
             if (res.done) { done = true; return; }
             const { index, mz, intensity } = res.value;
+            // STALE-GENERATION GUARD AT THE WRITE: shouldStop() is also checked between
+            // slices, but an open(B) queued on the same mutex clears this cache and bumps
+            // the generation while a slice is parked — writing after that would put file
+            // A's spectra into file B's LRU keyed only by index (adversarial-review
+            // BLOCKER; the ion prefetch commit was gen-guarded, this one was not).
+            if (control.shouldStop()) { done = true; return; }
             const doCache = accept(index);
             if (doCache) {
               // The spectrum-display prefetch streams full f64 m/z (default, no mzFloat32) for
@@ -677,7 +688,10 @@ export async function prefetchSpectrumCache(
               // stamped by the caller's onRow hook — prefetch entries MUST carry the same
               // provenance as cold reads, or a prefetch-warmed LRU hit hides the Signal
               // toggle on exactly the dual files it exists for (adversarial-review finding).
-              cache.set(index, { mz: mz as Float64Array, intensity, msLevel: msLevelOf(index) });
+              // sanitizePairs mirrors the cold-read path (drop non-finite pairs, ascending
+              // m/z) — warm hits must never serve rows the cold path would have cleaned.
+              const clean = sanitizePairs(mz as Float64Array, intensity);
+              cache.set(index, { mz: clean.mz, intensity: clean.intensity, msLevel: msLevelOf(index) });
               cached++;
             }
             onRow?.(index, mz, doCache);

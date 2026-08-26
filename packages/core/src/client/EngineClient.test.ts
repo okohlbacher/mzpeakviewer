@@ -19,15 +19,19 @@ import { EngineClient, EngineError, SupersededError, EngineClosedError, type Wor
 
 class FakeWorker implements WorkerLike {
   readonly sent: { msg: unknown; transfer?: Transferable[] }[] = [];
-  private listener: ((ev: { data: WorkerResponse }) => void) | null = null;
+  // Keyed by event type: the client registers BOTH "message" and "error" listeners —
+  // a single slot let the later registration clobber the message listener.
+  private listeners = new Map<string, (ev: unknown) => void>();
   terminated = false;
 
   postMessage(msg: unknown, transfer?: Transferable[]): void {
     this.sent.push({ msg, transfer });
   }
 
-  addEventListener(_type: "message", cb: (ev: { data: WorkerResponse }) => void): void {
-    this.listener = cb;
+  addEventListener(type: "message", cb: (ev: { data: WorkerResponse }) => void): void;
+  addEventListener(type: "error", cb: (ev: { message?: string }) => void): void;
+  addEventListener(type: string, cb: (ev: never) => void): void {
+    this.listeners.set(type, cb as (ev: unknown) => void);
   }
 
   terminate(): void {
@@ -36,8 +40,9 @@ class FakeWorker implements WorkerLike {
 
   /** Drive an inbound response as if the worker posted it. */
   push(data: WorkerResponse): void {
-    if (!this.listener) throw new Error("FakeWorker: no listener registered");
-    this.listener({ data });
+    const listener = this.listeners.get("message");
+    if (!listener) throw new Error("FakeWorker: no listener registered");
+    listener({ data });
   }
 
   /** The last message sent (by type narrowing convenience). */
@@ -284,7 +289,6 @@ describe("EngineClient", () => {
       tic,
       opticalImages: [],
       fileSize: 1234,
-      mixedRepresentationWarning: null,
     });
     const result = await p;
     expect(result.stats).toBe(STATS);
@@ -354,7 +358,6 @@ describe("EngineClient", () => {
       tic: null,
       opticalImages: [],
       fileSize: null,
-      mixedRepresentationWarning: null,
     });
     await expect(p2).resolves.toBeDefined();
   });

@@ -351,18 +351,37 @@ export function buildWavelengthBrowse(reader: Reader): WavelengthBrowseIndex {
  * present on any spectrum (we do NOT decode arrays just to find the range).
  */
 export async function wavelengthRange(reader: Reader): Promise<[number, number] | null> {
-  const n = reader.wavelengthMetadata?.length ?? reader.numWavelengthSpectra ?? 0;
+  const sm = reader.wavelengthMetadata as unknown as WavelengthMetaTable | null;
+  const n = sm?.length ?? reader.numWavelengthSpectra ?? 0;
   if (!n) return null;
-  // The FIRST wavelength spectrum only: PDA/DAD scans share one common
-  // wavelength grid, so spectrum 0's observed range is the dataset range — no need to
-  // read every spectrum. Materialized once onto capability.wavelength.range at open.
+  // Dataset range from the metadata table: min of the declared lows / max of the highs
+  // across ALL wavelength spectra (a variable-grid PDA's spectrum 0 need not span the
+  // dataset). Metadata rows only — no signal arrays are decoded here.
+  if (sm) {
+    let lo: number | null = null;
+    let hi: number | null = null;
+    for (let i = 0; i < n; i++) {
+      let rec: RawWavelengthSpectrum | undefined;
+      try {
+        rec = sm.get(i);
+      } catch {
+        continue;
+      }
+      if (!rec) continue;
+      const l = readNumeric(rec, LOWEST_OBSERVED_ACC);
+      const h = readNumeric(rec, HIGHEST_OBSERVED_ACC);
+      if (l != null && l > 0 && (lo === null || l < lo)) lo = l;
+      if (h != null && h > 0 && (hi === null || h > hi)) hi = h;
+    }
+    if (lo != null && hi != null && lo <= hi) return [lo, hi];
+  }
+  // Fallback (no declared range on any spectrum): spectrum 0's decoded array bounds.
   let spec: WavelengthSpectrumArrays;
   try {
     spec = await readWavelengthSpectrum(reader, 0);
   } catch {
     return null; // EmptyWavelengthSpectrumError / transient read error → no range
   }
-  // Prefer the validated observed-range metadata; else the sorted wavelength-array bounds.
   const lo = spec.observedRange ? spec.observedRange[0] : spec.wavelength[0];
   const hi = spec.observedRange ? spec.observedRange[1] : spec.wavelength[spec.wavelength.length - 1];
   if (lo == null || hi == null || !Number.isFinite(lo) || !Number.isFinite(hi) || lo <= 0 || hi <= 0 || lo > hi) {
@@ -397,7 +416,19 @@ export async function buildWavelengthMatrix(reader: Reader): Promise<WavelengthM
 
   const spectra: WavelengthSpectrumArrays[] = [];
   for (let i = 0; i < n; i++) {
-    spectra.push(await readWavelengthSpectrum(reader, i));
+    // Untrusted input: ONE undecodable spectrum must not kill the whole PDA matrix —
+    // skip it (the sibling wavelengthRange already degrades the same way).
+    try {
+      spectra.push(await readWavelengthSpectrum(reader, i));
+    } catch {
+      // skipped — the row is simply absent from the heatmap
+    }
+  }
+  if (spectra.length === 0) {
+    return {
+      time: new Float32Array(0), wavelength: new Float32Array(0), intensity: new Float32Array(0),
+      width: 0, height: 0, min: NaN, max: NaN, intensityUnit: "Intensity",
+    };
   }
 
   // Common grid: spectrum 0's wavelength axis (already ascending from reconstruct).

@@ -173,7 +173,10 @@ async function scanByColumns(
       else bucket.unknown++;
     }
 
-    const time = numOrNull(timeCol?.get(i));
+    // File time column is MINUTES; the wire BrowseIndex.rt and FileStats.rtRange are
+    // SECONDS (wire.ts:58). Convert here — the single producer of MS retention times.
+    const rawTime = numOrNull(timeCol?.get(i));
+    const time = rawTime !== null ? rawTime * 60 : null;
     if (time !== null) {
       if (rtMin === null || time < rtMin) rtMin = time;
       if (rtMax === null || time > rtMax) rtMax = time;
