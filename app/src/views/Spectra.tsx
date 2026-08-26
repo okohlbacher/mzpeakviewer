@@ -489,6 +489,38 @@ export function Spectra() {
         />
       )}
 
+      {/* Leading-empty guidance: several corpus files open onto hundreds of empty survey
+          scans (first real signal can be spectrum #800+) — offer a one-click jump to the
+          first spectrum whose promoted TIC is non-zero instead of a silent blank plot. */}
+      {spectrum && spectrum.mz.length === 0 && browse && (() => {
+        let firstIdx = -1;
+        for (let i = 0; i < browse.tic.length; i++) {
+          const t = browse.tic[i]!;
+          if (Number.isFinite(t) && t > 0) { firstIdx = i; break; }
+        }
+        if (firstIdx < 0 || firstIdx === currentIndex) return null;
+        return (
+          <p style={{ margin: 0, fontSize: "var(--text-sm)" }}>
+            <button
+              type="button"
+              data-testid="jump-first-nonempty"
+              onClick={() => void selectSpectrum(firstIdx)}
+              style={{
+                border: "1px solid var(--border-default, #e2e8f0)",
+                borderRadius: "var(--radius-sm, 4px)",
+                background: "var(--surface-card, #fff)",
+                color: "var(--text-link, #1d4ed8)",
+                padding: "0.25rem 0.6rem",
+                cursor: "pointer",
+                fontSize: "inherit",
+              }}
+            >
+              Jump to first non-empty spectrum (#{firstIdx})
+            </button>
+          </p>
+        );
+      })()}
+
       {spectrum && (
         <p
           style={{

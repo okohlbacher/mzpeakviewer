@@ -565,7 +565,7 @@ function TopBar() {
         type="button"
         data-testid="load-demo-btn"
         disabled={busy}
-        title="Back to the start page to pick an example dataset"
+        title="Close this file and return to the start page (demo datasets live there)"
         onClick={() => reset()}
         style={{
           marginLeft: "0.5rem",
@@ -579,7 +579,7 @@ function TopBar() {
           cursor: busy ? "not-allowed" : "pointer",
         }}
       >
-        Load demo
+        Start page
       </button>
 
       <button
@@ -632,7 +632,7 @@ function ErrorBanner({ message }: { message: string }) {
       role="alert"
       style={{
         padding: "0.6rem 1rem",
-        background: "var(--danger-soft, #fef2f2)",
+        background: "var(--danger-bg, #fef2f2)",
         borderBottom: "1px solid var(--danger, #ef4444)",
         color: "var(--danger, #dc2626)",
         fontSize: "var(--text-sm, 0.875rem)",
@@ -773,7 +773,7 @@ function NoticeBar() {
             padding: "0.4rem 1rem",
             background:
               n.severity === "error"
-                ? "var(--danger-soft, #fef2f2)"
+                ? "var(--danger-bg, #fef2f2)"
                 : n.severity === "warning"
                   ? "var(--warning-soft, #fffbeb)"
                   : "var(--info-soft, #eff6ff)",

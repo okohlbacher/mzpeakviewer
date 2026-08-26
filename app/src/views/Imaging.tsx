@@ -16,7 +16,7 @@ import { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import type { ImagingGridWire, OpticalImageMeta, SpectrumArrays } from "@mzpeak/contracts";
 import { rebuildCoordMap } from "@mzpeak/core";
 import { SpectrumPlot } from "@mzpeak/ui-kit";
-import { useStore } from "../store";
+import { useStore, getOpenSeq } from "../store";
 import { engine } from "../engine";
 import {
   rasterizeImage,
@@ -305,18 +305,26 @@ function ImagingInner({
     setBusy(true);
     setError(null);
     setRenderProgress({ done: 0, total: 0 });
+    // Cross-file guard: a slow cold render finishing AFTER the user opened another file
+    // must not write the old file's image/stats into the new file's store — the optical
+    // path right below has this guard; these callbacks were missing it (adversarial-
+    // review finding, converged by two reviewers).
+    const seq = getOpenSeq();
+    const fresh = () => getOpenSeq() === seq;
     try {
       const res = await engine.renderIonImage(
         mzNum,
         tolNum,
-        (done, total) => setRenderProgress({ done, total }),
+        (done, total) => { if (fresh()) setRenderProgress({ done, total }); },
         // Progressive preview: draw each partial image so a cold render fills in live.
-        (ionImage, stats) => setIonImageStore(ionImage, stats),
+        (ionImage, stats) => { if (fresh()) setIonImageStore(ionImage, stats); },
       );
-      setIonImageStore(res.ionImage, res.stats);
+      if (fresh()) setIonImageStore(res.ionImage, res.stats);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setIonImageStore(null, null);
+      if (fresh()) {
+        setError(err instanceof Error ? err.message : String(err));
+        setIonImageStore(null, null);
+      }
     } finally {
       setBusy(false);
       setRenderProgress(null);
@@ -342,15 +350,19 @@ function ImagingInner({
     );
     setBusy(true);
     setError(null);
+    const seq = getOpenSeq(); // same cross-file guard as renderIon above
+    const fresh = () => getOpenSeq() === seq;
     try {
-      const images = await engine.renderMultiChannel(reqs, (partial) =>
+      const images = await engine.renderMultiChannel(reqs, (partial) => {
         // Progressive preview: draw each partial RGB composite as the cold build fills in.
-        setMultiChannelStore(partial),
-      );
-      setMultiChannelStore(images);
+        if (fresh()) setMultiChannelStore(partial);
+      });
+      if (fresh()) setMultiChannelStore(images);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setMultiChannelStore(null);
+      if (fresh()) {
+        setError(err instanceof Error ? err.message : String(err));
+        setMultiChannelStore(null);
+      }
     } finally {
       setBusy(false);
     }
@@ -1090,7 +1102,7 @@ function ImagingInner({
                   pick is loading, store.spectrum still holds the PREVIOUS pixel's
                   spectrum, so plotting it under the new coords would be misleading. */}
               {spectrum && spectrum.index === picked.index ? (
-                <SpectrumPlot spectrum={spectrum} xicWindow={null} />
+                <SpectrumPlot spectrum={spectrum} xicWindow={null} height={170} />
               ) : (
                 <div
                   style={{
@@ -1164,7 +1176,7 @@ function ImagingInner({
             </button>
           </div>
           <div className="chart-host" style={{ height: 200, position: "relative" }} aria-live="polite">
-            <SpectrumPlot spectrum={auxSpectrum.spectrum} xicWindow={null} />
+            <SpectrumPlot spectrum={auxSpectrum.spectrum} xicWindow={null} height={170} />
           </div>
         </div>
       )}

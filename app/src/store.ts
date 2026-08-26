@@ -32,6 +32,12 @@ import { engine } from "./engine";
 // ---------------------------------------------------------------------------
 
 let currentOpenSeq = 0;
+// Per-SELECT token: superseded/stale select completions must not clear the loading flag
+// the NEWER select just set (adversarial-review: every rapid re-select showed the OLD
+// spectrum with no loading indicator for the new one's entire cold read, and re-enabled
+// loading-gated controls mid-load). Only the latest select may touch spectrumLoading.
+let currentSelectSeq = 0;
+let currentWlSelectSeq = 0; // same rule for the UV/VIS selection lane
 
 
 // Monotonic id for chrom-LIST items + a global load token (re-adding a fixed-id item
@@ -203,6 +209,9 @@ export interface AppState {
   /** Dense time × wavelength matrix for PDA/DAD UV/VIS views (null until loaded). */
   wavelengthMatrix: WavelengthMatrix | null;
   wavelengthMatrixLoading: boolean;
+  /** Terminal matrix-build failure — set so the view STOPS auto-retrying (the effect
+   *  re-fired forever on a null matrix + cleared loading flag). */
+  wavelengthMatrixError: string | null;
 
   // chromatogram — a mirror of the active list item, kept so the Share link can
   // round-trip the exact active trace (xic m/z window, stored id) without reaching
@@ -355,6 +364,7 @@ const INITIAL_OPEN_STATE = {
   wavelengthSpectrumLoading: false,
   wavelengthMatrix: null,
   wavelengthMatrixLoading: false,
+  wavelengthMatrixError: null,
   chrom: null,
   chromReq: null,
   chromList: [],
@@ -394,9 +404,7 @@ async function finishOpen(
     wavelengthCount: wavelength.count,
     // Default accordion: Advanced closed; MSI open only for imaging files.
     expanded: { advanced: false, imaging: isImaging },
-    notices: opened.mixedRepresentationWarning
-      ? [{ id: "mixed-repr", severity: "warning" as const, message: opened.mixedRepresentationWarning }]
-      : [],
+    notices: [],
   });
 
   // scanBreakdown → detailed stats + browse index + the AUTHORITATIVE ticColumn (not inferred).
@@ -430,7 +438,11 @@ async function finishOpen(
   // Isobaric (TMT/iTRAQ) channels for the run, off the critical path.
   void engine.studyMeta().then((s) => {
     if (seq === currentOpenSeq) set({ channels: s.channels, study: s.study ?? null, studySamples: s.samples ?? null, sdrfMember: s.sdrfMember ?? null, sdrfMeta: s.sdrfMeta ?? null, channelsSource: s.channelsSource ?? "none", studyRunId: s.runId ?? null });
-  }).catch(() => {});
+  }).catch((err: unknown) => {
+    // Never silent: a failed read here hides the Study tab + TMT channels entirely.
+    if (seq !== currentOpenSeq) return;
+    pushNotice(set, "study-meta", `Study metadata couldn’t be read: ${err instanceof Error ? err.message : String(err)}`);
+  });
 
   // Pre-load spectrum 0 when the file has spectra — but route=false so the view STAYS on
   // the default Summary (a plain open shouldn't jump to the Spectra view). Deep links apply
@@ -453,6 +465,17 @@ async function finishOpen(
  * Lazily load the wavelength browse index (once) + the first wavelength spectrum. Idempotent:
  * if the browse is already present it does nothing. Stale-guarded against `currentOpenSeq`.
  */
+/** Append (or replace) a dismissible warning notice — the silent-failure escape hatch. */
+function pushNotice(
+  set: StoreApi<AppState>["setState"],
+  id: string,
+  message: string,
+): void {
+  set((s) => ({
+    notices: [...s.notices.filter((n) => n.id !== id), { id, severity: "warning" as const, message }],
+  }));
+}
+
 async function ensureWavelengthLoaded(
   set: StoreApi<AppState>["setState"],
   get: StoreApi<AppState>["getState"],
@@ -472,8 +495,10 @@ async function ensureWavelengthLoaded(
       }
       await get().selectWavelengthSpectrum(first);
     }
-  } catch {
-    // Non-fatal: the UV browse couldn't be built. The view falls back to empty.
+  } catch (err) {
+    // Non-fatal, but never silent: an I/O failure must not render as "no UV/VIS spectra".
+    if (seq !== currentOpenSeq) return;
+    pushNotice(set, "wl-browse", `UV/VIS spectra couldn’t be listed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -611,6 +636,7 @@ export const useStore = create<AppState>((set, get) => ({
   wavelengthSpectrumLoading: false,
   wavelengthMatrix: null,
   wavelengthMatrixLoading: false,
+  wavelengthMatrixError: null,
 
   // chrom
   chrom: null,
@@ -728,6 +754,7 @@ export const useStore = create<AppState>((set, get) => ({
       wavelengthSpectrumLoading: false,
       wavelengthMatrix: null,
       wavelengthMatrixLoading: false,
+      wavelengthMatrixError: null,
       chrom: null,
       chromReq: null,
       chromList: [],
@@ -745,7 +772,10 @@ export const useStore = create<AppState>((set, get) => ({
     // Pixel selectors keep their provenance; hydration (no spectrum yet) just stores
     // the preference and the first selection picks it up.
     const st = get();
-    const cur = st.spectrum?.index ?? st.selector?.index ?? null;
+    // Prefer the SELECTOR (the user's intent, possibly still loading) over the displayed
+    // spectrum (the past) — the other order silently cancelled an in-flight navigation
+    // and desynced the picker/share-URL from the plot (adversarial-review, confirmed).
+    const cur = st.selector?.index ?? st.spectrum?.index ?? null;
     if (cur == null) return;
     const px = st.selector && st.selector.by === "pixel" ? { x: st.selector.x, y: st.selector.y } : undefined;
     void reselectWithSource(cur, px, src, set);
@@ -791,32 +821,38 @@ export const useStore = create<AppState>((set, get) => ({
     // — pixel-picks and other views stay on the auto path (warm caches, honest defaults).
     const sigPref = get().signalSource;
     const src = !pixel && get().view === "spectra" && sigPref !== "auto" ? sigPref : undefined;
+    const selSeq = ++currentSelectSeq;
+    // Route only if the user hasn't navigated elsewhere while the read was in flight
+    // (a late completion yanking the user back to Spectra was an adversarial-review find).
+    const viewAtCall = get().view;
     set({ spectrumLoading: true, selector });
     try {
       const spectrum = await engine.selectSpectrum(index, src);
       // Drop if a newer file was opened while we waited.
       if (seq !== currentOpenSeq) {
-        set({ spectrumLoading: false });
+        if (selSeq === currentSelectSeq) set({ spectrumLoading: false });
         return;
       }
       // route=true → switch to the Spectra view (default). route=false keeps the
       // current view so an imaging pixel-pick fills the in-place dock instead.
-      set({ spectrum, spectrumLoading: false, ...(route ? { view: "spectra" as View } : {}) });
+      // A successful read also clears any sticky per-spectrum error banner.
+      const doRoute = route && get().view === viewAtCall;
+      set({ spectrum, error: null, ...(selSeq === currentSelectSeq ? { spectrumLoading: false } : {}), ...(doRoute ? { view: "spectra" as View } : {}) });
     } catch (err) {
-      // SupersededError / CancelledError: a newer select was issued — don't
-      // overwrite the newer result that's already been (or will be) set.
+      // SupersededError / CancelledError: a newer select was issued — the NEWER select
+      // owns the loading flag now; never clear it on its behalf.
       const name = err instanceof Error ? err.name : "";
       if (name === "SupersededError" || name === "CancelledError") {
-        set({ spectrumLoading: false });
+        if (selSeq === currentSelectSeq) set({ spectrumLoading: false });
         return;
       }
       // Also drop on stale file seq.
       if (seq !== currentOpenSeq) {
-        set({ spectrumLoading: false });
+        if (selSeq === currentSelectSeq) set({ spectrumLoading: false });
         return;
       }
       set({
-        spectrumLoading: false,
+        ...(selSeq === currentSelectSeq ? { spectrumLoading: false } : {}),
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -875,7 +911,11 @@ export const useStore = create<AppState>((set, get) => ({
         ? (Number.isInteger(Number(id.slice(3))) ? list.find((c) => c.index === Number(id.slice(3))) : undefined)
         : list.find((c) => c.id === id);
       if (hit) get().addStoredChrom(hit.index, hit.id);
-    } catch { /* inventory unavailable — stored deep link silently no-ops */ }
+      else pushNotice(set, "stored-chrom-link", `This link's stored chromatogram ("${id}") isn't in this file.`);
+    } catch (err) {
+      if (seq !== currentOpenSeq) return;
+      pushNotice(set, "stored-chrom-link", `Stored chromatogram couldn’t be loaded: ${err instanceof Error ? err.message : String(err)}`);
+    }
   },
 
   removeChrom: (itemId) => {
@@ -947,22 +987,24 @@ export const useStore = create<AppState>((set, get) => ({
         // Non-fatal — proceed to attempt the select anyway.
       }
     }
+    const wlSeq = ++currentWlSelectSeq;
     set({ wavelengthSpectrumLoading: true });
     try {
       const spectrum = await engine.selectWavelengthSpectrum(index);
       // Stale (a newer file was opened mid-flight): the open already reset this
       // file's UV state, so do NOT mutate the now-current file's loading flag.
       if (seq !== currentOpenSeq) return;
-      set({ wavelengthSpectrum: spectrum, wavelengthSpectrumLoading: false });
+      set({ wavelengthSpectrum: spectrum, ...(wlSeq === currentWlSelectSeq ? { wavelengthSpectrumLoading: false } : {}) });
     } catch (err) {
       if (seq !== currentOpenSeq) return; // stale — leave current file's state alone
       const name = err instanceof Error ? err.name : "";
       if (name === "SupersededError" || name === "CancelledError") {
-        set({ wavelengthSpectrumLoading: false });
+        // Only the LATEST UV select may clear the flag (dueling-selects review finding).
+        if (wlSeq === currentWlSelectSeq) set({ wavelengthSpectrumLoading: false });
         return;
       }
       set({
-        wavelengthSpectrumLoading: false,
+        ...(wlSeq === currentWlSelectSeq ? { wavelengthSpectrumLoading: false } : {}),
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -981,7 +1023,7 @@ export const useStore = create<AppState>((set, get) => ({
         if (inFlight) return inFlight;
       }
       const seq = currentOpenSeq;
-      set({ wavelengthMatrixLoading: true });
+      set({ wavelengthMatrixLoading: true, wavelengthMatrixError: null });
       inFlight = (async () => {
         try {
           const matrix = await engine.wavelengthMatrix();
@@ -997,7 +1039,10 @@ export const useStore = create<AppState>((set, get) => ({
             set({ wavelengthMatrixLoading: false });
             return;
           }
-          set({ wavelengthMatrixLoading: false, error: err instanceof Error ? err.message : String(err) });
+          set({
+            wavelengthMatrixLoading: false,
+            wavelengthMatrixError: err instanceof Error ? err.message : String(err),
+          });
         } finally {
           inFlight = null;
         }
@@ -1026,7 +1071,11 @@ export const useStore = create<AppState>((set, get) => ({
 // even if the user wasn't on the Imaging tab when it finished. A new open resets the flag
 // (above) and the worker only emits for the current file (gen-guarded), so no stale set.
 engine.on("ionIndexReady", () => {
-  useStore.setState({ ionCacheReady: true });
+  // Guard the in-transit race: an event emitted for file A can be delivered after the
+  // user already started opening file B (the open reset runs synchronously at click
+  // time). Worker messages are FIFO, so A's stale event always precedes B's `opened` —
+  // dropping events while an open is in flight (phase !== "ready") closes the window.
+  if (useStore.getState().phase === "ready") useStore.setState({ ionCacheReady: true });
 });
 
 // Re-export helpers so views can use them without importing contracts directly
@@ -1039,22 +1088,34 @@ async function reselectWithSource(
   set: (partial: Record<string, unknown>) => void,
 ): Promise<void> {
   const seq = currentOpenSeq;
+  const selSeq = ++currentSelectSeq; // same latest-select-owns-the-flag rule as selectSpectrum
   set({ spectrumLoading: true });
   try {
     const spectrum = await engine.selectSpectrum(index, src === "auto" ? undefined : src);
-    if (seq !== currentOpenSeq) { set({ spectrumLoading: false }); return; }
-    set({ spectrum, spectrumLoading: false });
+    if (seq !== currentOpenSeq) {
+      if (selSeq === currentSelectSeq) set({ spectrumLoading: false });
+      return;
+    }
+    set({ spectrum, ...(selSeq === currentSelectSeq ? { spectrumLoading: false } : {}) });
   } catch (err) {
+    // A superseded reselect must not clear the newer select's loading flag; a real
+    // failure surfaces as a notice rather than dying silently (the silent catch made
+    // the toggle appear to work while showing the old facet — review finding).
     const name = err instanceof Error ? err.name : "";
+    if (selSeq === currentSelectSeq) set({ spectrumLoading: false });
     if (name !== "SupersededError" && name !== "CancelledError") {
-      set({ spectrumLoading: false });
-    } else {
-      set({ spectrumLoading: false });
+      set({ error: `Signal-source read failed: ${err instanceof Error ? err.message : String(err)}` });
     }
   }
 }
 
 export { showChromatograms, showWavelength, showMobility };
+
+/** Read-only open-generation token: capture before an async producer, compare before
+ *  committing its result to the store (cross-file guard for view-level async work). */
+export function getOpenSeq(): number {
+  return currentOpenSeq;
+}
 
 /** ONE gating selector for the Study-design tab — used by the nav, the Summary CTA and
  *  the view's own empty state, so they can never disagree (adversarial-review finding). */

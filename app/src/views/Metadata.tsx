@@ -35,9 +35,11 @@ function roleLabel(role: string | undefined): string {
 function ArchiveTable({ highlighted }: { highlighted: boolean }) {
   const manifest = useStore((s) => s.manifest);
   const [downloading, setDownloading] = useState(false);
+  const [dlErr, setDlErr] = useState<string | null>(null);
 
   async function download() {
     setDownloading(true);
+    setDlErr(null);
     try {
       const res = await engine.archiveMemberBytes("mzpeak_index.json", 16 * 1024 * 1024);
       const blob = new Blob([res.bytes], { type: "application/json" });
@@ -49,6 +51,8 @@ function ArchiveTable({ highlighted }: { highlighted: boolean }) {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+    } catch (e) {
+      setDlErr(e instanceof Error ? e.message : String(e));
     } finally {
       setDownloading(false);
     }
@@ -94,6 +98,7 @@ function ArchiveTable({ highlighted }: { highlighted: boolean }) {
         <Button variant="secondary" size="sm" disabled={downloading} data-testid="manifest-download" onClick={() => void download()}>
           {downloading ? "Downloading…" : "⭳ Download mzpeak_index.json"}
         </Button>
+        {dlErr && <span style={{ color: "var(--danger, #c00)", fontSize: "var(--text-sm)", marginLeft: "0.5rem" }}>Download failed: {dlErr}</span>}
       </div>
     </div>
   );

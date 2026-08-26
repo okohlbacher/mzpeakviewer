@@ -35,6 +35,7 @@ export function Chromatograms() {
   const cv = useCvTerms();
 
   const [list, setList] = useState<ChromatogramInfo[] | null>(null);
+  const [listErr, setListErr] = useState<string | null>(null);
   const [metaId, setMetaId] = useState<string | null>(null); // stored row whose metadata is shown
 
   // add-XIC form (m/z, ± tol from Settings default, optional RT window in seconds).
@@ -54,7 +55,11 @@ export function Chromatograms() {
   useEffect(() => {
     if (phase !== "ready") { setList(null); setMetaId(null); return; }
     let live = true;
-    engine.chromatogramList().then((cs) => { if (live) setList(cs); }).catch(() => { if (live) setList([]); });
+    setListErr(null);
+    engine.chromatogramList().then((cs) => { if (live) setList(cs); }).catch((e: unknown) => {
+      // An I/O failure must not render as "This file has no stored chromatograms".
+      if (live) { setList([]); setListErr(e instanceof Error ? e.message : String(e)); }
+    });
     return () => { live = false; };
   }, [phase]);
 
@@ -208,7 +213,12 @@ export function Chromatograms() {
           )}
         </div>
       )}
-      {list && list.length === 0 && (
+      {listErr && (
+        <p data-testid="chrom-list-error" style={{ color: "var(--danger, #c00)", fontSize: "var(--text-sm)", margin: 0 }}>
+          Stored chromatograms couldn’t be listed: {listErr}
+        </p>
+      )}
+      {list && list.length === 0 && !listErr && (
         <p data-testid="chrom-no-stored" style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", margin: 0 }}>
           This file has no stored chromatograms. Add a TIC or XIC above.
         </p>

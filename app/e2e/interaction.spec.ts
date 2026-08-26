@@ -13,7 +13,8 @@ test("Load demo button returns to the start page to pick an example dataset", as
   // "Load demo" in the header → back to the start page with the example datasets.
   await page.getByTestId("load-demo-btn").click();
   await expect(page.getByTestId("idle-view")).toBeVisible();
-  await expect(page.locator('[data-testid^="demo-"][data-testid$="-cloud"]')).toHaveCount(3);
+  // ≥3: the demo list grows over releases — assert presence, not an exact count.
+  expect(await page.locator('[data-testid^="demo-"][data-testid$="-cloud"]').count()).toBeGreaterThanOrEqual(3);
   expect(await page.getByTestId("error").count()).toBe(0);
 });
 

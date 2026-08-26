@@ -31,6 +31,7 @@ export function Wavelength() {
   const ensureWavelength = useStore((s) => s.ensureWavelength);
   const matrix = useStore((s) => s.wavelengthMatrix);
   const matrixLoading = useStore((s) => s.wavelengthMatrixLoading);
+  const matrixError = useStore((s) => s.wavelengthMatrixError);
   const loadMatrix = useStore((s) => s.loadWavelengthMatrix);
 
   // Lazy-load the wavelength browse + first spectrum when this view first mounts (MS+UV
@@ -55,8 +56,9 @@ export function Wavelength() {
   // first time either is opened (idempotent + stale-guarded in the store).
   const needsMatrix = uvView === "chromatogram" || uvView === "heatmap";
   useEffect(() => {
-    if (needsMatrix && !matrix && !matrixLoading) void loadMatrix();
-  }, [needsMatrix, matrix, matrixLoading, loadMatrix]);
+    // matrixError gates the retry: without it a failed build re-fired this effect forever.
+    if (needsMatrix && !matrix && !matrixLoading && !matrixError) void loadMatrix();
+  }, [needsMatrix, matrix, matrixLoading, matrixError, loadMatrix]);
 
   // Heatmap/chromatogram click → jump to the spectrum at the nearest retention time.
   const pickTime = (timeSec: number) => {
@@ -197,6 +199,14 @@ export function Wavelength() {
               </label>
             )}
             {matrixLoading && <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>building matrix…</span>}
+            {matrixError && (
+              <span data-testid="wl-matrix-error" style={{ fontSize: "var(--text-sm)", color: "var(--danger, #c00)" }}>
+                Matrix build failed: {matrixError}{" "}
+                <button type="button" onClick={() => { useStore.setState({ wavelengthMatrixError: null }); }} style={{ cursor: "pointer" }}>
+                  Retry
+                </button>
+              </span>
+            )}
           </div>
           <div data-testid="uvvis-chrom-host" className="chart-host" style={{ height: 320, position: "relative" }}>
             <WavelengthChromatogramPlot

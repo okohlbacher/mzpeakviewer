@@ -4,7 +4,7 @@
 //   (b) ⤓ Download & open   → fetch the whole file (saved to disk) + open it locally
 // Shown until a file is open; replaced by the capability sidebar + views once ready.
 import { useRef, useState } from "react";
-import { useStore } from "../store";
+import { useStore, getOpenSeq } from "../store";
 
 const BASE = import.meta.env.BASE_URL;
 
@@ -98,6 +98,9 @@ export function Idle() {
   async function downloadAndOpen(d: Demo) {
     setDlErr(null);
     setDl({ id: d.id, pct: null });
+    // If the user opens another file while this multi-minute download runs, the
+    // completion must not stomp that open — save to disk, but skip the auto-open.
+    const seq = getOpenSeq();
     const ctrl = new AbortController();
     dlAbort.current = ctrl;
     try {
@@ -127,8 +130,11 @@ export function Idle() {
       a.click();
       a.remove();
       URL.revokeObjectURL(a.href);
-      // Open the downloaded file locally (flips phase → loading, replacing this screen).
-      await openFile(new File([blob], d.download, { type: "application/octet-stream" }));
+      // Open the downloaded file locally (flips phase → loading, replacing this screen) —
+      // unless another open superseded this download while it was running.
+      if (getOpenSeq() === seq) {
+        await openFile(new File([blob], d.download, { type: "application/octet-stream" }));
+      }
     } catch (err) {
       const aborted = ctrl.signal.aborted || (err instanceof Error && err.name === "AbortError");
       if (aborted) {

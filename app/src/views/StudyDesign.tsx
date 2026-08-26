@@ -58,7 +58,7 @@ export function StudyDesign() {
   const [filter, setFilter] = useState("");
   const [showAllCols, setShowAllCols] = useState(false);
 
-  const cacheKey = `${sourceUrl ?? "local"}::${fileName ?? ""}::${sdrfMember ?? ""}`;
+  const cacheKey = `${sourceUrl ?? "local"}::${fileName ?? ""}::${sdrfMember ?? ""}::${studyRunId ?? ""}`;
 
   useEffect(() => {
     let alive = true;

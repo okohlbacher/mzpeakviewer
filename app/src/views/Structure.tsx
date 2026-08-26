@@ -4,7 +4,7 @@
 // a column → deep footer stats + an on-demand "Sample value distribution" that reads
 // up to ~50k rows (range reads) and computes a histogram + numeric stats (mean / median
 // / stddev / quantiles).
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { engine } from "../engine";
 import type { ArchiveMemberList, ParquetFooter, ParquetColumn, ColumnSample } from "@mzpeak/contracts";
@@ -269,6 +269,9 @@ export function Structure() {
   const [footer, setFooter] = useState<ParquetFooter | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Monotonic pick token: two rapid clicks race their footer reads through the serial
+  // worker — only the LATEST pick may commit its footer/error/loading state.
+  const pickSeq = useRef(0);
 
   useEffect(() => {
     if (phase !== "ready") return;
@@ -285,16 +288,18 @@ export function Structure() {
 
   async function pick(m: Member) {
     if (!m.isParquet) return;
+    const seq = ++pickSeq.current;
     setSelected(m.path);
     setFooter(null);
     setError(null);
     setLoading(true);
     try {
-      setFooter(await engine.parquetFooter(m.path));
+      const footer = await engine.parquetFooter(m.path);
+      if (pickSeq.current === seq) setFooter(footer);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (pickSeq.current === seq) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (pickSeq.current === seq) setLoading(false);
     }
   }
 
