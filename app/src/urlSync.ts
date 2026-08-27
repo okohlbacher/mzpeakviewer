@@ -29,12 +29,15 @@ import { useStore, getOpenSeq } from "./store";
 import { idsCarryScans, resolveScanToIndex, scanNumberOf } from "./scan";
 
 // ---------------------------------------------------------------------------
-/** True in the Tauri desktop app (window.location.origin is "tauri://localhost").
- *  The address bar is meaningless there, so live URL sync + the toggle are hidden,
- *  and currentShareUrl() resolves links to the canonical web viewer instead. */
+/** True in the Tauri desktop app. Detected by the runtime-injected IPC global, which
+ *  is present in dev AND production on every OS — the old origin check ("tauri://…")
+ *  missed Windows production (origin "http://tauri.localhost") and `tauri dev`
+ *  (origin = the vite dev server). The address bar is meaningless in the app, so live
+ *  URL sync + the toggle are hidden, and currentShareUrl() resolves links to the
+ *  canonical web viewer instead. */
 export function isTauriApp(): boolean {
-  const rawOrigin = typeof window !== "undefined" ? window.location.origin : "";
-  return rawOrigin.startsWith("tauri://");
+  if (typeof window === "undefined") return false;
+  return "__TAURI_INTERNALS__" in window || window.location.origin.startsWith("tauri://");
 }
 
 /** The mode the URL grammar resolves against, derived from capabilities. */

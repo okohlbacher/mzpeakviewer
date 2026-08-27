@@ -167,6 +167,9 @@ export type WorkerResponse =
   // single streamed build fills in. Non-null channel buffers TRANSFERRED.
   | { type: "multiChannelPreview"; requestId: number; channels: (Float32Array | null)[] }
   | { type: "ionIndexReady"; points: number }
+  // Spectrum-LRU prefetch finished un-stopped: facet-provenance stamps (altAvailable)
+  // are now final — the shell may refresh the current spectrum's stamp from cache.
+  | { type: "spectrumPrefetchDone"; cached: number }
   // rgba.buffer TRANSFERRED; gen echoed for stale-result rejection.
   | { type: "opticalImageResult"; archivePath: string; gen: number; width: number; height: number; rgba: Uint8ClampedArray }
   | { type: "opticalImageError"; archivePath: string; gen: number; message: string }

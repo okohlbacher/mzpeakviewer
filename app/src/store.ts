@@ -1070,6 +1070,21 @@ export const useStore = create<AppState>((set, get) => ({
 // for the open file — capture it in the store so any view can show "ion images ready"
 // even if the user wasn't on the Imaging tab when it finished. A new open resets the flag
 // (above) and the worker only emits for the current file (gen-guarded), so no stale set.
+// Prefetch completion: the facet-provenance stamps are final now. If the CURRENT
+// spectrum was served from the cache BEFORE the peaks drain flipped its altAvailable
+// (fast local opens of dual files hit this window), the Signal toggle stays hidden —
+// re-serve it from the warm cache (a cheap hit) so the stamp reaches the store. The
+// select-token guards make this safe against any in-flight user selection.
+engine.on("spectrumPrefetchDone", () => {
+  const st = useStore.getState();
+  if (st.phase !== "ready") return;
+  const idx = st.selector?.index ?? st.spectrum?.index ?? null;
+  if (idx == null || idx < 0) return;
+  if (st.spectrum && st.spectrum.altAvailable !== true) {
+    void st.selectSpectrum(idx, false).catch(() => {});
+  }
+});
+
 engine.on("ionIndexReady", () => {
   // Guard the in-transit race: an event emitted for file A can be delivered after the
   // user already started opening file B (the open reset runs synchronously at click

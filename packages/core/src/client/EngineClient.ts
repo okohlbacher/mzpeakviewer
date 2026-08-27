@@ -148,6 +148,7 @@ export type EngineEventMap = {
   renderPreview: Extract<WorkerResponse, { type: "renderPreview" }>;
   multiChannelPreview: Extract<WorkerResponse, { type: "multiChannelPreview" }>;
   ionIndexReady: Extract<WorkerResponse, { type: "ionIndexReady" }>;
+  spectrumPrefetchDone: Extract<WorkerResponse, { type: "spectrumPrefetchDone" }>;
   opticalImageResult: Extract<WorkerResponse, { type: "opticalImageResult" }>;
   opticalImageError: Extract<WorkerResponse, { type: "opticalImageError" }>;
   /** A global/unattributed engine error (no requestId/selectId — e.g. WASM init). */
@@ -617,6 +618,7 @@ export class EngineClient {
       case "renderPreview":
       case "multiChannelPreview":
       case "ionIndexReady":
+      case "spectrumPrefetchDone":
         this.emit(msg.type, msg);
         return;
 

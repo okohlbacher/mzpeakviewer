@@ -210,7 +210,7 @@ export function startIonPrefetch(ctx: EngineContext, respond?: Respond): void {
  * mutex + user-activity cooldown); the LRU's budget bounds memory. No-op for imaging files
  * (those use `startIonPrefetch`) or when preload is disabled.
  */
-export function startSpectrumPrefetch(ctx: EngineContext): void {
+export function startSpectrumPrefetch(ctx: EngineContext, respond?: Respond): void {
   const ef = ctx.active;
   const gen = ctx.gen;
   // imaging → ion prefetch; remote → skip; per-peak-mobility files → skip: the bulk
@@ -227,9 +227,18 @@ export function startSpectrumPrefetch(ctx: EngineContext): void {
         : false,
     cooldownMs: () => adaptiveCooldown(ctx),
     budgetRemaining: () => ctx.budget.remaining(),
-  }).catch(() => {
-    // Best-effort; on failure first navigation is just cold.
-  });
+  })
+    .then((r) => {
+      // Announce completion so the shell can refresh altAvailable on the CURRENT
+      // spectrum: a preselect served from the cache BEFORE the peaks drain flipped the
+      // stamp hides the Signal toggle on dual files (fast local opens hit this window).
+      if (!r.stopped && ctx.gen === gen) {
+        respond?.({ type: "spectrumPrefetchDone", cached: r.cached });
+      }
+    })
+    .catch(() => {
+      // Best-effort; on failure first navigation is just cold.
+    });
 }
 
 /** Map a thrown reader error to a wire error class (+ findings when present). */

@@ -53,7 +53,7 @@ scope.addEventListener("message", (e: MessageEvent<WorkerRequest>) => {
       // non-imaging (LC/DDA) → the MS0/1 spectrum LRU. Both no-op when not applicable.
       if (msg && msg.type === "open") {
         startIonPrefetch(ctx, respond);
-        startSpectrumPrefetch(ctx);
+        startSpectrumPrefetch(ctx, respond);
       }
     })
     .catch((err) => {

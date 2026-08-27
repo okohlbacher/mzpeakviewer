@@ -5,6 +5,8 @@
 // Shown until a file is open; replaced by the capability sidebar + views once ready.
 import { useRef, useState } from "react";
 import { useStore, getOpenSeq } from "../store";
+import { localPathOf, readLocalFile, WEB_LOCAL_PATH_MSG } from "../localFile";
+import { isTauriApp } from "../urlSync";
 
 const BASE = import.meta.env.BASE_URL;
 
@@ -188,15 +190,37 @@ export function Idle() {
             {/* Remote URL — placed up top (between the intro text and the drop-zone) so it's
                 never hidden underneath the demo-dataset grid. */}
             <form
-              onSubmit={(e) => { e.preventDefault(); const u = url.trim(); if (u) void openUrl(u); }}
+              onSubmit={(e) => {
+                e.preventDefault();
+                const u = url.trim();
+                if (!u) return;
+                // file:// URLs and bare filesystem paths: the desktop app reads them
+                // natively; the web build explains instead of failing with a fetch error.
+                const localPath = localPathOf(u);
+                if (localPath) {
+                  if (isTauriApp()) {
+                    void (async () => {
+                      try {
+                        await openFile(await readLocalFile(localPath));
+                      } catch (err) {
+                        useStore.setState({ error: `Couldn’t open ${localPath}: ${err instanceof Error ? err.message : String(err)}` });
+                      }
+                    })();
+                  } else {
+                    useStore.setState({ error: WEB_LOCAL_PATH_MSG });
+                  }
+                  return;
+                }
+                void openUrl(u);
+              }}
               style={{ margin: "0 0 1.25rem", display: "flex", gap: "0.5rem" }}
             >
               <input
                 data-testid="idle-url"
-                type="url"
+                type="text"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                placeholder="…or paste a https:// .mzpeak URL"
+                placeholder={isTauriApp() ? "…or paste a https:// URL or a local file path" : "…or paste a https:// .mzpeak URL"}
                 style={{ flex: 1, padding: "0.5rem 0.7rem", border: "1px solid var(--border-default, #e2e8f0)", borderRadius: 8, fontSize: "var(--text-sm, 0.85rem)" }}
               />
               <button type="submit" disabled={!url.trim()} style={{ padding: "0.5rem 1rem", border: "1px solid var(--blue-600, #3b54da)", borderRadius: 8, background: "var(--blue-600, #3b54da)", color: "#fff", cursor: url.trim() ? "pointer" : "not-allowed", fontWeight: "var(--weight-medium, 500)" }}>
