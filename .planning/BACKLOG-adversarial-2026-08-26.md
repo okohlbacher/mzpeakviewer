@@ -10,7 +10,13 @@
 > remain), 23, and the mislabel + matrix-retry-loop from 24 are fixed. From P2:
 > 25 (deepColumn) and 29 (mixedRepresentationWarning) deleted. Everything else —
 > P1 items 14, 16, 17, 20, 21, rest of 24; P2 26–28, 30–32; P3 — remains open.
-> P3 item 33 note: the legacy `imaging.mzpeak` fixture also breaks 5 interaction
+> v0.9.2 residual: on a FAST local open of a dual-facet file, the initially-selected
+> spectrum 0 can be served from the prefetch cache before the peaks drain stamps
+> `altAvailable`, so the Signal toggle is hidden until the user navigates (from #1 on
+> it shows; HTTP opens are unaffected — the cold read wins there). Fix direction:
+> propagate the peaks-drain altAvailable flip to the store for the current selection,
+> or re-stamp on the cache-hit read.
+> > P3 item 33 note: the legacy `imaging.mzpeak` fixture also breaks 5 interaction
 > e2e tests (error banner "Cannot read properties of null (reading 'get')") —
 > verified pre-existing at the v0.8.8 baseline; regenerate the fixture flat.
 
