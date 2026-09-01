@@ -17,6 +17,7 @@
     "lint": "echo \"(lint configured per-phase)\" && exit 0"
   },
   "devDependencies": {
+    "@swc/core": "~1.15.41",
     "typescript": "~5.9.2",
     "vitest": "^4.1.11"
   },

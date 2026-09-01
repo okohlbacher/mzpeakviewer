@@ -34,6 +34,17 @@ mzpeak.org). **Pin these; do not float majors.** Re-validate only with evidence.
 | @vitejs/plugin-react | 6.0.2 | JSX + Fast Refresh; peer vite ^8 |
 | vite-plugin-wasm | 3.6.0 | imports parquet-wasm `.wasm` as ESM |
 
+**@swc/core pinned (root devDependency `~1.15.41`):** the vendored reader's own vite
+build uses `vite-plugin-top-level-await`, which breaks on `@swc/core` 1.16.x with
+`[vite-plugin-top-level-await] missing field \`type\`` at bundle time. npm hoists that
+plugin (and its transitive swc) to the monorepo root, so the plugin resolves the ROOT
+copy — an unpinned root install silently breaks `vendor/mzpeakts/lib` builds. It must be
+pinned at the root to take effect: a root `overrides` entry does NOT reach a
+`file:`-linked package's devDep tree, and pinning inside the submodule only creates a
+nested copy nothing resolves (both verified 2026-08-26). CI is insulated only because it
+runs `npm ci` inside the submodule against its own lockfile. Verified: 1.16.1 fails,
+1.15.41/1.15.47 build.
+
 **top-level-await:** `vite-plugin-top-level-await` is **NOT used** (as built). With
 `build.target: "es2022"` + modern browsers, TLA is native and parquet-wasm's init works
 without the plugin — verified in node. See the note in `app/vite.config.ts`.
