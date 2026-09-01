@@ -143,8 +143,13 @@ function intPairOf(s: string | undefined): [number, number] | null {
 
 function quadOf(s: string | undefined): [number, number, number, number] | null {
   if (s == null) return null;
-  const parts = s.split(",").map((x) => Number(x));
-  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
+  const raw = s.split(",");
+  // Reject empty fields explicitly: Number("") === 0, so "1,2,," used to coerce to
+  // [1,2,0,0] — a rect silently pinned to the origin. This module's contract is
+  // "strict — reject rather than silently coerce" (pairOf already does this).
+  if (raw.length !== 4 || raw.some((x) => x.trim() === "")) return null;
+  const parts = raw.map((x) => Number(x));
+  if (parts.some((n) => !Number.isFinite(n))) return null;
   return parts as [number, number, number, number];
 }
 

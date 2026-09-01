@@ -5,7 +5,7 @@
 // up to ~50k rows (range reads) and computes a histogram + numeric stats (mean / median
 // / stddev / quantiles).
 import { Fragment, useEffect, useRef, useState } from "react";
-import { useStore } from "../store";
+import { useStore, getOpenSeq } from "../store";
 import { engine } from "../engine";
 import type { ArchiveMemberList, ParquetFooter, ParquetColumn, ColumnSample } from "@mzpeak/contracts";
 import { Button } from "@mzpeak/ui-kit";
@@ -142,7 +142,9 @@ function MemberDownload({ path, bytes }: { path: string; bytes: number | null | 
     }
     setBusy(true);
     try {
+      const seq = getOpenSeq();
       const res = await engine.archiveMemberBytes(path, DOWNLOAD_HARD_MAX);
+      if (getOpenSeq() !== seq) return; // file switched mid-download — do not save B's bytes
       if (res.truncated) {
         window.alert(`${name} is larger than the in-browser download limit (${formatBytes(DOWNLOAD_HARD_MAX)}); not downloaded (a truncated parquet would be unreadable).`);
         return;
@@ -209,7 +211,9 @@ function MemberGunzipDownload({ path, bytes }: { path: string; bytes: number | n
     if (busy || tooBig) return;
     setBusy(true);
     try {
+      const seq = getOpenSeq();
       const res = await engine.archiveMemberBytes(path, DOWNLOAD_HARD_MAX);
+      if (getOpenSeq() !== seq) return; // file switched mid-download — do not save B's bytes
       if (res.truncated) {
         window.alert(`${gzName} is larger than the in-browser read limit (${formatBytes(DOWNLOAD_HARD_MAX)}); can't decompress a truncated member.`);
         return;

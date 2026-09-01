@@ -67,10 +67,19 @@ export function fileMeta(reader: Reader): FileMeta {
 /** Parse `mzpeak_index.json` into a plain {@link ManifestEntry}[]. */
 export function manifest(reader: Reader): ManifestEntry[] {
   const files = reader.store?.fileIndex?.files ?? [];
+  // entityType/dataKind are CLASS instances (DataKind/EntityType) since the vendored
+  // "_"/" " normalization fix — String() on them yields "[object Object]", which is what
+  // every manifest row displayed. Use the raw index token they wrap (.name).
+  const tok = (v: unknown): string => {
+    if (v == null) return "";
+    if (typeof v === "string") return v;
+    const name = (v as { name?: unknown }).name;
+    return typeof name === "string" ? name : String(v);
+  };
   return files.map((e) => ({
     name: String(e.name),
-    entityType: String(e.entityType ?? ""),
-    dataKind: String(e.dataKind ?? ""),
+    entityType: tok(e.entityType),
+    dataKind: tok(e.dataKind),
   }));
 }
 

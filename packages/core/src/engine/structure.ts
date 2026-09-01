@@ -126,9 +126,15 @@ type FileMetaData = {
 function roleMap(store: Store | undefined): Map<string, string> {
   const out = new Map<string, string>();
   for (const f of store?.fileIndex?.files ?? []) {
-    if (f && typeof f.name === "string" && typeof f.data_kind === "string") {
-      out.set(f.name, f.data_kind);
-    }
+    if (!f || typeof f.name !== "string") continue;
+    // data_kind is a DataKind CLASS instance since the vendored normalization fix (it
+    // used to be a plain string) — accept both, reading the raw token off the object.
+    const dk = f.data_kind as unknown;
+    const role =
+      typeof dk === "string" ? dk
+      : dk != null && typeof (dk as { name?: unknown }).name === "string" ? (dk as { name: string }).name
+      : null;
+    if (role) out.set(f.name, role);
   }
   return out;
 }

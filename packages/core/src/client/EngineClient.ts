@@ -199,6 +199,9 @@ export class EngineClient {
 
   /** True once the worker has posted {type:"ready"} past its WASM top-level await. */
   private ready = false;
+  /** Set on an uncaught worker error; every later request fails fast with this message
+   *  instead of buffering/posting into a dead worker (adversarial review 2026-09-01). */
+  private fatalError: string | null = null;
   /** Outbound requests queued before `ready`; flushed in-order on ready. */
   private outbox: { req: WorkerRequest; transfer?: Transferable[] }[] = [];
 
@@ -236,14 +239,11 @@ export class EngineClient {
     // misattribute a mid-session crash to startup.
     this.worker.addEventListener("error", (ev) => {
       const detail = ev.message ?? "unknown worker error";
-      this.rejectAllPending(
-        () =>
-          new Error(
-            this.ready
-              ? `Engine worker crashed: ${detail}`
-              : `Engine worker failed to start: ${detail}`,
-          ),
-      );
+      const msg = this.ready
+        ? `Engine worker crashed: ${detail}`
+        : `Engine worker failed to start: ${detail}`;
+      this.fatalError = msg; // sticky: see request()
+      this.rejectAllPending(() => new Error(msg));
     });
   }
 
@@ -269,6 +269,9 @@ export class EngineClient {
 
   /** Post (or buffer until ready) a request. Fire-and-forget; no correlation. */
   private send(req: WorkerRequest, transfer?: Transferable[]): void {
+    // Dead worker: nothing sent here can ever be answered. Drop it — the caller's
+    // Promise was (or will be) rejected via fatalError / rejectAllPending.
+    if (this.fatalError) return;
     if (!this.ready) {
       this.outbox.push({ req, transfer });
       return;
@@ -294,6 +297,7 @@ export class EngineClient {
         new Error(`EngineClient: request type "${req.type}" is not requestId-correlated`),
       );
     }
+    if (this.fatalError) return Promise.reject(new Error(this.fatalError));
     return new Promise<R>((resolve, reject) => {
       this.pendingByRequestId.set(requestId, {
         resolveType,
@@ -316,15 +320,18 @@ export class EngineClient {
    */
   open(source: OpenSource): Promise<OpenedResult> {
     if (this.openRequestId !== 0) this.supersedeRequest(this.openRequestId);
+    let myId = 0;
     const p = this.request<OpenedResult>((requestId) => {
+      myId = requestId;
       this.openRequestId = requestId;
       return { type: "open", requestId, source };
     });
-    // Clear the tracked open once it settles (success or failure).
-    void p.then(
-      () => { this.openRequestId = 0; },
-      () => { this.openRequestId = 0; },
-    );
+    // Clear the tracked open once it settles — but only if the tracker still points at
+    // THIS open. A superseded open A settles (rejected) AFTER B was tracked; blindly
+    // zeroing here untracked B, so a third open C no longer superseded it
+    // (adversarial review 2026-09-01).
+    const clear = () => { if (this.openRequestId === myId) this.openRequestId = 0; };
+    void p.then(clear, clear);
     return p;
   }
 
@@ -356,6 +363,7 @@ export class EngineClient {
     }
     const selectId = this.nextSelectId++;
     this.latestSelectId = selectId;
+    if (this.fatalError) return Promise.reject(new Error(this.fatalError));
     return new Promise<SpectrumArrays>((resolve, reject) => {
       this.pendingBySelectId.set(selectId, {
         resolveType: "spectrumResult",
@@ -396,6 +404,7 @@ export class EngineClient {
     }
     const selectId = this.nextSelectId++;
     this.latestWavelengthSelectId = selectId;
+    if (this.fatalError) return Promise.reject(new Error(this.fatalError));
     return new Promise<WavelengthSpectrumArrays>((resolve, reject) => {
       this.pendingByWavelengthSelectId.set(selectId, {
         resolveType: "wavelengthSpectrumResult",

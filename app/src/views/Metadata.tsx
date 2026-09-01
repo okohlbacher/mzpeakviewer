@@ -10,7 +10,7 @@
 // Clicking mzpeak_index.json in the Structure view sets store.metadataReveal="manifest",
 // which highlights the Archive column here.
 import { useEffect, useRef, useState } from "react";
-import { useStore } from "../store";
+import { useStore, getOpenSeq } from "../store";
 import { engine } from "../engine";
 import { TreeView, Button } from "@mzpeak/ui-kit";
 import { AdvancedTabs } from "./AdvancedTabs";
@@ -40,8 +40,10 @@ function ArchiveTable({ highlighted }: { highlighted: boolean }) {
   async function download() {
     setDownloading(true);
     setDlErr(null);
+    const seq = getOpenSeq(); // a download finishing after a file switch must not save B's bytes as A's
     try {
       const res = await engine.archiveMemberBytes("mzpeak_index.json", 16 * 1024 * 1024);
+      if (getOpenSeq() !== seq) return;
       const blob = new Blob([res.bytes], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

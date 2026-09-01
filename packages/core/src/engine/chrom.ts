@@ -104,9 +104,22 @@ export function engineChromatogramList(reader: Reader): ChromatogramInfo[] {
       promotedColumns: rec.meta,
     });
     const promoted = (rec.meta ?? {}) as Record<string, unknown>;
-    const polRaw = promoted[POLARITY_ACC];
-    const typeRaw = promoted[CHROM_TYPE_ACC];
-    const nPtsRaw = promoted[NPOINTS_ACC];
+    // FLAT records leave rec.meta empty and carry the same CV terms in rec.params
+    // ({accession, value} objects) — fall back there so the catalog's type/polarity/
+    // point-count columns aren't blank on every current-converter file.
+    const paramVal = (curie: string): unknown => {
+      const list = rec.params as { accession?: unknown; value?: unknown }[] | undefined;
+      return list?.find((q) => q?.accession === curie)?.value;
+    };
+    const polRaw = promoted[POLARITY_ACC] ?? paramVal("MS:1000465");
+    const typeRaw =
+      promoted[CHROM_TYPE_ACC] ??
+      // chromatogram type is itself a term param (e.g. accession MS:1000235 "total ion
+      // current chromatogram" with no value) — surface the accession as the type.
+      (rec.params as { accession?: unknown; value?: unknown }[] | undefined)?.find((q) =>
+        typeof q?.accession === "string" && ["MS:1000235", "MS:1000628", "MS:1000627", "MS:1001473", "MS:1000810", "MS:1000811"].includes(q.accession),
+      )?.accession;
+    const nPtsRaw = promoted[NPOINTS_ACC] ?? paramVal("MS:1003060");
     out.push({
       index: i,
       id: String(rec.id ?? i),
@@ -210,12 +223,18 @@ async function extractAllLevels(
     else if (r.representation === "centroid") wantsProfile.set(r.index, false);
   }
   const merged: ChromPoint[] = [];
+  const majorSeen = new Set<number>();
   for (const p of major) {
+    majorSeen.add(p.index);
     const wp = wantsProfile.get(p.index);
     if (wp === undefined || wp === majorityProfile) merged.push(p);
   }
   for (const p of minor) {
-    if (wantsProfile.get(p.index) === !majorityProfile) merged.push(p);
+    // Keep a minority point when its spectrum is DECLARED minority, or when the majority
+    // facet had NOTHING for that index (mis-declared or minority-only spectra — without
+    // this their signal vanished from the merged trace). Dual-stored ghosts stay
+    // excluded: their index has a majority point.
+    if (wantsProfile.get(p.index) === !majorityProfile || !majorSeen.has(p.index)) merged.push(p);
   }
   merged.sort((a, b) => a.time - b.time);
   return merged;
@@ -331,7 +350,15 @@ export async function engineExtractChrom(
   const rt = req.rt ?? null;
 
   if (req.mode === "tic") {
-    const points = (await buildTic(reader, ctx, rt)) ?? [];
+    const points = await buildTic(reader, ctx, rt);
+    if (points === null) {
+      // The whole-file summed-read fallback was REFUSED (no promoted TIC + too many
+      // spectra). An empty-but-successful trace would read as "flat baseline" — fail
+      // loud instead so the UI shows why (adversarial review 2026-09-01).
+      throw new Error(
+        "TIC unavailable: this file has no per-spectrum TIC column and is too large for a whole-file summed read.",
+      );
+    }
     const { time, intensity } = unpackPoints(points);
     return adaptChromatogram({ kind: "tic", id: null, time, intensity });
   }

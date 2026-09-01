@@ -498,7 +498,13 @@ export function reconstructSpectrum(
   // ims-compact Layout B (m/z-chunked): the chunked facet's axis is `tof` (reconstructed via `cal`)
   // instead of an `m/z array` — count it as decodable data so we don't false-empty. PROVISIONAL (§6).
   const imsChunked = cal?.tofEncoding === "m/z-chunked" && !!da?.[TOF_DATA_KEY];
-  const daOk = hasDataArrays(spectrum) || hasGridData(spectrum, gridMz) || imsChunked;
+  // LENGTH-checked, not key-presence: an explicit zero-length profile row (a real
+  // encoding) must fall through to the centroid facet below, not "win" the routing and
+  // render an empty spectrum while centroids exist (adversarial review 2026-09-01).
+  const daOk =
+    (hasDataArrays(spectrum) && (mzArr?.length ?? 0) > 0) ||
+    hasGridData(spectrum, gridMz) ||
+    imsChunked;
   // mzpeakts decoded this spectrum to NO signal at all: a present `dataArrays` carrying no
   // intensity, no integer axis, and no (or a 0-length) m/z, and no centroids. Render it empty
   // rather than throwing — survey/empty scans interleave with data scans (SciEX/Agilent). A

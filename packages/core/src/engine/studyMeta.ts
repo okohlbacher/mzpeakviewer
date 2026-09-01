@@ -103,6 +103,14 @@ export async function engineStudyMeta(reader: Reader): Promise<StudyMeta> {
       channelsSource = fb.matchedRun ? "sdrf-run" : "sdrf-study";
     }
   }
+  // Label-free honesty: a projection where NO channel resolved a reporter m/z (e.g.
+  // MS:1002602 = "label free sample") is not an isobaric channel set — reporting it as
+  // present:true/"projected" made the UI claim reporter channels that can never match a
+  // peak. Drop it entirely (the sample list itself still reaches the Study tab).
+  if (!projectedUsable && effectiveChannels === channels) {
+    effectiveChannels = [];
+    channelsSource = "none";
+  }
 
   return {
     present: effectiveChannels.length > 0,

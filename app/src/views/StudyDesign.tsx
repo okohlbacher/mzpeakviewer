@@ -14,7 +14,7 @@
 //    (channels/samples but no embedded SDRF member).
 import { useEffect, useMemo, useState } from "react";
 import { engine } from "../engine";
-import { useStore, showStudy } from "../store";
+import { useStore, showStudy, getOpenSeq } from "../store";
 import { parseSdrf } from "../sdrf";
 import { gunzipBytes } from "../gunzip";
 import { buildSdrfDesign, compactColumns, sdrfValueName, type SdrfDesign } from "../sdrfDesign";
@@ -58,7 +58,9 @@ export function StudyDesign() {
   const [filter, setFilter] = useState("");
   const [showAllCols, setShowAllCols] = useState(false);
 
-  const cacheKey = `${sourceUrl ?? "local"}::${fileName ?? ""}::${sdrfMember ?? ""}::${studyRunId ?? ""}`;
+  // getOpenSeq() disambiguates same-basename local files: /a/run.mzpeak and /b/run.mzpeak
+  // produced identical keys and the second open served the FIRST file's sample table.
+  const cacheKey = `${getOpenSeq()}::${sourceUrl ?? "local"}::${fileName ?? ""}::${sdrfMember ?? ""}::${studyRunId ?? ""}`;
 
   useEffect(() => {
     let alive = true;

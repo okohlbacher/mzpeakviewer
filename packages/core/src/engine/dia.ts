@@ -17,10 +17,14 @@
 import type { ChromatogramSeries } from "@mzpeak/contracts";
 import { adaptChromatogram } from "../adapt/chrom";
 import { extractChromatogram } from "../reader/explorer/browse";
+import { getCol } from "../reader/explorer/cv";
+import { pickUseProfileForLevel } from "./chrom";
 import type { Reader } from "../reader/openUrl";
 import type { ChromContext } from "./chrom";
 
-const MSLEVEL_COL = "MS_1000511_ms_level";
+// (MS-level column resolved via getCol — nested AND flat names; the old hardcoded
+// nested-only name made every flat file yield ZERO windows, killing DIA extraction
+// on the current converter's output.)
 const IW_TARGET = "MS_1000827_isolation_window_target_mz";
 const IW_LOWER = "MS_1000828_isolation_window_lower_offset";
 const IW_UPPER = "MS_1000829_isolation_window_upper_offset";
@@ -115,7 +119,7 @@ export function buildDiaWindowMap(reader: Reader): DiaWindow[] {
   const sm = reader.spectrumMetadata;
   const n = sm?.length ?? 0;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const msCol = (sm as any)?.spectra?.getChild?.(MSLEVEL_COL) ?? null;
+  const msCol = getCol<{ get(i: number): unknown }>((sm as any)?.spectra, "msLevel");
   const records: WindowRecord[] = [];
   for (let i = 0; i < n; i++) {
     const lvl = num(msCol?.get?.(i));
@@ -152,8 +156,10 @@ export async function engineDiaXic(
   const members = new Set<number>();
   for (const w of matched) for (const i of w.indices) members.add(i);
 
-  const counts = ctx?.representationCounts;
-  const useProfile = counts ? (counts.profile ?? 0) >= (counts.centroid ?? 0) : true;
+  // Facet choice from the MS2 rows' representation, NOT the whole-file majority — a
+  // profile-majority file with centroid MS2 read the profile facet and post-filtered to
+  // an empty trace (same class as the v0.9.0 pickUseProfileForLevel fix).
+  const useProfile = pickUseProfileForLevel(ctx, 2);
   const points = await extractChromatogram(reader, {
     mz: req.mz,
     tolDa: req.tolDa,

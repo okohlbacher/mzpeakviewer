@@ -250,7 +250,18 @@ export function currentShareUrl(): string {
     if (r.mode === "xic") { chromMode = "xic"; chromXic = { mz: r.mz, tolDa: r.tolDa, ...(r.msLevel != null ? { msLevel: r.msLevel } : {}) }; }
     else if (r.mode === "xicRange") { chromMode = "xic"; chromXic = { mz: (r.mzLo + r.mzHi) / 2, tolDa: (r.mzHi - r.mzLo) / 2 }; }
     else if (r.mode === "stored") { chromMode = "stored"; chromStoredId = r.id; }
-    else if (r.mode === "diaXic") { diaXic = [{ precursorMz: r.precursorMz, mz: r.mz, tolDa: r.tolDa }]; }
+    else if (r.mode === "diaXic") {
+      // ALL DIA cards, not just the active one — the grammar's dia= is repeatable, and a
+      // share link that silently dropped the other transitions misrepresented the panel
+      // (adversarial review 2026-09-01). Order = card order; hydration re-adds each.
+      diaXic = s.chromList
+        .filter((it) => it.req.mode === "diaXic")
+        .map((it) => {
+          const q = it.req as Extract<typeof it.req, { mode: "diaXic" }>;
+          return { precursorMz: q.precursorMz, mz: q.mz, tolDa: q.tolDa };
+        });
+      if (diaXic.length === 0) diaXic = [{ precursorMz: r.precursorMz, mz: r.mz, tolDa: r.tolDa }];
+    }
     else chromMode = "tic";
     // rt window round-trips for tic + xic (the grammar re-applies it for those modes).
     if ("rt" in r && r.rt) chromTimeRange = r.rt;
