@@ -2,7 +2,7 @@
   "name": "mzpeakviewer",
   "private": true,
   "version": "0.0.0",
-  "description": "Unified mzPeak viewer — merge of mzPeakIV (imaging) and mzPeakExplorer (general explorer).",
+  "description": "Unified mzPeak viewer \u2014 merge of mzPeakIV (imaging) and mzPeakExplorer (general explorer).",
   "license": "MIT",
   "type": "module",
   "workspaces": [
@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "typescript": "~5.9.2",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": ">=20"

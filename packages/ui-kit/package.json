@@ -8,7 +8,9 @@
     ".": "./src/index.ts",
     "./styles.css": "./src/styles.css"
   },
-  "files": ["src"],
+  "files": [
+    "src"
+  ],
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
@@ -22,10 +24,10 @@
     "uplot": "1.6.32"
   },
   "devDependencies": {
-    "@types/react": "19.2.16",
-    "@types/react-dom": "19.2.3",
-    "react": "19.2.7",
-    "react-dom": "19.2.7",
-    "vitest": "4.1.8"
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "vitest": "4.1.11"
   }
 }
