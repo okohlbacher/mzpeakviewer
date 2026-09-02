@@ -166,7 +166,7 @@ function gridCal(reader: Reader, facet: GridFacet = "centroid"): GridCal | null 
     : asObj(mzRaw) != null ? mzGridLatticeCal(mzRaw) : mzGridTofCal(tofRaw);
 }
 
-/** `mz_calibration` `{codec:"mz-grid", scale}` → uniform lattice `mz = idx / scale`. `scale` must
+/** `mz_calibration` `{codec:"mz-grid", scale}` → uniform lattice `mz = idx · (1/scale)`. `scale` must
  *  be a JSON number > 0 (the viewer gates on it — a string/zero/negative scale is unresolvable). */
 function mzGridLatticeCal(raw: unknown): GridCal | null {
   const mzc = asObj(raw);
@@ -250,7 +250,9 @@ function fieldBySuffix(spectra: SpectraStruct | undefined, suffix: string): stri
 
 /**
  * Resolve the per-spectrum integer-axis → m/z map for a grid spectrum, for ONE facet:
- *  - **mz-grid** (sciex uniform): `mz = tof_index / scale`, run-wide.
+ *  - **mz-grid** (sciex uniform / Shimadzu lattice): `mz = tof_index · (1/scale)`, run-wide —
+ *    the Parquet transform's multiplier (`transform_params [1e-9]`), bit-identical to the
+ *    reference reader; NOT `tof_index / scale` (1 ulp off on ~40 % of values).
  *  - **tof-grid** (sciex sqrt): `mz = (c0 + c1·tof_index)²` with PER-SPECTRUM `c0,c1`.
  *  - **agilent-grid** (sqrt + polynomial): `mz = (c0+c1·k)² − poly(clamp(t,left,right))`,
  *    `t = base + (c0+c1·k)/coeff`, with PER-SPECTRUM `c0,c1,calibration_id` selecting the
@@ -267,7 +269,16 @@ function fieldBySuffix(spectra: SpectraStruct | undefined, suffix: string): stri
 export function resolveGridMz(reader: Reader, index: number, facet: GridFacet = "centroid"): GridMz | null {
   const g = gridCal(reader, facet);
   if (!g) return null;
-  if (g.kind === "mz-grid") { const s = g.scale; return (axis) => axis / s; }
+  if (g.kind === "mz-grid") {
+    // MULTIPLY by the reciprocal, never divide: the archive's Parquet transform is
+    // `mz = transform_params[0] · k` (MS:1003824, params [1e-9]) and the reference reader computes
+    // `s * k` (mzpeak_prototyping reader/point.rs). `k / 1e9` and `k * 1e-9` differ by 1 ulp on
+    // ~40 % of lattice values (100000123456 → 100.000123456 vs 100.00012345600001), so dividing
+    // would put this viewer 1 ulp off every other conformant reader on the same archive.
+    // 1/1e9 === 1e-9 and 1/1e4 === 1e-4 exactly in IEEE-754.
+    const inv = 1 / g.scale;
+    return (axis) => axis * inv;
+  }
   if (g.kind === "tof-grid-global") { const { c0, c1 } = g; return (axis) => { const m = c0 + c1 * axis; return m * m; }; }
   const spectra = (reader as unknown as { spectrumMetadata?: { spectra?: SpectraStruct } }).spectrumMetadata?.spectra;
   const numBySuffix = (suffix: string): number | null => {
@@ -326,11 +337,19 @@ function tofColumnKey(c: Record<string, unknown>): string | null {
   for (const k of Object.keys(c)) if (!CENTROID_STD_KEYS.has(k) && isAxis(c[k])) return k;
   return null;
 }
-/** A centroid object's `mz` that is NOT a usable value: absent (no `mz` column, e.g. SciEX
- *  mz-grid / ims-compact peaks), null, or the 0 mzpeakts materialises for a NULL f64 cell of a
- *  gridded row (Shimadzu peaks facet: `mz` is the per-spectrum f64 fallback column, null on
- *  lattice rows). The grid axis is authoritative for such a row when it is present + resolvable. */
-const mzUnusable = (v: unknown): boolean => v == null || v === 0;
+/** A row's f64 `mz` that IS a usable value: a finite number > 0. Everything else is the null fill
+ *  of a gridded row — absent (no `mz` column, e.g. SciEX mz-grid / ims-compact peaks), null, or
+ *  the 0 mzpeakts materialises for a NULL f64 cell (Shimadzu: `mz` is the per-spectrum f64
+ *  fallback column, null on lattice rows). The rule is PER ROW and the same on both facets:
+ *  axis present AND `mz` unusable → the grid axis is authoritative; `mz` finite and > 0 → `mz`
+ *  wins. The second half matters for a fallback f64 spectrum inside a lattice facet: mzpeakts
+ *  drops a column that is all-null within the selected rows, so a whole-spectrum fallback most
+ *  likely arrives with NO axis key at all, but a NULL Int64 cell that IS materialised comes back
+ *  as `0n` — either shape reads `mz` and is never reconstructed from the zero. (The converter
+ *  routes per spectrum, so the real archives are homogeneous per spectrum on both facets; the
+ *  mixed shapes below are defensive.) */
+const mzUsable = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v > 0;
+const mzUnusable = (v: unknown): boolean => !mzUsable(v);
 
 /** The raw spectrum record shape mzpeakts returns from getSpectrum(index). The centroid
  *  objects may carry extra promoted columns (e.g. ion mobility) beyond mz/intensity. */
@@ -476,13 +495,21 @@ type RawSignal = { mz: Float64Array; intensity: Float32Array; mobility?: ArrayLi
 function readDataArrays(s: RawSpectrum, gridMz: GridMz | null, cal: ImsCalibration | null = null): RawSignal {
   const da = s.dataArrays!;
   // SciEX/Agilent grid: an integer `tof_index` replaces the `m/z array`; reconstruct m/z
-  // per point through the resolved grid map (mz-grid: idx/scale; tof-grid: (c0+c1·idx)²).
-  if (gridMz && da[GRID_AXIS_KEY]) {
-    // Grid axis wins over any m/z array (see hasGridData): a gridded row's `mz` is a null fill.
+  // per point through the resolved grid map (mz-grid: idx·(1/scale); tof-grid: (c0+c1·idx)²).
+  if (da[GRID_AXIS_KEY]) {
+    // Per-row rule (see `mzUsable`): the grid axis is authoritative for a row whose `mz` is the
+    // null fill (absent / 0); a row carrying a real f64 `mz` (a fallback spectrum whose null
+    // Int64 axis, when materialised at all, mzpeakts yields as 0n) keeps it. An axis with NO resolver maps a null-mz
+    // row to NaN — dropped by sanitizePairs, fail-loud (EmptySpectrumError) when the whole
+    // spectrum is like that — never the 0 null fill as m/z.
     const axis = da[GRID_AXIS_KEY]!, n = axis.length;
+    const mzArr = da[MZ_KEY] as ArrayLike<number> | undefined;
     const mz = new Float64Array(n);
     // `axisNum`: an Int64 axis is a BigInt64Array — coerce before arithmetic (no implicit mixing).
-    for (let i = 0; i < n; i++) mz[i] = gridMz(axisNum(axis[i]));
+    for (let i = 0; i < n; i++) {
+      const f = mzArr ? mzArr[i] : undefined;
+      mz[i] = mzUsable(f) ? f : gridMz ? gridMz(axisNum(axis[i])) : NaN;
+    }
     return { mz, intensity: Float32Array.from(da[INTENSITY_KEY] as ArrayLike<number>) };
   }
   // ims-compact Layout B (m/z-chunked): the chunked facet carries a `tof` axis instead of an
@@ -519,13 +546,17 @@ function readCentroids(s: RawSpectrum, cal: ImsCalibration | null, gridMz: GridM
   const intensity = new Float32Array(n);
   const hasMobility = n > 0 && centroids[0]!["mean_inverse_reduced_ion_mobility"] != null;
   const mobility = hasMobility ? new Float64Array(n) : undefined;
-  // Unusable `mz` (absent / null / the 0 of a null-filled fallback column) → locate the
-  // non-standard integer axis once (mzpeakts mangles the 1-word `tof`/`tof_index` name, often to
-  // ""). gridMz (grid) takes precedence over cal (ims-compact). Values may be number OR bigint
+  // Unusable `mz` (absent / null / the 0 of a null-filled fallback column) on ANY row → locate
+  // the non-standard integer axis once, from the first such row (mzpeakts mangles the 1-word
+  // `tof`/`tof_index` name, often to ""). Locating it from row 0 alone would read a gridded
+  // row's null-fill 0 verbatim whenever a fallback row (real f64 `mz`) happens to come first —
+  // the per-row rule below must not depend on row order. All-usable `mz` → no axis, verbatim.
+  // gridMz (grid) takes precedence over cal (ims-compact). Values may be number OR bigint
   // (Int64 lattice) — every axis read goes through `axisNum` before arithmetic. The axis is
   // located even when NO resolver is available so such rows map to NaN (→ EmptySpectrumError
   // when the whole spectrum is like that) instead of reading the 0 null-fill as m/z.
-  const axisKey = n > 0 && mzUnusable(centroids[0]!["mz"]) ? tofColumnKey(centroids[0]!) : null;
+  const firstGridded = centroids.findIndex((c) => mzUnusable(c["mz"]));
+  const axisKey = firstGridded >= 0 ? tofColumnKey(centroids[firstGridded]!) : null;
   // The axis may sit under a key `tofColumnKey` found by elimination — read it by string key.
   const axisOf = (c: RawCentroid): number => axisNum((c as Record<string, unknown>)[axisKey!] as number | bigint | null | undefined);
   // ims-compact Layout A: `point.tof` is a per-mobility-scan delta. Reconstruct absolute TOF by
@@ -563,6 +594,73 @@ function readCentroids(s: RawSpectrum, cal: ImsCalibration | null, gridMz: GridM
     if (mobility) mobility[i] = axisNum(c["mean_inverse_reduced_ion_mobility"]);
   }
   return mobility ? { mz, intensity, mobility } : { mz, intensity };
+}
+
+/** One facet's signal, reconstructed (pre-sanitize) — what {@link readFacetSignal} returns. */
+export type FacetSignal = { mz: Float64Array; intensity: Float32Array; mobility?: ArrayLike<number> };
+
+/**
+ * Thrown by {@link readFacetSignal} when a facet carries an integer grid axis (`tof_index`) on
+ * rows whose `mz` is the null fill but NO resolver is available for that facet (missing or
+ * malformed index block, or a spectrum without its per-spectrum coefficients). Named so the raw
+ * readers fail loud instead of returning the 0 null fill as m/z.
+ */
+export class UnresolvedGridAxisError extends Error {
+  constructor(public readonly index: number, facet: GridFacet, rows: number) {
+    super(`Spectrum ${index}: ${rows} ${facet} row(s) carry a grid axis (tof_index) with no resolvable ${facet} grid calibration`);
+    this.name = "UnresolvedGridAxisError";
+  }
+}
+
+/**
+ * Read ONE facet of a raw mzpeakts spectrum record through the SAME codecs `reconstructSpectrum`
+ * uses — the per-facet grid resolver (`resolveFacetGridMz`: Shimadzu Int64 lattice / SciEX sqrt /
+ * Agilent poly, BigInt axes coerced) and the ims-compact `tof` calibration — WITHOUT the
+ * representation routing, source fall-through or sanitizing. This is the shared reconstruction for
+ * the non-engine readers (`reader/arrays harvestDataArraysOrNull`, `reader/explorer/browse
+ * getSpectrumArrays`) which choose their own source order; it exists so nobody reads a gridded
+ * row's `mz` (the 0 null fill) verbatim.
+ *
+ * Returns null when the facet holds no signal at all (no data arrays / no centroid rows). A
+ * facet whose rows need a grid axis it cannot resolve throws {@link UnresolvedGridAxisError};
+ * rows carrying a real f64 `mz` (a fallback spectrum) read it verbatim under either outcome.
+ * Pass `grid`/`cal` from `resolveFacetGridMz(reader, index)` / `readImsCalibration(reader)`
+ * (resolved once per spectrum) or use {@link readSpectrumFacet} to resolve them here.
+ */
+export function readFacetSignal(
+  spectrum: RawSpectrum,
+  index: number,
+  facet: GridFacet,
+  grid: GridResolvers,
+  cal: ImsCalibration | null,
+): FacetSignal | null {
+  if (facet === "centroid") {
+    if (!hasCentroids(spectrum)) return null;
+    const sig = readCentroids(spectrum, cal, grid.centroid);
+    // readCentroids maps a null-mz row whose axis has no resolver to NaN — count those rows so a
+    // partially-unresolved spectrum fails loud, not just an all-NaN one.
+    if (!grid.centroid && !cal) assertResolved(sig.mz, spectrum.centroids!.map((c) => c["mz"]), index, facet);
+    return sig;
+  }
+  const da = spectrum.dataArrays;
+  if (!da || !da[INTENSITY_KEY]) return null;
+  const imsChunked = cal?.tofEncoding === "m/z-chunked" && !!da[TOF_DATA_KEY];
+  if (!da[MZ_KEY] && !da[GRID_AXIS_KEY] && !imsChunked) return null;
+  const sig = readDataArrays(spectrum, grid.profile, cal);
+  if (da[GRID_AXIS_KEY] && !grid.profile) assertResolved(sig.mz, da[MZ_KEY] as ArrayLike<number> | undefined, index, facet);
+  return sig;
+}
+
+/** Fail loud when an unresolved axis left NaN on rows whose own `mz` was unusable. */
+function assertResolved(mz: Float64Array, raw: ArrayLike<unknown> | undefined, index: number, facet: GridFacet): void {
+  let bad = 0;
+  for (let i = 0; i < mz.length; i++) if (!Number.isFinite(mz[i]!) && mzUnusable(raw?.[i])) bad++;
+  if (bad > 0) throw new UnresolvedGridAxisError(index, facet, bad);
+}
+
+/** {@link readFacetSignal} with the resolvers taken from `reader` for spectrum `index`. */
+export function readSpectrumFacet(reader: Reader, index: number, spectrum: RawSpectrum, facet: GridFacet): FacetSignal | null {
+  return readFacetSignal(spectrum, index, facet, resolveFacetGridMz(reader, index), readImsCalibration(reader));
 }
 
 /**

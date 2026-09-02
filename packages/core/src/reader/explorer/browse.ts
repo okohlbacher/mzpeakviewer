@@ -4,11 +4,15 @@
 //
 // `getSpectrumArrays` is the golden REFERENCE the engine's reconstruction is
 // asserted value-equal against (engine/imaging.golden.test) — the reference
-// reconstruction the engine must reproduce byte-for-byte.
+// SOURCE ORDER (profile → centroids → profile) the engine must reproduce byte-for-byte.
+// The per-row decode of each facet is shared with the engine (`engine/spectrum
+// readFacetSignal`): a grid-encoded facet stores its m/z as an integer axis beside a
+// null-filled `mz` (read back as 0), so the codec — not the verbatim `mz` — is the truth.
 import type { Reader } from "./open";
 import { recRepresentation } from "./cv";
 import type { ChromPoint, SpectrumArrays, StoredChromatogram } from "./types";
 import { assertNoGridAxis } from "../arrays";
+import { readFacetSignal, readImsCalibration, resolveFacetGridMz, type RawSpectrum as EngineRawSpectrum } from "../../engine/spectrum";
 
 const MZ_KEY = "m/z array";
 const INTENSITY_KEY = "intensity array";
@@ -50,21 +54,21 @@ export function sanitizePairs(
   return { x: nx, y: ny };
 }
 
-type RawSpectrum = {
-  id: unknown;
+type RawSpectrum = EngineRawSpectrum & {
   msLevel?: number | null;
   time?: number | null;
   meta?: unknown;
   isProfile?: boolean;
-  dataArrays?: Record<string, ArrayLike<number>> | undefined;
-  centroids?: { mz: number; intensity: number }[] | undefined;
 };
 
 /**
  * Read + reconstruct spectrum `index` into plain typed arrays — the golden parity
  * reference reconstruction for the engine. Prefers the profile data-array source,
  * falls back to centroids (spectra_peaks), then to data-arrays again, sanitizing
- * the result.
+ * the result. Each facet is decoded through the engine's `readFacetSignal` (per-facet
+ * grid resolver + ims-compact calibration, BigInt axes coerced), so a grid-encoded facet
+ * yields reconstructed m/z here exactly as in the Spectra view; a grid axis with no
+ * resolver fails loud (`assertNoGridAxis` / `UnresolvedGridAxisError`), never zeros.
  */
 export async function getSpectrumArrays(
   reader: Reader,
@@ -82,36 +86,22 @@ export async function getSpectrumArrays(
   const msLevel =
     typeof spectrum.msLevel === "number" ? spectrum.msLevel : null;
 
-  let mz: Float64Array;
-  let intensity: Float32Array;
-
-  const da = spectrum.dataArrays;
-  const centroids = spectrum.centroids;
-  // This reference reads `mz` VERBATIM: a grid-encoded facet (integer `tof_index` beside a
-  // null-filled `mz`) needs the engine's per-spectrum reconstruction — fail loud, never zeros.
-  assertNoGridAxis(spectrum, index);
-  // Prefer the profile data-array source; fall back to centroids (spectra_peaks).
-  if (representation !== "centroid" && da && da[MZ_KEY] && da[INTENSITY_KEY]) {
-    mz = Float64Array.from(da[MZ_KEY]);
-    intensity = Float32Array.from(da[INTENSITY_KEY]);
-  } else if (centroids && centroids.length > 0) {
-    const k = centroids.length;
-    mz = new Float64Array(k);
-    intensity = new Float32Array(k);
-    for (let i = 0; i < k; i++) {
-      mz[i] = centroids[i]!.mz;
-      intensity[i] = centroids[i]!.intensity;
-    }
-  } else if (da && da[MZ_KEY] && da[INTENSITY_KEY]) {
-    mz = Float64Array.from(da[MZ_KEY]);
-    intensity = Float32Array.from(da[INTENSITY_KEY]);
-  } else {
-    throw new Error(`Spectrum ${index} has no reconstructable m/z + intensity arrays`);
-  }
+  // Resolve the per-facet grid / ims-compact codecs once; with NO resolver at all a grid axis is
+  // unreadable — fail loud up front (the per-facet reader fails loud for the partial case).
+  const grid = resolveFacetGridMz(reader, index);
+  const cal = readImsCalibration(reader);
+  if (!grid.profile && !grid.centroid && !cal) assertNoGridAxis(spectrum, index);
+  // Prefer the profile data-array source; fall back to centroids (spectra_peaks), then to the
+  // data arrays again for a centroid-declared spectrum whose peaks facet is empty.
+  const sig =
+    (representation !== "centroid" ? readFacetSignal(spectrum, index, "profile", grid, cal) : null) ??
+    readFacetSignal(spectrum, index, "centroid", grid, cal) ??
+    readFacetSignal(spectrum, index, "profile", grid, cal);
+  if (!sig) throw new Error(`Spectrum ${index} has no reconstructable m/z + intensity arrays`);
 
   // Defensively drop non-finite points and enforce ascending m/z; a length mismatch
   // is reconciled here too.
-  const clean = sanitizePairs(mz, intensity);
+  const clean = sanitizePairs(sig.mz, sig.intensity);
   return { index, id, msLevel, representation, time, mz: clean.x, intensity: clean.y };
 }
 

@@ -49,7 +49,7 @@ describe("gridXicResolver", () => {
   it("picks the facet's index block: profile → sqrt tof_calibration, centroids → mz_calibration lattice", () => {
     const { reader } = fakeReader([], both, coeffs);
     expect(gridXicResolver(reader, true)!(0)!(1000)).toBe(sqrt(1000));
-    expect(gridXicResolver(reader, false)!(0)!(500_000_000_000)).toBe(500);
+    expect(gridXicResolver(reader, false)!(0)!(500_000_000_000)).toBe(500_000_000_000 * 1e-9); // the transform multiplier (= the reference reader), not k/1e9
   });
 });
 
