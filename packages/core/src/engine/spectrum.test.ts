@@ -8,6 +8,7 @@ import {
   sanitizePairs,
   reconstructSpectrum,
   resolveGridMz,
+  resolveFacetGridMz,
   isGridFile,
   EmptySpectrumError,
   type RawSpectrum,
@@ -583,5 +584,157 @@ describe("reconstructSpectrum — forced signal source (dual-stored spectra)", (
     expect(r.mz.length).toBe(0);
     expect(r.sourceUsed).toBeUndefined();
     expect(r.altAvailable).toBe(false);
+  });
+});
+
+describe("grid axis beside a null-filled m/z column (Shimadzu sqrt-grid profile facet)", () => {
+  const grid = (k: number) => { const r = 8.0 + 9.16e-5 * k; return r * r; };
+  const mk = (da: Record<string, ArrayLike<number>>) => ({ id: "scan=1", dataArrays: da } as unknown as RawSpectrum);
+  it("reconstructs from tof_index even though mzpeakts materialises the null mz column as zeros", () => {
+    const s = mk({ "m/z array": new Float64Array([0, 0, 0]), "tof_index": new Int32Array([0, 1, 2]), "intensity array": new Float32Array([5, 7, 9]) });
+    const out = reconstructSpectrum(s, 0, "profile", null, grid, "profile");
+    expect(Array.from(out.mz)).toEqual([grid(0), grid(1), grid(2)]);
+    expect(Array.from(out.intensity)).toEqual([5, 7, 9]);
+  });
+  it("a fallback spectrum without tof_index still reads its f64 m/z", () => {
+    const s = mk({ "m/z array": new Float64Array([70, 70.000626327, 70.032827765]), "intensity array": new Float32Array([1, 2, 3]) });
+    const out = reconstructSpectrum(s, 0, "profile", null, grid, "profile");
+    expect(Array.from(out.mz)).toEqual([70, 70.000626327, 70.032827765]);
+  });
+});
+
+describe("per-facet grid resolution (Shimadzu: sqrt tof-grid PROFILE + Int64 mz-grid CENTROIDS)", () => {
+  // Same reader shape as the calibration-shape tests above: index metadata + per-spectrum
+  // coefficient columns exposed by full name (suffix lookup finds them).
+  const mkReader = (metadata: Record<string, unknown>, coeffs?: Record<string, number>): Reader =>
+    ({
+      store: { fileIndex: { metadata } },
+      spectrumMetadata: coeffs ? {
+        spectra: {
+          getChild: (n: string) => ({ get: () => coeffs[n] }),
+          type: { children: Object.keys(coeffs).map((name) => ({ name })) },
+        },
+      } : undefined,
+    }) as unknown as Reader;
+  const tofBlock = { codec: "tof-grid", model: "sciex_sqrt_per_spectrum", per_spectrum_columns: ["tof_c0", "tof_c1"], vendor: "shimadzu", tof_to_mz: "mz = (tof_c0 + tof_c1*tof_index)^2" };
+  const mzBlock = { codec: "mz-grid", scale: 1e9, vendor: "shimadzu", lossless: "tof_index", applies_to: "spectra_peaks", mz_from_tof_index: "tof_index / scale" };
+  const both = { tof_calibration: tofBlock, mz_calibration: mzBlock };
+  const c0 = 8.0, c1 = 9.16e-5;
+  const coeffs = { MS_4000900_tof_c0: c0, MS_4000901_tof_c1: c1 };
+  const sqrt = (k: number) => { const r = c0 + c1 * k; return r * r; };
+  const lattice = (k: number) => k / 1e9;
+
+  it("both blocks present: profile → tof_calibration (sqrt), centroid → mz_calibration (idx/scale)", () => {
+    const r = mkReader(both, coeffs);
+    expect(isGridFile(r)).toBe(true);
+    expect(resolveGridMz(r, 0, "profile")!(1000)).toBe(sqrt(1000));
+    expect(resolveGridMz(r, 0, "centroid")!(123_456_789_012)).toBe(lattice(123_456_789_012));
+    // The facet-less call shape keeps the centroid precedence (documented default).
+    expect(resolveGridMz(r, 0)!(5e11)).toBe(500);
+    const f = resolveFacetGridMz(r, 0);
+    expect(f.profile!(2000)).toBe(sqrt(2000));
+    expect(f.centroid!(2000)).toBe(lattice(2000));
+  });
+
+  it("both blocks, coefficient-less spectrum: profile unresolvable, centroids still resolve the lattice", () => {
+    const r = mkReader(both, { MS_4000900_tof_c0: null as unknown as number, MS_4000901_tof_c1: null as unknown as number });
+    const f = resolveFacetGridMz(r, 0);
+    expect(f.profile).toBeNull();
+    expect(f.centroid!(70_000_000_000)).toBe(70);
+  });
+
+  it("reconstructSpectrum: dataArrays go through the sqrt grid, centroids through idx/scale", () => {
+    const f = resolveFacetGridMz(mkReader(both, coeffs), 0);
+    const rec = {
+      id: "scan=1",
+      // Gridded profile row: Int32 tof_index + the null-filled fallback `mz` read back as zeros.
+      dataArrays: { "m/z array": new Float64Array([0, 0, 0]), "tof_index": new Int32Array([0, 1, 2]), "intensity array": new Float32Array([5, 7, 9]) },
+      // Gridded centroid rows: `mz` (the fallback column) null-filled → 0, lattice in tof_index.
+      centroids: [{ mz: 0, tof_index: 70_000_000_000, intensity: 11 }, { mz: 0, tof_index: 70_000_626_327, intensity: 13 }],
+    } as unknown as RawSpectrum;
+    const prof = reconstructSpectrum(rec, 0, "centroid", null, f, "profile");
+    expect(prof.sourceUsed).toBe("profile");
+    expect(Array.from(prof.mz)).toEqual([sqrt(0), sqrt(1), sqrt(2)]);
+    expect(Array.from(prof.intensity)).toEqual([5, 7, 9]);
+    const cent = reconstructSpectrum(rec, 0, "centroid", null, f);
+    expect(cent.sourceUsed).toBe("centroid");
+    expect(Array.from(cent.mz)).toEqual([70, 70.000626327]);
+    expect(Array.from(cent.intensity)).toEqual([11, 13]);
+    expect(cent.altAvailable).toBe(true);
+  });
+
+  it("BigInt axes on both facets: BigInt64Array dataArrays and bigint centroid tof_index", () => {
+    const f = resolveFacetGridMz(mkReader(both, coeffs), 0);
+    const rec = {
+      id: "scan=2",
+      dataArrays: { "m/z array": new Float64Array([0, 0]), "tof_index": new BigInt64Array([10n, 20n]), "intensity array": new Float32Array([1, 2]) },
+      centroids: [{ mz: 0, tof_index: 1_250_000_000_000n, intensity: 3 }, { mz: null, tof_index: 1_250_000_000_001n, intensity: 4 }],
+    } as unknown as RawSpectrum;
+    const prof = reconstructSpectrum(rec, 0, "profile", null, f);
+    expect(Array.from(prof.mz)).toEqual([sqrt(10), sqrt(20)]);
+    const cent = reconstructSpectrum(rec, 0, "centroid", null, f);
+    expect(Array.from(cent.mz)).toEqual([1250, 1250.000000001]);
+    expect(Array.from(cent.intensity)).toEqual([3, 4]);
+    // The mangled "" key mzpeakts sometimes produces for the 1-word name, as bigint.
+    const mangled = { id: "s", centroids: [{ mz: 0, "": 500_000_000_000n, intensity: 1 }] } as unknown as RawSpectrum;
+    expect(Array.from(reconstructSpectrum(mangled, 0, "centroid", null, f).mz)).toEqual([500]);
+  });
+
+  it("an off-lattice centroid spectrum keeps its f64 mz (tof_index null-filled) under a resolver", () => {
+    const f = resolveFacetGridMz(mkReader(both, coeffs), 0);
+    const rec = { id: "s", centroids: [{ mz: 100.5, tof_index: 0n, intensity: 1 }, { mz: 200.25, tof_index: 0n, intensity: 2 }] } as unknown as RawSpectrum;
+    expect(Array.from(reconstructSpectrum(rec, 0, "centroid", null, f).mz)).toEqual([100.5, 200.25]);
+    // ...and the profile fallback row (f64 mz, no tof_index) reads its f64 unchanged.
+    const prof = { id: "s", dataArrays: { "m/z array": new Float64Array([70, 70.000626327]), "intensity array": new Float32Array([1, 2]) } } as unknown as RawSpectrum;
+    expect(Array.from(reconstructSpectrum(prof, 0, "profile", null, f).mz)).toEqual([70, 70.000626327]);
+  });
+
+  it("single-block files are unchanged: mz-grid only → both facets idx/scale; tof-grid only → both facets sqrt", () => {
+    const mzOnly = resolveFacetGridMz(mkReader({ mz_calibration: { codec: "mz-grid", scale: 10_000 } }), 0);
+    expect(mzOnly.profile!(1_000_000)).toBe(100);
+    expect(mzOnly.centroid!(1_000_000)).toBe(100);
+    const tofOnly = resolveFacetGridMz(mkReader({ tof_calibration: tofBlock }, coeffs), 0);
+    expect(tofOnly.profile!(1000)).toBe(sqrt(1000));
+    expect(tofOnly.centroid!(1000)).toBe(sqrt(1000));
+    // The Shimadzu archives converted before the lattice landed (sqrt-grid profile, plain f64
+    // centroids, no mz_calibration): centroids carry a real `mz` and no axis → f64 verbatim
+    // even though the centroid facet now resolves the sqrt grid.
+    const rec = { id: "s", centroids: [{ mz: 80.045795373, intensity: 91 }, { mz: 80.047434479, intensity: 215 }] } as unknown as RawSpectrum;
+    expect(Array.from(reconstructSpectrum(rec, 0, "centroid", null, tofOnly).mz)).toEqual([80.045795373, 80.047434479]);
+    // A bare resolver passed positionally still applies to both facets (pre-facet call shape).
+    const bare = reconstructSpectrum({ id: "s", dataArrays: { "tof_index": new Int32Array([1, 2]), "intensity array": new Float32Array([1, 2]) } } as unknown as RawSpectrum, 0, "profile", null, sqrt);
+    expect(Array.from(bare.mz)).toEqual([sqrt(1), sqrt(2)]);
+  });
+
+  it("mz_calibration PRESENT but malformed (non-numeric / non-positive scale): centroids unresolvable (no sqrt fall-through), profile sqrt still resolves", () => {
+    const lattice2 = [{ mz: 0, "": 100_000_123_456n, intensity: 5 }, { mz: 0, "": 200_000_000_001n, intensity: 7 }];
+    for (const scale of ["1e9", 0, -1, null]) {
+      const r = mkReader({ tof_calibration: tofBlock, mz_calibration: { ...mzBlock, scale } }, coeffs);
+      expect(isGridFile(r)).toBe(true);
+      const f = resolveFacetGridMz(r, 0);
+      expect(f.profile!(1)).toBe(sqrt(1));
+      // A present-but-rejected block must NOT fall back to the other block: pushing the ~1e11
+      // lattice axis through (c0 + c1·k)² would render finite, ascending, absurd m/z (~8e13).
+      expect(f.centroid).toBeNull();
+      const rec = { id: "s", centroids: lattice2 } as unknown as RawSpectrum;
+      expect(() => reconstructSpectrum(rec, 0, "centroid", null, f)).toThrow(EmptySpectrumError);
+    }
+    // Same for a present-but-unrecognised tof block on the profile facet (no lattice fall-through).
+    const f2 = resolveFacetGridMz(mkReader({ tof_calibration: { codec: "tof-grid", model: "unknown_model" }, mz_calibration: mzBlock }, coeffs), 0);
+    expect(f2.profile).toBeNull();
+    expect(f2.centroid!(70_000_000_000)).toBe(70);
+  });
+
+  it("lattice centroids with NO resolvable grid (no index blocks at all) fail loud instead of rendering m/z 0", () => {
+    const f = resolveFacetGridMz(mkReader({}), 0);
+    expect(f).toEqual({ profile: null, centroid: null });
+    const rec = { id: "s", centroids: [{ mz: 0, "": 100_000_123_456n, intensity: 5 }, { mz: 0, "": 200_000_000_001n, intensity: 7 }] } as unknown as RawSpectrum;
+    expect(() => reconstructSpectrum(rec, 0, "centroid", null, f)).toThrow(EmptySpectrumError);
+    expect(() => reconstructSpectrum(rec, 0, "centroid", null, null)).toThrow(EmptySpectrumError);
+    // Per-row: a row carrying a real f64 mz survives beside the unmappable lattice rows.
+    const mixed = { id: "s", centroids: [{ mz: 0, "": 100_000_123_456n, intensity: 5 }, { mz: 200.5, "": 0n, intensity: 7 }] } as unknown as RawSpectrum;
+    const out = reconstructSpectrum(mixed, 0, "centroid", null, null);
+    expect(Array.from(out.mz)).toEqual([200.5]);
+    expect(Array.from(out.intensity)).toEqual([7]);
   });
 });

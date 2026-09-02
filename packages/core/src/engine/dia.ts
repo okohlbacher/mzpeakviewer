@@ -18,7 +18,7 @@ import type { ChromatogramSeries } from "@mzpeak/contracts";
 import { adaptChromatogram } from "../adapt/chrom";
 import { extractChromatogram } from "../reader/explorer/browse";
 import { getCol } from "../reader/explorer/cv";
-import { pickUseProfileForLevel } from "./chrom";
+import { pickUseProfileForLevel, gridXicResolver } from "./chrom";
 import type { Reader } from "../reader/openUrl";
 import type { ChromContext } from "./chrom";
 
@@ -165,6 +165,7 @@ export async function engineDiaXic(
     tolDa: req.tolDa,
     timeRange: req.rt ?? null,
     useProfile,
+    gridMz: gridXicResolver(reader, useProfile), // grid-encoded facets window on the axis
   });
   const time: number[] = [];
   const intensity: number[] = [];

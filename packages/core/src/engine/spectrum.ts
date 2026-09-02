@@ -88,8 +88,26 @@ export function readImsCalibration(reader: Reader): ImsCalibration | null {
   return { a, b, tofEncoding };
 }
 
-/** A per-spectrum integer-axis → m/z map for SciEX/Agilent grid profile data (`tof_index`). */
+/** A per-spectrum integer-axis → m/z map for SciEX/Agilent/Shimadzu grid data (`tof_index`). */
 export type GridMz = (axis: number) => number;
+/**
+ * The facet a grid resolver is asked for. One file may carry BOTH index blocks — Shimadzu keeps
+ * the per-spectrum sqrt grid (`tof_calibration`) on the PROFILE facet and an exact Int64 lattice
+ * (`mz_calibration`, `mz-grid`) on the CENTROID facet — so the block precedence is per facet:
+ *   centroid → `mz_calibration` first, then `tof_calibration`;
+ *   profile  → `tof_calibration` first, then `mz_calibration`.
+ * Single-block files resolve identically for either facet (SciEX `mz-grid` → centroids; mzML
+ * `--tof-grid` → both facets through the sqrt grid, exactly as before).
+ */
+export type GridFacet = "profile" | "centroid";
+/** Per-facet grid resolvers for one spectrum (null = that facet has no resolvable grid). */
+export type GridResolvers = { profile: GridMz | null; centroid: GridMz | null };
+/** Widen an `ArrayLike<number>` to the Int64 case: mzpeakts materialises an Int64 column as a
+ *  `BigInt64Array` (dataArrays) / `bigint` properties (centroid objects). Every AXIS read goes
+ *  through `axisNum` before arithmetic; lattice values reach ~1.25e12, well inside Number. */
+type AxisLike = ArrayLike<number | bigint>;
+const axisNum = (v: number | bigint | undefined | null): number =>
+  typeof v === "bigint" ? Number(v) : typeof v === "number" ? v : NaN;
 const GRID_AXIS_KEY = "tof_index"; // mzpeakts array_name for the integer grid axis (MS:1000519)
 const TOF_DATA_KEY = "tof"; // ims-compact tof axis (MS:1000786) as it appears in a chunked facet (Layout B)
 
@@ -134,13 +152,33 @@ function parseAgilentCals(raw: unknown): Record<string, AgilentCal> | null {
  * the VERIFIED shapes are accepted (gated on the `model` field); any unrecognised grid → null →
  * fail loud rather than reconstruct wrong m/z.
  */
-function gridCal(reader: Reader): GridCal | null {
+function gridCal(reader: Reader, facet: GridFacet = "centroid"): GridCal | null {
   const meta = indexMeta(reader);
-  const mzc = asObj(meta["mz_calibration"]);
+  const mzRaw = meta["mz_calibration"], tofRaw = meta["tof_calibration"];
+  // Per-facet precedence (see GridFacet): the centroid facet prefers the `mz_calibration`
+  // lattice, the profile facet prefers the `tof_calibration` sqrt grid. The fallback to the
+  // OTHER block applies only when the preferred block is ABSENT (single-block files). A block
+  // that is PRESENT but malformed (e.g. a string / zero `scale`) resolves to null for its
+  // facet — fail loud rather than push a ~1e12 lattice axis through the sqrt grid and render
+  // finite, ascending, absurd m/z (review 2026-09-02).
+  return facet === "profile"
+    ? asObj(tofRaw) != null ? mzGridTofCal(tofRaw) : mzGridLatticeCal(mzRaw)
+    : asObj(mzRaw) != null ? mzGridLatticeCal(mzRaw) : mzGridTofCal(tofRaw);
+}
+
+/** `mz_calibration` `{codec:"mz-grid", scale}` → uniform lattice `mz = idx / scale`. `scale` must
+ *  be a JSON number > 0 (the viewer gates on it — a string/zero/negative scale is unresolvable). */
+function mzGridLatticeCal(raw: unknown): GridCal | null {
+  const mzc = asObj(raw);
   if (mzc && mzc["codec"] === "mz-grid" && typeof mzc["scale"] === "number" && (mzc["scale"] as number) > 0) {
     return { kind: "mz-grid", scale: mzc["scale"] as number };
   }
-  const tofc = asObj(meta["tof_calibration"]);
+  return null;
+}
+
+/** `tof_calibration` `{codec:"tof-grid", model, …}` → the verified sqrt / Agilent shapes. */
+function mzGridTofCal(raw: unknown): GridCal | null {
+  const tofc = asObj(raw);
   if (tofc && tofc["codec"] === "tof-grid") {
     // SciEX sqrt, mz=(c0+c1·idx)². Current model is "sciex_sqrt_per_spectrum" (per-spectrum
     // c0/c1 columns); "sciex_sqrt" is the mzML --tof-grid path (per-spectrum if it carries the
@@ -191,7 +229,7 @@ function agilentPoly(coeffs: number[], useFlags: number): number[] | null {
  *  we can't resolve must still bypass those raw-`tof_index` paths (the per-select read fails loud
  *  instead). m/z reconstruction itself uses the stricter `gridCal`/`resolveGridMz`. */
 export function isGridFile(reader: Reader): boolean {
-  if (gridCal(reader)) return true;
+  if (gridCal(reader)) return true; // either block resolvable (the centroid order sees both)
   const meta = indexMeta(reader);
   const mzc = asObj(meta["mz_calibration"]);
   if (mzc && mzc["codec"] === "mz-grid") return true;
@@ -211,7 +249,7 @@ function fieldBySuffix(spectra: SpectraStruct | undefined, suffix: string): stri
 }
 
 /**
- * Resolve the per-spectrum integer-axis → m/z map for a grid profile spectrum:
+ * Resolve the per-spectrum integer-axis → m/z map for a grid spectrum, for ONE facet:
  *  - **mz-grid** (sciex uniform): `mz = tof_index / scale`, run-wide.
  *  - **tof-grid** (sciex sqrt): `mz = (c0 + c1·tof_index)²` with PER-SPECTRUM `c0,c1`.
  *  - **agilent-grid** (sqrt + polynomial): `mz = (c0+c1·k)² − poly(clamp(t,left,right))`,
@@ -221,9 +259,13 @@ function fieldBySuffix(spectra: SpectraStruct | undefined, suffix: string): stri
  * (`*_tof_c0` / `*_tof_c1` / `*_tof_calibration_id`) — the accession prefix drifts across
  * converter versions (MZP_1000003_tof_c0 → MS_4000900_tof_c0), so we match the suffix, not the
  * full name. Returns null when the file isn't a grid file OR this spectrum lacks coefficients.
+ *
+ * `facet` picks the index-block precedence (see {@link GridFacet}); it defaults to "centroid" so
+ * the pre-facet call shape `resolveGridMz(reader, index)` keeps resolving exactly what it did for
+ * every single-block file. The engine's read paths use {@link resolveFacetGridMz} to get both.
  */
-export function resolveGridMz(reader: Reader, index: number): GridMz | null {
-  const g = gridCal(reader);
+export function resolveGridMz(reader: Reader, index: number, facet: GridFacet = "centroid"): GridMz | null {
+  const g = gridCal(reader, facet);
   if (!g) return null;
   if (g.kind === "mz-grid") { const s = g.scale; return (axis) => axis / s; }
   if (g.kind === "tof-grid-global") { const { c0, c1 } = g; return (axis) => { const m = c0 + c1 * axis; return m * m; }; }
@@ -259,6 +301,18 @@ export function resolveGridMz(reader: Reader, index: number): GridMz | null {
   };
 }
 
+/** Both facet resolvers for spectrum `index` (what `reconstructSpectrum` consumes). */
+export function resolveFacetGridMz(reader: Reader, index: number): GridResolvers {
+  return { profile: resolveGridMz(reader, index, "profile"), centroid: resolveGridMz(reader, index, "centroid") };
+}
+
+/** Normalise the `gridMz` argument of `reconstructSpectrum`: a bare resolver applies to BOTH
+ *  facets (the pre-facet call shape used by single-block files and the unit tests). */
+function facetResolvers(g: GridMz | GridResolvers | null | undefined): GridResolvers {
+  if (typeof g === "function") return { profile: g, centroid: g };
+  return g ?? { profile: null, centroid: null };
+}
+
 // Standard centroid-object keys mzpeakts emits; any OTHER numeric key is the non-standard
 // data array (the ims-compact `tof`, whose 1-word name packTableIntoPeaks can't suffix-strip).
 const CENTROID_STD_KEYS = new Set(["mz", "intensity", "mean_inverse_reduced_ion_mobility"]);
@@ -266,17 +320,40 @@ function tofColumnKey(c: Record<string, unknown>): string | null {
   // Prefer the KNOWN integer-axis names (mzpeakts mangles the 1-word `tof`/`tof_index` to "")
   // before falling back to by-elimination, so an unrelated extra numeric centroid field can't be
   // mistaken for the axis.
-  for (const k of ["tof_index", "tof", ""]) if (k in c && typeof c[k] === "number") return k;
-  for (const k of Object.keys(c)) if (!CENTROID_STD_KEYS.has(k) && typeof c[k] === "number") return k;
+  // An Int64 axis (the Shimadzu `mz-grid` lattice) arrives as a `bigint` property.
+  const isAxis = (v: unknown): boolean => typeof v === "number" || typeof v === "bigint";
+  for (const k of ["tof_index", "tof", ""]) if (k in c && isAxis(c[k])) return k;
+  for (const k of Object.keys(c)) if (!CENTROID_STD_KEYS.has(k) && isAxis(c[k])) return k;
   return null;
 }
+/** A centroid object's `mz` that is NOT a usable value: absent (no `mz` column, e.g. SciEX
+ *  mz-grid / ims-compact peaks), null, or the 0 mzpeakts materialises for a NULL f64 cell of a
+ *  gridded row (Shimadzu peaks facet: `mz` is the per-spectrum f64 fallback column, null on
+ *  lattice rows). The grid axis is authoritative for such a row when it is present + resolvable. */
+const mzUnusable = (v: unknown): boolean => v == null || v === 0;
 
 /** The raw spectrum record shape mzpeakts returns from getSpectrum(index). The centroid
  *  objects may carry extra promoted columns (e.g. ion mobility) beyond mz/intensity. */
 export type RawSpectrum = {
   id: unknown;
-  dataArrays?: Record<string, ArrayLike<number>> | undefined;
-  centroids?: { mz: number; intensity: number; mean_inverse_reduced_ion_mobility?: number }[] | undefined;
+  /** Axis arrays may be `BigInt64Array` (an Int64 `tof_index`); m/z + intensity are float arrays. */
+  dataArrays?: Record<string, AxisLike> | undefined;
+  /** Centroid objects may carry an integer axis (`tof_index` / `tof` — mzpeakts often mangles
+   *  the 1-word name to "" — number OR bigint) in place of, or beside a null-filled (null / 0),
+   *  `mz`: the axis is authoritative for such a row (see `readCentroids`). */
+  centroids?: RawCentroid[] | undefined;
+};
+/** One mzpeakts centroid object (structurally compatible with its `PointLike`). `mz` is the f64
+ *  column — absent / null / 0 on a gridded row, where the integer axis (`tof_index` / `tof`, or
+ *  the mangled "" key mzpeakts emits for the 1-word name; number OR bigint) is authoritative.
+ *  `tofColumnKey` locates the axis by name, falling back to any other integer-valued key. */
+export type RawCentroid = {
+  mz?: number | null;
+  intensity: number;
+  mean_inverse_reduced_ion_mobility?: number | null;
+  tof_index?: number | bigint | null;
+  tof?: number | bigint | null;
+  ""?: number | bigint | null;
 };
 
 /** Plain, transfer-ready reconstruction output (pre-adapter). */
@@ -316,9 +393,13 @@ function hasDataArrays(s: RawSpectrum): boolean {
   return !!(s.dataArrays && s.dataArrays[MZ_KEY] && s.dataArrays[INTENSITY_KEY]);
 }
 /** Grid profile data: integer `tof_index` + intensity (no `m/z array`) AND a resolver to map it. */
+// The grid axis is AUTHORITATIVE whenever it is present and resolvable, even beside an `m/z array`:
+// a facet that grids most spectra and keeps f64 m/z for the few that do not fit (the Shimadzu
+// sqrt-grid profile facet) carries BOTH columns, and mzpeakts materialises the null-filled `mz` of
+// a gridded row as a Float64Array of zeros. Gating on `!da[MZ_KEY]` read those zeros as the signal.
 function hasGridData(s: RawSpectrum, gridMz: GridMz | null): boolean {
   const da = s.dataArrays;
-  return !!(gridMz && da && da[GRID_AXIS_KEY] && da[INTENSITY_KEY] && !da[MZ_KEY]);
+  return !!(gridMz && da && da[GRID_AXIS_KEY] && da[INTENSITY_KEY]);
 }
 function hasCentroids(s: RawSpectrum): boolean {
   return !!(s.centroids && s.centroids.length > 0);
@@ -334,9 +415,9 @@ function hasCentroids(s: RawSpectrum): boolean {
 function profileNonEmpty(s: RawSpectrum, cal: ImsCalibration | null, gridMz: GridMz | null): boolean {
   const da = s.dataArrays;
   if (!da) return false;
-  const len = (a: ArrayLike<number> | undefined) => (a ? a.length : 0);
+  const len = (a: AxisLike | undefined) => (a ? a.length : 0);
   if (len(da[MZ_KEY]) > 0 && len(da[INTENSITY_KEY]) > 0) return true;
-  if (gridMz && len(da[GRID_AXIS_KEY]) > 0 && len(da[INTENSITY_KEY]) > 0 && !da[MZ_KEY]) return true;
+  if (gridMz && len(da[GRID_AXIS_KEY]) > 0 && len(da[INTENSITY_KEY]) > 0) return true;
   if (cal?.tofEncoding === "m/z-chunked" && len(da[TOF_DATA_KEY]) > 0) return true;
   return false;
 }
@@ -396,11 +477,13 @@ function readDataArrays(s: RawSpectrum, gridMz: GridMz | null, cal: ImsCalibrati
   const da = s.dataArrays!;
   // SciEX/Agilent grid: an integer `tof_index` replaces the `m/z array`; reconstruct m/z
   // per point through the resolved grid map (mz-grid: idx/scale; tof-grid: (c0+c1·idx)²).
-  if (gridMz && da[GRID_AXIS_KEY] && !da[MZ_KEY]) {
+  if (gridMz && da[GRID_AXIS_KEY]) {
+    // Grid axis wins over any m/z array (see hasGridData): a gridded row's `mz` is a null fill.
     const axis = da[GRID_AXIS_KEY]!, n = axis.length;
     const mz = new Float64Array(n);
-    for (let i = 0; i < n; i++) mz[i] = gridMz(axis[i]!);
-    return { mz, intensity: Float32Array.from(da[INTENSITY_KEY]!) };
+    // `axisNum`: an Int64 axis is a BigInt64Array — coerce before arithmetic (no implicit mixing).
+    for (let i = 0; i < n; i++) mz[i] = gridMz(axisNum(axis[i]));
+    return { mz, intensity: Float32Array.from(da[INTENSITY_KEY] as ArrayLike<number>) };
   }
   // ims-compact Layout B (m/z-chunked): the chunked facet carries a `tof` axis instead of an
   // `m/z array`; reconstruct mz = (a + b·tof)². PROVISIONAL — the `--ims-chunked` writer schema is
@@ -413,14 +496,14 @@ function readDataArrays(s: RawSpectrum, gridMz: GridMz | null, cal: ImsCalibrati
   if (cal?.tofEncoding === "m/z-chunked" && tof && !da[MZ_KEY]) {
     const n = tof.length;
     const mz = new Float64Array(n);
-    for (let i = 0; i < n; i++) mz[i] = mzFromTof(cal, tof[i]!);
-    const mob = da[MOBILITY_DATA_KEY];
-    return { mz, intensity: Float32Array.from(da[INTENSITY_KEY]!), ...(mob ? { mobility: mob } : {}) };
+    for (let i = 0; i < n; i++) mz[i] = mzFromTof(cal, axisNum(tof[i]));
+    const mob = da[MOBILITY_DATA_KEY] as ArrayLike<number> | undefined;
+    return { mz, intensity: Float32Array.from(da[INTENSITY_KEY] as ArrayLike<number>), ...(mob ? { mobility: mob } : {}) };
   }
-  const mob = da[MOBILITY_DATA_KEY];
+  const mob = da[MOBILITY_DATA_KEY] as ArrayLike<number> | undefined;
   return {
-    mz: Float64Array.from(da[MZ_KEY]!),
-    intensity: Float32Array.from(da[INTENSITY_KEY]!),
+    mz: Float64Array.from(da[MZ_KEY] as ArrayLike<number>),
+    intensity: Float32Array.from(da[INTENSITY_KEY] as ArrayLike<number>),
     ...(mob ? { mobility: mob } : {}),
   };
 }
@@ -430,16 +513,21 @@ function readDataArrays(s: RawSpectrum, gridMz: GridMz | null, cal: ImsCalibrati
  *  ims-compact `tof` (reconstruct via `cal`) or a SciEX grid `tof_index` (via `gridMz`) — map
  *  every peak through the reconstructor. (SciEX SWATH stores its grid in the CENTROID facet.) */
 function readCentroids(s: RawSpectrum, cal: ImsCalibration | null, gridMz: GridMz | null): RawSignal {
-  const centroids = s.centroids! as unknown as Record<string, number>[];
+  const centroids = s.centroids!;
   const n = centroids.length;
   const mz = new Float64Array(n);
   const intensity = new Float32Array(n);
   const hasMobility = n > 0 && centroids[0]!["mean_inverse_reduced_ion_mobility"] != null;
   const mobility = hasMobility ? new Float64Array(n) : undefined;
-  // No `mz` key → locate the non-standard integer axis once (mzpeakts mangles the 1-word
-  // `tof`/`tof_index` name, often to ""). gridMz (grid) takes precedence over cal (ims-compact).
-  const axisKey = n > 0 && centroids[0]!["mz"] == null && (cal != null || gridMz != null)
-    ? tofColumnKey(centroids[0]!) : null;
+  // Unusable `mz` (absent / null / the 0 of a null-filled fallback column) → locate the
+  // non-standard integer axis once (mzpeakts mangles the 1-word `tof`/`tof_index` name, often to
+  // ""). gridMz (grid) takes precedence over cal (ims-compact). Values may be number OR bigint
+  // (Int64 lattice) — every axis read goes through `axisNum` before arithmetic. The axis is
+  // located even when NO resolver is available so such rows map to NaN (→ EmptySpectrumError
+  // when the whole spectrum is like that) instead of reading the 0 null-fill as m/z.
+  const axisKey = n > 0 && mzUnusable(centroids[0]!["mz"]) ? tofColumnKey(centroids[0]!) : null;
+  // The axis may sit under a key `tofColumnKey` found by elimination — read it by string key.
+  const axisOf = (c: RawCentroid): number => axisNum((c as Record<string, unknown>)[axisKey!] as number | bigint | null | undefined);
   // ims-compact Layout A: `point.tof` is a per-mobility-scan delta. Reconstruct absolute TOF by
   // cumulative sum in STORED order, resetting at each scan boundary — detected by the 1/K0 value
   // changing (one stored f64 per scan, strictly monotonic across scans; the handoff's contract).
@@ -452,19 +540,27 @@ function readCentroids(s: RawSpectrum, cal: ImsCalibration | null, gridMz: GridM
     const c = centroids[i]!;
     // axisKey may be "" — test for null, not truthiness.
     if (axisKey === null) {
-      mz[i] = c["mz"]!;
+      mz[i] = axisNum(c["mz"]);
     } else if (gridMz) {
-      mz[i] = gridMz(c[axisKey]!);
+      // Grid axis is authoritative for a row whose `mz` is unusable (absent / null-fill 0); a row
+      // carrying a real f64 `mz` (the per-spectrum fallback) keeps it. A null axis on a null-mz
+      // row maps NaN → dropped by sanitizePairs (fail loud if the whole spectrum is like that).
+      mz[i] = mzUnusable(c["mz"]) ? gridMz(axisOf(c)) : axisNum(c["mz"]);
     } else if (perScanDelta) {
-      const m = c["mean_inverse_reduced_ion_mobility"]!;
-      acc = m !== prevMob ? c[axisKey]! : acc + c[axisKey]!; // absolute on scan start, else add delta
+      const m = axisNum(c["mean_inverse_reduced_ion_mobility"]);
+      acc = m !== prevMob ? axisOf(c) : acc + axisOf(c); // absolute on scan start, else add delta
       prevMob = m;
       mz[i] = mzFromTof(cal!, acc);
+    } else if (cal) {
+      mz[i] = mzFromTof(cal, axisOf(c));
     } else {
-      mz[i] = mzFromTof(cal!, c[axisKey]!);
+      // An integer axis with NO resolver (a lattice/grid archive whose index blocks are missing
+      // or malformed): never read the null-fill 0 as m/z — NaN drops the row, and an all-NaN
+      // spectrum fails loud in reconstructSpectrum. A row with a real f64 `mz` keeps it.
+      mz[i] = mzUnusable(c["mz"]) ? NaN : axisNum(c["mz"]);
     }
-    intensity[i] = c["intensity"]!;
-    if (mobility) mobility[i] = c["mean_inverse_reduced_ion_mobility"]!;
+    intensity[i] = axisNum(c["intensity"]);
+    if (mobility) mobility[i] = axisNum(c["mean_inverse_reduced_ion_mobility"]);
   }
   return mobility ? { mz, intensity, mobility } : { mz, intensity };
 }
@@ -483,11 +579,14 @@ export function reconstructSpectrum(
   index: number,
   representation: SpectrumRepresentation,
   cal: ImsCalibration | null = null,
-  gridMz: GridMz | null = null,
+  // A bare GridMz applies to BOTH facets (single-block files / unit tests); the engine passes
+  // the per-facet pair from `resolveFacetGridMz` (a Shimadzu file grids the two facets differently).
+  gridMz: GridMz | GridResolvers | null = null,
   // TRAILING on purpose (review: inserting mid-signature would silently re-bind the
   // existing positional cal/gridMz call sites).
   forceSource: "profile" | "centroid" | null = null,
 ): ReconstructedSpectrum {
+  const grid = facetResolvers(gridMz);
   // A genuinely-EMPTY scan: mzpeakts emits a 0-length `m/z array` (the file's own "0 data
   // points" signal) and nothing else. Render it as an empty spectrum rather than throwing —
   // SciEX/Agilent runs interleave empty survey scans with data scans, so the default-open
@@ -503,7 +602,7 @@ export function reconstructSpectrum(
   // render an empty spectrum while centroids exist (adversarial review 2026-09-01).
   const daOk =
     (hasDataArrays(spectrum) && (mzArr?.length ?? 0) > 0) ||
-    hasGridData(spectrum, gridMz) ||
+    hasGridData(spectrum, grid.profile) ||
     imsChunked;
   // mzpeakts decoded this spectrum to NO signal at all: a present `dataArrays` carrying no
   // intensity, no integer axis, and no (or a 0-length) m/z, and no centroids. Render it empty
@@ -519,7 +618,7 @@ export function reconstructSpectrum(
   // Route by representation, but fall through to the other source when empty.
   // `representation` is reported as-is regardless of which source supplied bytes. ims-compact AND
   // SciEX grid can live in EITHER facet, so both readers take `cal`+`gridMz`.
-  const profOk = profileNonEmpty(spectrum, cal, gridMz);
+  const profOk = profileNonEmpty(spectrum, cal, grid.profile);
   const centOk = hasCentroids(spectrum);
   const altAvailable = profOk && centOk;
 
@@ -534,13 +633,13 @@ export function reconstructSpectrum(
     : representation === "centroid" ? "centroid"
     : "profile";
   if (want === "centroid") {
-    if (hasCentroids(spectrum)) { raw = readCentroids(spectrum, cal, gridMz); sourceUsed = "centroid"; }
-    else if (daOk) { raw = readDataArrays(spectrum, gridMz, cal); sourceUsed = "profile"; }
+    if (hasCentroids(spectrum)) { raw = readCentroids(spectrum, cal, grid.centroid); sourceUsed = "centroid"; }
+    else if (daOk) { raw = readDataArrays(spectrum, grid.profile, cal); sourceUsed = "profile"; }
     else throw new EmptySpectrumError(index);
   } else {
     // "profile" or null (unknown) → data-array default, centroid fall-through.
-    if (daOk) { raw = readDataArrays(spectrum, gridMz, cal); sourceUsed = "profile"; }
-    else if (hasCentroids(spectrum)) { raw = readCentroids(spectrum, cal, gridMz); sourceUsed = "centroid"; }
+    if (daOk) { raw = readDataArrays(spectrum, grid.profile, cal); sourceUsed = "profile"; }
+    else if (hasCentroids(spectrum)) { raw = readCentroids(spectrum, cal, grid.centroid); sourceUsed = "centroid"; }
     else throw new EmptySpectrumError(index);
   }
 
@@ -583,7 +682,7 @@ export async function readEngineSpectrum(
   const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
   if (!spectrum) throw new Error(`No spectrum at index ${index}`);
 
-  const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveGridMz(reader, index), source);
+  const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveFacetGridMz(reader, index), source);
   return adaptSpectrum({
     index: recon.index,
     id: recon.id,
@@ -805,7 +904,7 @@ export async function readEngineSpectrumCached(
     }
     const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
     if (!spectrum) throw new Error(`No spectrum at index ${index}`);
-    const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveGridMz(reader, index), source);
+    const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveFacetGridMz(reader, index), source);
     return adaptSpectrum({
       index, id: recon.id, mz: recon.mz, intensity: recon.intensity, representation: recon.representation,
       ...(recon.sourceUsed ? { sourceUsed: recon.sourceUsed } : {}),
@@ -838,7 +937,7 @@ export async function readEngineSpectrumCached(
 
   const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
   if (!spectrum) throw new Error(`No spectrum at index ${index}`);
-  const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveGridMz(reader, index));
+  const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveFacetGridMz(reader, index));
   // Cache the canonical decoded arrays + facet provenance (adaptSpectrum copies for the wire).
   cache.set(index, {
     mz: recon.mz, intensity: recon.intensity, msLevel,

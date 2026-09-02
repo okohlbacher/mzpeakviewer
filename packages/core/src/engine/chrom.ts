@@ -22,7 +22,23 @@ import {
   getStoredChromatogram,
 } from "../reader/explorer/browse";
 import type { ChromPoint, SpectrumIndexRow } from "../reader/explorer/types";
+import type { XicGridResolver } from "../reader/explorer/browse";
 import { engineDiaXic } from "./dia";
+import { isGridFile, resolveGridMz } from "./spectrum";
+
+/**
+ * The per-spectrum grid resolver `extractChromatogram` needs for a GRID-ENCODED file
+ * (SciEX/Agilent/Shimadzu `tof_index`): the facet being read decides the index-block
+ * precedence (profile → `tof_calibration` sqrt first; centroids → `mz_calibration` lattice
+ * first — see engine/spectrum `GridFacet`). Undefined for a non-grid file, so the reader's own
+ * m/z slice runs unchanged. Every XIC call site MUST pass this (review 2026-09-02: the reader
+ * keys its window on the null-filled `mz` sorting column of a grid facet).
+ */
+export function gridXicResolver(reader: Reader, useProfile: boolean): XicGridResolver | undefined {
+  if (!isGridFile(reader)) return undefined;
+  const facet = useProfile ? "profile" : "centroid";
+  return (i) => resolveGridMz(reader, i, facet);
+}
 
 /**
  * Optional precomputed context the dispatcher may pass through from a prior
@@ -207,12 +223,12 @@ async function extractAllLevels(
   const mixed = (counts?.profile ?? 0) > 0 && (counts?.centroid ?? 0) > 0;
   const majorityProfile = pickUseProfile(ctx);
   if (!mixed || !rows || rows.length === 0) {
-    return extractChromatogram(reader, { ...opts, useProfile: majorityProfile });
+    return extractChromatogram(reader, { ...opts, useProfile: majorityProfile, gridMz: gridXicResolver(reader, majorityProfile) });
   }
-  const major = await extractChromatogram(reader, { ...opts, useProfile: majorityProfile });
+  const major = await extractChromatogram(reader, { ...opts, useProfile: majorityProfile, gridMz: gridXicResolver(reader, majorityProfile) });
   let minor: ChromPoint[];
   try {
-    minor = await extractChromatogram(reader, { ...opts, useProfile: !majorityProfile });
+    minor = await extractChromatogram(reader, { ...opts, useProfile: !majorityProfile, gridMz: gridXicResolver(reader, !majorityProfile) });
   } catch {
     return major; // minority facet unreadable — keep the majority-only trace
   }
@@ -299,6 +315,7 @@ async function buildTic(
     tolDa: null,
     timeRange,
     useProfile,
+    gridMz: gridXicResolver(reader, useProfile), // no window → no-op, kept for uniformity
   });
   // MS1-filter the summed trace when the scan rows tell us which spectra are MS1.
   if (rows && rows.length > 0) {
@@ -377,13 +394,15 @@ export async function engineExtractChrom(
   // For an MS-level-limited XIC, choose the source from the requested level's
   // representation; an all-level XIC merges both facets on mixed files instead.
   const wantLevel = req.mode === "xic" ? (req.msLevel ?? null) : null;
+  const levelProfile = wantLevel != null ? pickUseProfileForLevel(ctx, wantLevel) : true;
   let points =
     wantLevel != null
       ? await extractChromatogram(reader, {
           mz,
           tolDa,
           timeRange: rt,
-          useProfile: pickUseProfileForLevel(ctx, wantLevel),
+          useProfile: levelProfile,
+          gridMz: gridXicResolver(reader, levelProfile),
         })
       : await extractAllLevels(reader, { mz, tolDa, timeRange: rt }, ctx);
   // MS-level limit (xic only): keep only points from spectra of the requested level — a

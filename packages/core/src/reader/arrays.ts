@@ -17,6 +17,34 @@ type RawSpectrum = {
   centroids?: { mz: number; intensity: number }[] | undefined;
 };
 
+// The integer grid axis (SciEX/Agilent/Shimadzu `tof_index`, MS:1000519) as mzpeakts keys it
+// in dataArrays; centroid objects carry it as a property (the 1-word name is often mangled to "").
+const GRID_AXIS_KEY = "tof_index";
+const isIntAxis = (v: unknown): boolean => typeof v === "number" || typeof v === "bigint";
+
+/**
+ * Fail loud on a GRID-ENCODED spectrum in the raw (verbatim-`mz`) readers: a gridded row stores
+ * its m/z as an integer `tof_index` beside a NULL `mz` that mzpeakts materialises as 0, so
+ * reading `mz` verbatim yields a spectrum of zeros (finite, non-descending — sanitizePairs keeps
+ * it). Such spectra need the engine's per-spectrum reconstruction (`engine/spectrum
+ * reconstructSpectrum` with `resolveFacetGridMz`). A facet whose axis column is entirely null
+ * for this spectrum (the f64 fallback rows) is dropped by mzpeakts and passes through.
+ */
+export function assertNoGridAxis(spectrum: RawSpectrum, index: number): void {
+  const da = spectrum.dataArrays as Record<string, unknown> | undefined;
+  if (da && da[GRID_AXIS_KEY] != null) {
+    throw new Error(`Spectrum ${index}: grid-encoded data arrays (tof_index) need per-spectrum reconstruction (engine/spectrum)`);
+  }
+  const c0 = spectrum.centroids?.[0] as Record<string, unknown> | undefined;
+  if (c0 && (c0["mz"] == null || c0["mz"] === 0)) {
+    for (const k of Object.keys(c0)) {
+      if (k !== "mz" && k !== "intensity" && k !== "mean_inverse_reduced_ion_mobility" && isIntAxis(c0[k])) {
+        throw new Error(`Spectrum ${index}: grid-encoded centroids (${k || "tof_index"}) need per-spectrum reconstruction (engine/spectrum)`);
+      }
+    }
+  }
+}
+
 /**
  * Reconstruct from the data-array source (spectra_data → profile). Preserves the
  * length-mismatch guard and f64/f32 dtype copies. Throws a named error when the
@@ -96,6 +124,9 @@ export async function harvestDataArraysOrNull(
     return null;
   }
   if (!spectrum) return null;
+  // Grid-encoded spectra are unreadable verbatim (imaging already refuses grid files up front
+  // via isGridFile; this is the per-spectrum backstop). Throws, never silent zeros.
+  assertNoGridAxis(spectrum, index);
   // Data-array source FIRST (spectra_data) — the ion-image source of truth.
   const da = spectrum.dataArrays;
   if (da && da[MZ_KEY] && da[INTENSITY_KEY]) {

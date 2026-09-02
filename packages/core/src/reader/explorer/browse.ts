@@ -8,6 +8,7 @@
 import type { Reader } from "./open";
 import { recRepresentation } from "./cv";
 import type { ChromPoint, SpectrumArrays, StoredChromatogram } from "./types";
+import { assertNoGridAxis } from "../arrays";
 
 const MZ_KEY = "m/z array";
 const INTENSITY_KEY = "intensity array";
@@ -86,6 +87,9 @@ export async function getSpectrumArrays(
 
   const da = spectrum.dataArrays;
   const centroids = spectrum.centroids;
+  // This reference reads `mz` VERBATIM: a grid-encoded facet (integer `tof_index` beside a
+  // null-filled `mz`) needs the engine's per-spectrum reconstruction — fail loud, never zeros.
+  assertNoGridAxis(spectrum, index);
   // Prefer the profile data-array source; fall back to centroids (spectra_peaks).
   if (representation !== "centroid" && da && da[MZ_KEY] && da[INTENSITY_KEY]) {
     mz = Float64Array.from(da[MZ_KEY]);
@@ -114,14 +118,58 @@ export async function getSpectrumArrays(
 type XicPoint = {
   index: bigint | number;
   time: number | null;
-  dataArrays: Record<string, ArrayLike<number> | ArrayLike<string> | undefined>;
+  /** The integer grid axis of a grid-encoded facet is `Int32Array` or (Int64) `BigInt64Array`. */
+  dataArrays: Record<string, ArrayLike<number> | ArrayLike<bigint> | ArrayLike<string> | undefined>;
 };
+
+/** Per-spectrum integer-axis → m/z map for a grid-encoded facet (engine/spectrum `GridMz`),
+ *  or null when that spectrum's axis is unresolvable (e.g. missing per-spectrum coefficients). */
+export type XicGridResolver = (spectrumIndex: number) => ((axis: number) => number) | null;
+
+// mzpeakts array_name of the integer grid axis (`tof_index`, MS:1000519) as packTableIntoDataArrays
+// keys it in the bulk XIC stream (same key as in getSpectrum's dataArrays).
+const GRID_AXIS_KEY = "tof_index";
+const axisNum = (v: unknown): number =>
+  typeof v === "bigint" ? Number(v) : typeof v === "number" ? v : NaN;
+
+/**
+ * Sum the in-window intensity of ONE grid-facet spectrum read WITHOUT the reader's m/z slice:
+ * the m/z of each row is the grid map of its integer axis (authoritative whenever the row's f64
+ * `mz` is the null-fill 0 / absent), else the row's real f64 `mz` (the per-spectrum fallback
+ * column). Returns null when no row falls inside the window — mirroring the reader's own
+ * `betweenSorted` slice, which yields NO point for such a spectrum — and also when the rows
+ * are unmappable (an axis with no resolver): a gap, never a false zero.
+ */
+function sumGridWindow(p: XicPoint, lo: number, hi: number, resolve: ((axis: number) => number) | null): number | null {
+  const da = p.dataArrays;
+  const inten = da[INTENSITY_KEY] as ArrayLike<number> | undefined;
+  const axis = da[GRID_AXIS_KEY] as ArrayLike<number | bigint> | undefined;
+  const mzArr = da[MZ_KEY] as ArrayLike<number> | undefined;
+  if (!inten || (!axis && !mzArr)) return null;
+  let sum = 0, hit = false;
+  for (let i = 0; i < inten.length; i++) {
+    const f = mzArr ? axisNum(mzArr[i]) : NaN;
+    const m = axis && resolve && (f === 0 || !Number.isFinite(f)) ? resolve(axisNum(axis[i])) : f;
+    if (!Number.isFinite(m) || m < lo || m > hi) continue;
+    hit = true;
+    const v = inten[i];
+    if (typeof v === "number" && Number.isFinite(v)) sum += v;
+  }
+  return hit ? sum : null;
+}
 
 /**
  * Extract an ion chromatogram: for each spectrum in the (optional) time range,
  * sum the intensity within the (optional) m/z window. With both ranges null this
  * is the total-ion chromatogram. `useProfile` routes to spectra_data vs
  * spectra_peaks.
+ *
+ * `gridMz` (engine/chrom `gridXicResolver`) marks the facet being read as GRID-ENCODED
+ * (SciEX/Agilent/Shimadzu `tof_index`): the reader's own m/z slice keys on the facet's
+ * sorting column `mz`, which such a facet either lacks or null-fills (mzpeakts then throws
+ * "Could not find … in Schema" or slices nothing), so the m/z window is instead applied here,
+ * per row, on the reconstructed axis. Point-layout facets read the same bytes either way (the
+ * reader's slice is post-read); a TIC (no window) is unaffected.
  */
 export async function extractChromatogram(
   reader: Reader,
@@ -130,9 +178,10 @@ export async function extractChromatogram(
     tolDa?: number | null;
     timeRange?: [number, number] | null;
     useProfile?: boolean;
+    gridMz?: XicGridResolver | null;
   } = {},
 ): Promise<ChromPoint[]> {
-  const { mz = null, tolDa = null, timeRange = null, useProfile = true } = opts;
+  const { mz = null, tolDa = null, timeRange = null, useProfile = true, gridMz = null } = opts;
   const mzRange =
     mz != null && tolDa != null
       ? { start: mz - tolDa, end: mz + tolDa }
@@ -144,17 +193,25 @@ export async function extractChromatogram(
   const tRange =
     timeRange != null ? { start: timeRange[0] / 60, end: timeRange[1] / 60 } : null;
 
-  const xic = await reader.extractXIC(tRange, mzRange, useProfile);
+  // Grid facet + m/z window: collect every row (null range) and window on the grid axis here.
+  const gridWindow = mzRange && gridMz ? mzRange : null;
+  const xic = await reader.extractXIC(tRange, gridWindow ? null : mzRange, useProfile);
   if (!xic) return [];
 
   const out: ChromPoint[] = [];
   for (const p of xic.points as XicPoint[]) {
-    const arr = p.dataArrays[INTENSITY_KEY];
     let sum = 0;
-    if (arr) {
-      for (let i = 0; i < arr.length; i++) {
-        const v = arr[i];
-        if (typeof v === "number" && Number.isFinite(v)) sum += v;
+    if (gridWindow) {
+      const s = sumGridWindow(p, gridWindow.start, gridWindow.end, gridMz!(Number(p.index)));
+      if (s === null) continue; // nothing in the window (or unmappable) → no point, as the reader's slice does
+      sum = s;
+    } else {
+      const arr = p.dataArrays[INTENSITY_KEY];
+      if (arr) {
+        for (let i = 0; i < arr.length; i++) {
+          const v = arr[i];
+          if (typeof v === "number" && Number.isFinite(v)) sum += v;
+        }
       }
     }
     out.push({
