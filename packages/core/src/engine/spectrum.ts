@@ -388,14 +388,15 @@ export function resolveGridMz(reader: Reader, index: number, facet: GridFacet = 
   const g = gridCal(reader, facet);
   if (!g) return null;
   if (g.kind === "mz-grid") {
-    // MULTIPLY by the reciprocal, never divide: the archive's Parquet transform is
-    // `mz = transform_params[0] · k` (MS:1003824, params [1e-9]) and the reference reader computes
-    // `s * k` (mzpeak_prototyping reader/point.rs). `k / 1e9` and `k * 1e-9` differ by 1 ulp on
-    // ~40 % of lattice values (100000123456 → 100.000123456 vs 100.00012345600001), so dividing
-    // would put this viewer 1 ulp off every other conformant reader on the same archive.
-    // 1/1e9 === 1e-9 and 1/1e4 === 1e-4 exactly in IEEE-754.
-    const inv = 1 / g.scale;
-    return (axis) => axis * inv;
+    // DIVIDE by the scale, never multiply by its reciprocal. `k / 1e9` and `k * 1e-9` disagree on
+    // ~40 % of lattice values (measured: 80,150 of 200,000 random indices in the 70–1700 m/z range),
+    // and division is the EXACT one: 1e9 is representable in IEEE-754 while 1e-9 is not, so `k / 1e9`
+    // is correctly rounded to the true quotient whereas `k * 1e-9` carries the reciprocal's own error.
+    // This is also what the archive documents (`mz_from_tof_index: "tof_index / scale"`) and what the
+    // reference reader computes (mzpeak_prototyping reader/point.rs `k as f64 / scale`).
+    // An earlier revision of this file multiplied, to match a reader that has since been corrected.
+    const scale = g.scale;
+    return (axis) => axis / scale;
   }
   if (g.kind === "tof-grid-global") { const { c0, c1 } = g; return (axis) => { const m = c0 + c1 * axis; return m * m; }; }
   const spectra = spectraStruct(reader);

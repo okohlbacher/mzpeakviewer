@@ -376,7 +376,7 @@ describe("resolveGridMz — calibration-shape gating", () => {
       } : undefined,
     }) as unknown as Reader;
 
-  it("mz-grid → idx·(1/scale)", () => {
+  it("mz-grid → idx / scale", () => {
     const f = resolveGridMz(mkReader({ mz_calibration: { codec: "mz-grid", scale: 10_000 } }), 0)!;
     expect(f).toBeTypeOf("function");
     expect(f(1_000_000)).toBe(100);
@@ -630,32 +630,31 @@ describe("per-facet grid resolution (Shimadzu: sqrt tof-grid PROFILE + Int64 mz-
   const sqrt = (k: number) => { const r = c0 + c1 * k; return r * r; };
   // The Parquet transform's MULTIPLIER (`transform_params [1e-9]`, reference reader `s * k`) —
   // NOT `k / 1e9`, which is 1 ulp off on ~40 % of lattice values.
-  const lattice = (k: number) => k * 1e-9;
+  const lattice = (k: number) => k / 1e9;
 
-  it("both blocks present: profile → tof_calibration (sqrt), centroid → mz_calibration (idx·(1/scale))", () => {
+  it("both blocks present: profile → tof_calibration (sqrt), centroid → mz_calibration (idx / scale)", () => {
     const r = mkReader(both, coeffs);
     expect(isGridFile(r)).toBe(true);
     expect(resolveGridMz(r, 0, "profile")!(1000)).toBe(sqrt(1000));
     expect(resolveGridMz(r, 0, "centroid")!(123_456_789_012)).toBe(lattice(123_456_789_012));
     // The facet-less call shape keeps the centroid precedence (documented default).
-    expect(resolveGridMz(r, 0)!(5e11)).toBe(5e11 * 1e-9); // = 500.00000000000006, the reference reader's s·k
+    expect(resolveGridMz(r, 0)!(5e11)).toBe(5e11 / 1e9); // = 500, the exact quotient (k * 1e-9 would give 500.00000000000006)
     const f = resolveFacetGridMz(r, 0);
     expect(f.profile!(2000)).toBe(sqrt(2000));
     expect(f.centroid!(2000)).toBe(lattice(2000));
   });
 
-  it("mz-grid multiplies by 1/scale (bit-identical to the reference reader's s·k), never divides by scale", () => {
+  it("mz-grid DIVIDES by the scale (the exact form; the reference reader divides too), never multiplies by 1/scale", () => {
     const f = resolveFacetGridMz(mkReader(both, coeffs), 0);
-    // Two lattice values where k/1e9 and k*1e-9 differ by 1 ulp: the viewer must agree with
-    // `s * k` (mzpeak_prototyping reader/point.rs), i.e. 100.00012345600001, not 100.000123456.
+    // k/1e9 and k*1e-9 disagree on ~40 % of lattice values, and division is the EXACT one: 1e9 is
+    // representable in IEEE-754, 1e-9 is not, so `k / 1e9` is correctly rounded while `k * 1e-9`
+    // inherits the reciprocal's error. The archive says `tof_index / scale` and the reference
+    // reader (mzpeak_prototyping reader/point.rs) computes `k as f64 / scale`.
     expect(100_000_123_456 / 1e9).not.toBe(100_000_123_456 * 1e-9); // the ulp gap is real
-    expect(f.centroid!(100_000_123_456)).toBe(100_000_123_456 * 1e-9);
-    expect(f.centroid!(200_000_000_001)).toBe(200_000_000_001 * 1e-9);
+    expect(f.centroid!(100_000_123_456)).toBe(100_000_123_456 / 1e9);
+    expect(f.centroid!(200_000_000_001)).toBe(200_000_000_001 / 1e9);
     const rec = { id: "s", centroids: [{ mz: 0, tof_index: 100_000_123_456n, intensity: 5 }, { mz: null, tof_index: 200_000_000_001n, intensity: 7 }] } as unknown as RawSpectrum;
-    expect(Array.from(reconstructSpectrum(rec, 0, "centroid", null, f).mz)).toEqual([100_000_123_456 * 1e-9, 200_000_000_001 * 1e-9]);
-    // 1/scale is exact for the two scales in the wild (1e9 lattice, SciEX 1e4).
-    expect(1 / 1e9).toBe(1e-9);
-    expect(1 / 1e4).toBe(1e-4);
+    expect(Array.from(reconstructSpectrum(rec, 0, "centroid", null, f).mz)).toEqual([100_000_123_456 / 1e9, 200_000_000_001 / 1e9]);
   });
 
   it("both blocks, coefficient-less spectrum: profile unresolvable, centroids still resolve the lattice", () => {
@@ -665,7 +664,7 @@ describe("per-facet grid resolution (Shimadzu: sqrt tof-grid PROFILE + Int64 mz-
     expect(f.centroid!(70_000_000_000)).toBe(70);
   });
 
-  it("reconstructSpectrum: dataArrays go through the sqrt grid, centroids through idx·(1/scale)", () => {
+  it("reconstructSpectrum: dataArrays go through the sqrt grid, centroids through idx / scale", () => {
     const f = resolveFacetGridMz(mkReader(both, coeffs), 0);
     const rec = {
       id: "scan=1",
@@ -695,11 +694,11 @@ describe("per-facet grid resolution (Shimadzu: sqrt tof-grid PROFILE + Int64 mz-
     const prof = reconstructSpectrum(rec, 0, "profile", null, f);
     expect(Array.from(prof.mz)).toEqual([sqrt(10), sqrt(20)]);
     const cent = reconstructSpectrum(rec, 0, "centroid", null, f);
-    expect(Array.from(cent.mz)).toEqual([1_250_000_000_000 * 1e-9, 1_250_000_000_001 * 1e-9]);
+    expect(Array.from(cent.mz)).toEqual([1_250_000_000_000 / 1e9, 1_250_000_000_001 / 1e9]);
     expect(Array.from(cent.intensity)).toEqual([3, 4]);
     // The mangled "" key mzpeakts sometimes produces for the 1-word name, as bigint.
     const mangled = { id: "s", centroids: [{ mz: 0, "": 500_000_000_000n, intensity: 1 }] } as unknown as RawSpectrum;
-    expect(Array.from(reconstructSpectrum(mangled, 0, "centroid", null, f).mz)).toEqual([500_000_000_000 * 1e-9]);
+    expect(Array.from(reconstructSpectrum(mangled, 0, "centroid", null, f).mz)).toEqual([500_000_000_000 / 1e9]);
   });
 
   it("an off-lattice centroid spectrum keeps its f64 mz (tof_index null-filled) under a resolver", () => {
@@ -711,7 +710,7 @@ describe("per-facet grid resolution (Shimadzu: sqrt tof-grid PROFILE + Int64 mz-
     expect(Array.from(reconstructSpectrum(prof, 0, "profile", null, f).mz)).toEqual([70, 70.000626327]);
   });
 
-  it("single-block files are unchanged: mz-grid only → both facets idx·(1/scale); tof-grid only → both facets sqrt", () => {
+  it("single-block files are unchanged: mz-grid only → both facets idx / scale; tof-grid only → both facets sqrt", () => {
     const mzOnly = resolveFacetGridMz(mkReader({ mz_calibration: { codec: "mz-grid", scale: 10_000 } }), 0);
     expect(mzOnly.profile!(1_000_000)).toBe(100);
     expect(mzOnly.centroid!(1_000_000)).toBe(100);

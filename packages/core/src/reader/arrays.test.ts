@@ -60,9 +60,9 @@ describe("V1 — raw readers reconstruct a lattice centroid facet (bigint tof_in
   // The Parquet transform's multiplier (`transform_params [1e-9]`): k·1e-9, bit-identical to the
   // reference reader's `s * k`. NOT k/1e9 — the first two differ from it by 1 ulp
   // (100.00012345600001 vs 100.000123456).
-  const want = [100_000_123_456, 200_000_000_001, 1_250_123_456_789].map((k) => k * 1e-9);
+  const want = [100_000_123_456, 200_000_000_001, 1_250_123_456_789].map((k) => k / 1e9);
 
-  it("harvestDataArraysOrNull → idx·(1/scale), not zeros", async () => {
+  it("harvestDataArraysOrNull → idx / scale, not zeros", async () => {
     const out = await harvestDataArraysOrNull(mkReader(lattice, rec), 7);
     expect(out).not.toBeNull();
     expect(Array.from(out!.mz)).toEqual(want);
@@ -70,7 +70,7 @@ describe("V1 — raw readers reconstruct a lattice centroid facet (bigint tof_in
     expect(out!.mz).toBeInstanceOf(Float64Array);
   });
 
-  it("getSpectrumArrays (browse) → idx·(1/scale), ascending, same values as the engine", async () => {
+  it("getSpectrumArrays (browse) → idx / scale, ascending, same values as the engine", async () => {
     const r = mkReader(lattice, withRepr(rec, REPR_CENTROID));
     const out = await getSpectrumArrays(r, 7);
     expect(Array.from(out.mz)).toEqual(want);
@@ -82,8 +82,9 @@ describe("V1 — raw readers reconstruct a lattice centroid facet (bigint tof_in
 
   it("the mangled \"\" axis key mzpeakts emits for the 1-word name is found too", async () => {
     const mangled: RawSpectrum = { id: "s", centroids: [{ mz: 0, intensity: 1, "": 500_000_000_000n }, { mz: null, intensity: 2, "": 500_000_000_001n }] };
-    // k·1e-9 (the reference reader's value): 500.00000000000006, not the 500 that k/1e9 would give.
-    const wantM = [500_000_000_000 * 1e-9, 500_000_000_001 * 1e-9];
+    // k/scale, the exact quotient the reference reader computes: 500 and 500.000000001
+    // (k * 1e-9 would give 500.00000000000006 and 500.00000000100005).
+    const wantM = [500_000_000_000 / 1e9, 500_000_000_001 / 1e9];
     expect(Array.from((await harvestDataArraysOrNull(mkReader(lattice, mangled), 0))!.mz)).toEqual(wantM);
     expect(Array.from((await getSpectrumArrays(mkReader(lattice, mangled), 0)).mz)).toEqual(wantM);
   });
