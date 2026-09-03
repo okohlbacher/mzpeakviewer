@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useStore } from "../store";
 import { parseRtRange } from "../rtRange";
+import { buildDta, precursorFromMeta, dtaFilename } from "../dta";
+import { saveTextFile } from "../localFile";
 import { buildLevelIndex, activeSet, rankOf, absoluteOf } from "../levelIndex";
 import { SpectrumPlot, MobilityFrameHeatmap, Select, Button, TreeView, spectrumReporters, type SelectOption, type ReporterMarker, type ReporterPeak } from "@mzpeak/ui-kit";
 
@@ -61,6 +63,9 @@ export function Spectra() {
   // Clicking a channel pill zooms the plot to the reporter region + highlights that
   // channel's peak. Reset when the spectrum changes or the user double-clicks to reset.
   const [selectedChannel, setSelectedChannel] = useState<number | null>(null);
+  // Last .dta export outcome ("HEK….spec17.centroid.dta" or an error) — shown inline.
+  const [dtaSaved, setDtaSaved] = useState<string | null>(null);
+  useEffect(() => { setDtaSaved(null); }, [spectrum?.index, spectrum?.sourceUsed]);
   const spectrumIndex = spectrum?.index ?? null;
   useEffect(() => { setSelectedChannel(null); }, [spectrumIndex]);
   // Dismiss any open peak→chrom popover when the file/spectrum changes — a stale popover
@@ -535,6 +540,45 @@ export function Spectra() {
             ? "centroid (stick spectrum)"
             : "profile (line)"}
           {" · scroll to zoom · double-click to reset"}
+          {spectrum.mz.length > 0 && (
+            <>
+              {" · "}
+              <button
+                type="button"
+                data-testid="dta-export-btn"
+                title="Save the DISPLAYED spectrum (current signal facet) as a SEQUEST .dta file — MH+/charge header from the precursor when the file records one, then m/z–intensity pairs"
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      const text = buildDta(spectrum.mz, spectrum.intensity, precursorFromMeta(spectrum.meta));
+                      const dest = await saveTextFile(
+                        text,
+                        dtaFilename(useStore.getState().fileName, spectrum.index, effectiveRepr),
+                      );
+                      if (dest != null) setDtaSaved(dest.split(/[\/]/).pop() ?? dest);
+                    } catch (err) {
+                      setDtaSaved(`export failed: ${err instanceof Error ? err.message : String(err)}`);
+                    }
+                  })();
+                }}
+                style={{
+                  border: "none",
+                  background: "none",
+                  padding: 0,
+                  font: "inherit",
+                  color: "var(--text-link, #1d4ed8)",
+                  cursor: "pointer",
+                }}
+              >
+                ⭳ .dta
+              </button>
+              {dtaSaved && (
+                <span data-testid="dta-export-status" style={{ marginLeft: "0.4rem" }}>
+                  {/failed/.test(dtaSaved) ? dtaSaved : `saved ${dtaSaved}`}
+                </span>
+              )}
+            </>
+          )}
         </p>
       )}
 

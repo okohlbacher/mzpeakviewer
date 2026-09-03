@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Least-privilege capability set for the static mzPeakViewer shell: core window/webview defaults, native open/save dialogs (if wired by the frontend), opening external https:// links in the OS browser, and reading user-named local .mzpeak paths pasted into the start page's URL field (same trust as the file dialog: the USER names the path).",
+  "description": "Least-privilege capability set for the static mzPeakViewer shell: core window/webview defaults, native open/save dialogs (if wired by the frontend), opening external https:// links in the OS browser, and reading user-named local .mzpeak paths pasted into the start page's URL field (same trust as the file dialog: the USER names the path); writing a user-chosen export file (.dta) picked via the native save dialog (the USER names the path).",
   "windows": [
     "main"
   ],
@@ -12,6 +12,14 @@
     "fs:default",
     {
       "identifier": "fs:allow-read-file",
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-file",
       "allow": [
         {
           "path": "**"

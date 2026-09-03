@@ -160,6 +160,10 @@ export function spectrumMetaTree(reader: Reader, index: number): unknown {
     parameters: rec.parameters ?? rec.params,
     scans: rec.scans,
     precursors: rec.precursors,
+    // Selected ions live at RECORD level in mzpeakts (NOT inside precursors) — the
+    // panel doc always promised "precursor / selected-ion", but this field was
+    // omitted; it also carries the precursor m/z + charge the .dta export needs.
+    selectedIons: (rec as { selectedIons?: unknown }).selectedIons,
     promotedColumns: rec.meta,
   });
 }

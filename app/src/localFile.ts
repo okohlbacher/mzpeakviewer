@@ -9,7 +9,7 @@
 //   - the WEB build gets a clear, actionable error instead of a network failure.
 // NOTE: deliberately no import from urlSync — its module graph pulls in the store and
 // the engine Worker, which breaks plain-node unit tests of this pure helper.
-function inTauri(): boolean {
+export function inTauri(): boolean {
   if (typeof window === "undefined") return false;
   // The runtime-injected IPC global exists in dev and production on every OS; the
   // origin check alone misses Windows production and `tauri dev`.
@@ -94,4 +94,34 @@ export async function readLocalFile(path: string): Promise<File> {
   const bytes = await fs.readFile(path);
   const name = path.split(/[\\/]/).pop() || "local.mzpeak";
   return new File([bytes], name, { type: "application/octet-stream" });
+}
+
+/**
+ * Save `text` as a file named `suggestedName`. Desktop: native save dialog + fs write
+ * (anchor downloads do not work in WKWebView). Web: classic blob-anchor download.
+ * Returns the chosen path (desktop), the suggested name (web), or null when the user
+ * cancelled the dialog.
+ */
+export async function saveTextFile(text: string, suggestedName: string): Promise<string | null> {
+  if (inTauri()) {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const path = await save({
+      defaultPath: suggestedName,
+      filters: [{ name: "SEQUEST DTA", extensions: ["dta"] }],
+    });
+    if (path == null) return null; // user cancelled
+    const fs = await import("@tauri-apps/plugin-fs");
+    await fs.writeTextFile(path, text);
+    return path;
+  }
+  const blob = new Blob([text], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = suggestedName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return suggestedName;
 }
