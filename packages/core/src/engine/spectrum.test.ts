@@ -3,7 +3,7 @@
 //   - reconstructSpectrum: representation routing, representation-PRESERVED-on-fallback
 //     (the codex MAJOR fix — a fallback read must not rewrite the file's claim), and
 //     the both-empty named throw.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   sanitizePairs,
   reconstructSpectrum,
@@ -11,6 +11,12 @@ import {
   resolveFacetGridMz,
   isGridFile,
   EmptySpectrumError,
+  readImsCalibration,
+  resolveImsCalibration,
+  imsMzExact,
+  imsPairUnboundCount,
+  imsTofToMz,
+  readSpectrumFacet,
   type RawSpectrum,
 } from "./spectrum";
 import type { Reader } from "../reader/openUrl";
@@ -769,5 +775,179 @@ describe("per-facet grid resolution (Shimadzu: sqrt tof-grid PROFILE + Int64 mz-
     // Same through the mangled "" key.
     const mangled = { id: "s", centroids: [{ mz: 60.5, "": 0n, intensity: 2 }, { mz: 0, "": 50_000_100_000n, intensity: 1 }] } as unknown as RawSpectrum;
     expect(Array.from(reconstructSpectrum(mangled, 0, "centroid", null, f).mz)).toEqual([50.0001, 60.5]);
+  });
+});
+
+describe("ims-compact per-spectrum exact linear calibration (tof_c0 / tof_c1)", () => {
+  // Chord (a, b) deliberately DIFFERENT from the per-spectrum pair so the two paths are told apart:
+  // tof 100000 → chord 400, exact 420.25. Squares via m*m, exactly as mzFromTof computes them.
+  const A = 10, B = 0.0001, C0 = 9.5, C1 = 0.00011;
+  const chordMz = (tof: number) => { const m = A + B * tof; return m * m; };
+  const exactMz = (tof: number) => { const m = C0 + C1 * tof; return m * m; };
+  const imsMeta = (extra: Record<string, unknown> = {}) => ({
+    ims_calibration: { codec: "ims-compact", a: A, b: B, tof_encoding: "absolute", per_spectrum: "tof_c0,tof_c1", exact_per_spectrum: true, ...extra },
+  });
+  // Per-spectrum metadata cells keyed by index: 0 finite → the pair; 1 null (the converter left it
+  // on the chord); 2 the 0 mzpeakts materialises for a NULL f64 cell; 3 a non-finite c0.
+  const cells: Record<number, Record<string, number | null>> = {
+    0: { opt_MS_4000900_tof_c0: C0, opt_MS_4000901_tof_c1: C1 },
+    1: { opt_MS_4000900_tof_c0: null, opt_MS_4000901_tof_c1: null },
+    2: { opt_MS_4000900_tof_c0: 0, opt_MS_4000901_tof_c1: 0 },
+    3: { opt_MS_4000900_tof_c0: NaN, opt_MS_4000901_tof_c1: C1 },
+  };
+  const mkReader = (metadata: Record<string, unknown>, withCols = true): Reader =>
+    ({
+      store: { fileIndex: { metadata } },
+      spectrumMetadata: withCols ? { spectra: {
+        getChild: (n: string) => ({ get: (i: number) => cells[i]?.[n] }),
+        type: { children: ["opt_MS_4000900_tof_c0", "opt_MS_4000901_tof_c1"].map((name) => ({ name })) },
+      } } : undefined,
+    }) as unknown as Reader;
+
+  it("parses per_spectrum / exact_per_spectrum; without a valid key the default columns are the trigger", () => {
+    const cal = readImsCalibration(mkReader(imsMeta()))!;
+    expect(cal.perSpectrum).toEqual({ c0: "_tof_c0", c1: "_tof_c1" });
+    expect(cal.perSpectrumSource).toBe("per_spectrum");
+    expect(cal.exactPerSpectrum).toBe(true);
+    expect(cal.tofEncoding).toBe("absolute");
+    // A genuine chord-only archive: no key AND no columns → chord only.
+    expect(readImsCalibration(mkReader({ ims_calibration: { a: A, b: B } }, false))).toEqual({ a: A, b: B, tofEncoding: null, perSpectrum: null, perSpectrumSource: null, exactPerSpectrum: false });
+    // Anything but two identifier names is ignored as a key; the pair then rides on the columns
+    // when BOTH exist (the vendored Rust reader's trigger — see readImsCalibration), else nothing.
+    for (const bad of ["tof_c0", "", 42, ["tof_c0"], "tof c0,tof_c1", "tof_c0,tof_c1,tof_c2", undefined]) {
+      const withCols = readImsCalibration(mkReader(imsMeta({ per_spectrum: bad })))!;
+      expect(withCols.perSpectrum).toEqual({ c0: "_tof_c0", c1: "_tof_c1" });
+      expect(withCols.perSpectrumSource).toBe("columns");
+      const noCols = readImsCalibration(mkReader(imsMeta({ per_spectrum: bad }), false))!;
+      expect(noCols.perSpectrum).toBeNull();
+      expect(noCols.perSpectrumSource).toBeNull();
+    }
+    // Only ONE of the two default columns → never a half pair.
+    const halfCols = { store: { fileIndex: { metadata: imsMeta({ per_spectrum: undefined }) } }, spectrumMetadata: { spectra: {
+      getChild: () => ({ get: () => C0 }), type: { children: [{ name: "opt_MS_4000900_tof_c0" }] },
+    } } } as unknown as Reader;
+    expect(readImsCalibration(halfCols)!.perSpectrum).toBeNull();
+    // A valid key names its OWN columns and wins over the defaults.
+    expect(readImsCalibration(mkReader(imsMeta({ per_spectrum: ["tof_c0", "tof_c1"] })))!.perSpectrum).toEqual({ c0: "_tof_c0", c1: "_tof_c1" });
+    const other = readImsCalibration(mkReader(imsMeta({ per_spectrum: "k0,k1" })))!;
+    expect(other.perSpectrum).toEqual({ c0: "_k0", c1: "_k1" });
+    expect(other.perSpectrumSource).toBe("per_spectrum");
+    expect(resolveImsCalibration(mkReader(imsMeta({ per_spectrum: "k0,k1" })), 0)!.spectrumCoeffs).toBeUndefined(); // no such columns → chord
+  });
+
+  it("binds the spectrum's own pair when both cells are finite (and c1 ≠ 0); the chord otherwise", () => {
+    const r = mkReader(imsMeta());
+    const cal0 = resolveImsCalibration(r, 0)!;
+    expect(cal0.spectrumCoeffs).toEqual({ c0: C0, c1: C1 });
+    expect(cal0.a).toBe(A); // the chord stays available beside the pair
+    expect(imsMzExact(cal0)).toBe(true);
+    expect(imsTofToMz(cal0)(100000)).toBe(exactMz(100000));
+    for (const i of [1, 2, 3, 99]) {
+      const c = resolveImsCalibration(r, i)!;
+      expect(c.spectrumCoeffs).toBeUndefined();
+      expect(imsMzExact(c)).toBe(false);
+      expect(imsTofToMz(c)(100000)).toBe(chordMz(100000));
+    }
+    // No metadata columns at all → chord. per_spectrum absent but both columns present → the pair
+    // (as the vendored Rust reader does), though never CLAIMED exact without exact_per_spectrum.
+    expect(resolveImsCalibration(mkReader(imsMeta(), false), 0)!.spectrumCoeffs).toBeUndefined();
+    const keyless = resolveImsCalibration(mkReader({ ims_calibration: { a: A, b: B, tof_encoding: "absolute" } }), 0)!;
+    expect(keyless.spectrumCoeffs).toEqual({ c0: C0, c1: C1 });
+    expect(keyless.perSpectrumSource).toBe("columns");
+    expect(imsMzExact(keyless)).toBe(false);
+    expect(resolveImsCalibration(mkReader({ ims_calibration: { a: A, b: B, tof_encoding: "absolute" } }), 1)!.spectrumCoeffs).toBeUndefined();
+    // exact_per_spectrum absent → the pair is still used, but never CLAIMED exact.
+    const notClaimed = resolveImsCalibration(mkReader(imsMeta({ exact_per_spectrum: undefined })), 0)!;
+    expect(notClaimed.spectrumCoeffs).toEqual({ c0: C0, c1: C1 });
+    expect(imsMzExact(notClaimed)).toBe(false);
+    // Not an ims-compact file.
+    expect(resolveImsCalibration(mkReader({}), 0)).toBeNull();
+    expect(imsMzExact(null)).toBe(false);
+  });
+
+  it("warns ONCE per reader, and counts, when an exact_per_spectrum archive leaves a spectrum on the chord", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const r = mkReader(imsMeta());
+      expect(imsPairUnboundCount(r)).toBe(0);
+      resolveImsCalibration(r, 0); // bound → nothing
+      expect(warn).not.toHaveBeenCalled();
+      expect(imsPairUnboundCount(r)).toBe(0);
+      resolveImsCalibration(r, 1); // null cells
+      resolveImsCalibration(r, 2); // c1 = 0
+      resolveImsCalibration(r, 3); // NaN
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]![0])).toMatch(/exact_per_spectrum.*spectrum 1.*_tof_c0\/_tof_c1/);
+      expect(imsPairUnboundCount(r)).toBe(3);
+      // a second reader warns on its own
+      const r2 = mkReader(imsMeta());
+      resolveImsCalibration(r2, 1);
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(imsPairUnboundCount(r2)).toBe(1);
+      expect(imsPairUnboundCount(r)).toBe(3);
+      // no exact claim → a chord spectrum is the documented layout, not a degradation: silent
+      const r3 = mkReader(imsMeta({ exact_per_spectrum: undefined }));
+      resolveImsCalibration(r3, 1);
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(imsPairUnboundCount(r3)).toBe(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("reconstructs centroids through the per-spectrum pair (BigInt tof); the null spectrum stays on the chord", () => {
+    const r = mkReader(imsMeta());
+    const rec = { id: "frame=0", centroids: [
+      { tof: 250000n, intensity: 1, mean_inverse_reduced_ion_mobility: 0.9 },
+      { tof: 100000n, intensity: 2, mean_inverse_reduced_ion_mobility: 1.1 },
+    ] } as unknown as RawSpectrum;
+    const s0 = reconstructSpectrum(rec, 0, "centroid", resolveImsCalibration(r, 0));
+    expect(Array.from(s0.mz)).toEqual([exactMz(100000), exactMz(250000)]);
+    expect(Array.from(s0.mz)).toEqual([420.25, 1369]);
+    expect(Array.from(s0.intensity)).toEqual([2, 1]);
+    expect(Array.from(s0.mobility!.values)).toEqual([0.9, 1.1]); // dictionary (sorted unique 1/K0)
+    expect(Array.from(s0.mobility!.index)).toEqual([1, 0]); // peak order after the m/z sort
+    const s1 = reconstructSpectrum(rec, 1, "centroid", resolveImsCalibration(r, 1));
+    expect(Array.from(s1.mz)).toEqual([chordMz(100000), chordMz(250000)]);
+    expect(Array.from(s1.mz)).toEqual([400, 1225]);
+    // The same bytes reconstruct differently — proves the per-spectrum path fired for spectrum 0.
+    expect(s0.mz[0]).not.toBe(s1.mz[0]);
+    // The mzpeakts-mangled "" key for the 1-word `tof` array goes through the pair as well.
+    const mangled = { id: "f", centroids: [{ "": 100000, intensity: 5 }] } as unknown as RawSpectrum;
+    expect(reconstructSpectrum(mangled, 0, "centroid", resolveImsCalibration(r, 0)).mz[0]).toBe(exactMz(100000));
+  });
+
+  it("keeps the per-scan-delta cumsum guard in front of the per-spectrum map", () => {
+    const r = mkReader(imsMeta({ tof_encoding: "per-scan-delta" }));
+    // scan 0 (1/K0 0.80): abs 50k, 80k → stored 50k, 30k; scan 1 (0.95): abs 60k, 100k → 60k, 40k.
+    const frame = { id: "f", centroids: [
+      { tof: 50000, intensity: 1, mean_inverse_reduced_ion_mobility: 0.8 },
+      { tof: 30000, intensity: 2, mean_inverse_reduced_ion_mobility: 0.8 },
+      { tof: 60000n, intensity: 3, mean_inverse_reduced_ion_mobility: 0.95 },
+      { tof: 40000n, intensity: 4, mean_inverse_reduced_ion_mobility: 0.95 },
+    ] } as unknown as RawSpectrum;
+    const s = reconstructSpectrum(frame, 0, "centroid", resolveImsCalibration(r, 0));
+    // absolute tofs 50k, 60k, 80k, 100k in m/z order, through the EXACT pair (225, 259.21, 334.89, 420.25)
+    expect(Array.from(s.mz)).toEqual([exactMz(50000), exactMz(60000), exactMz(80000), exactMz(100000)]);
+    expect(Array.from(s.intensity)).toEqual([1, 3, 2, 4]);
+    // and the raw deltas never reach the map (30k → 12.8², 40k → 13.9²)
+    for (const m of s.mz) expect([exactMz(30000), exactMz(40000)]).not.toContain(m);
+    // without mobility the guard falls back to absolute, still through the pair
+    const noMob = { id: "g", centroids: [{ tof: 50000, intensity: 1 }, { tof: 30000, intensity: 2 }] } as unknown as RawSpectrum;
+    expect(new Set(reconstructSpectrum(noMob, 0, "centroid", resolveImsCalibration(r, 0)).mz)).toEqual(new Set([exactMz(50000), exactMz(30000)]));
+  });
+
+  it("applies the pair in the m/z-chunked data-array path too", () => {
+    const r = mkReader(imsMeta({ tof_encoding: "m/z-chunked" }));
+    const rec = { id: "x", dataArrays: { tof: new Int32Array([50000, 80000]), "intensity array": [3, 5] } } as unknown as RawSpectrum;
+    expect(Array.from(reconstructSpectrum(rec, 0, "profile", resolveImsCalibration(r, 0)).mz)).toEqual([exactMz(50000), exactMz(80000)]);
+    expect(Array.from(reconstructSpectrum(rec, 1, "profile", resolveImsCalibration(r, 1)).mz)).toEqual([chordMz(50000), chordMz(80000)]);
+  });
+
+  it("readSpectrumFacet (the non-engine readers' path) resolves per spectrum", () => {
+    const r = mkReader(imsMeta());
+    const rec = { id: "f", centroids: [{ tof: 100000, intensity: 7, mean_inverse_reduced_ion_mobility: 1.0 }] } as unknown as RawSpectrum;
+    expect(readSpectrumFacet(r, 0, rec, "centroid")!.mz[0]).toBe(exactMz(100000));
+    expect(readSpectrumFacet(r, 1, rec, "centroid")!.mz[0]).toBe(chordMz(100000));
   });
 });

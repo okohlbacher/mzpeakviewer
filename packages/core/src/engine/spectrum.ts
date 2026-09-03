@@ -48,6 +48,13 @@ const MOBILITY_DATA_KEY = "mean inverse reduced ion mobility array";
  * `m/z array`; m/z is recovered as `mz = (a + b·tof)²` with `a,b` from the index's
  * `ims_calibration` (the converter keeps this as the contract — tof in the *archive* is
  * absolute, a direct per-point map). See the mzPeakConverter compliance reply §2.
+ *
+ * `a,b` are the RUN-WIDE two-point chord (timsrust). When the vendor MzCalibration is exactly
+ * linear in tof (TDF ModelType 1 with C2 = 0) the converter ALSO writes per-spectrum `tof_c0` /
+ * `tof_c1` metadata columns — named by `ims_calibration.per_spectrum` ("tof_c0,tof_c1"), the same
+ * `*_tof_c0` / `*_tof_c1` suffix convention as the SciEX sqrt grid — that reproduce the vendor
+ * m/z through the SAME transform (MS:1003825): `mz = (tof_c0 + tof_c1·tof)²`.
+ * {@link resolveImsCalibration} binds that pair for one spectrum; {@link mzFromTof} prefers it.
  */
 export type ImsCalibration = {
   a: number;
@@ -57,11 +64,39 @@ export type ImsCalibration = {
   // boundary (a mobility-value change) before mzFromTof. "absolute": tof is the raw bin (--no-tof-
   // delta). null: legacy files with no encoding declared → treat as absolute. See the IM-TOF handoff.
   tofEncoding: "per-scan-delta" | "absolute" | "m/z-chunked" | null;
+  /** Metadata column NAME SUFFIXES of the per-spectrum linear pair (`per_spectrum: "tof_c0,tof_c1"`
+   *  → `_tof_c0` / `_tof_c1`), or null when the archive carries only the run-wide chord. */
+  perSpectrum?: { c0: string; c1: string } | null;
+  /** What named the pair: the `ims_calibration.per_spectrum` key, or — with no (valid) key — the
+   *  presence of BOTH `*_tof_c0` / `*_tof_c1` spectra-metadata columns, the trigger the vendored
+   *  Rust reader uses (`reader/point.rs reconstruct_per_spectrum_grid_mz`: the `SqrtMzFromTof` array
+   *  index entry + `tof_c0`/`tof_c1` params by name), so a hand-edited / stamp-only archive maps the
+   *  same way in both readers. */
+  perSpectrumSource?: "per_spectrum" | "columns" | null;
+  /** The converter's `exact_per_spectrum` claim: the per-spectrum pair IS the vendor calibration. */
+  exactPerSpectrum?: boolean;
+  /** THIS spectrum's own (c0, c1), bound by {@link resolveImsCalibration} when its columns are
+   *  finite; `mzFromTof` prefers it over the chord. Absent / null → the run-wide chord. */
+  spectrumCoeffs?: { c0: number; c1: number } | null;
 };
 
 function mzFromTof(cal: ImsCalibration, tof: number): number {
-  const m = cal.a + cal.b * tof;
+  const s = cal.spectrumCoeffs;
+  const m = s ? s.c0 + s.c1 * tof : cal.a + cal.b * tof;
   return m * m;
+}
+
+/** The tof → m/z map `cal` reconstructs with (the bound per-spectrum pair, else the chord) — for
+ *  the callers that map an axis outside the spectrum readers (the ims-compact XIC window). */
+export function imsTofToMz(cal: ImsCalibration): (tof: number) => number {
+  return (tof) => mzFromTof(cal, tof);
+}
+
+/** True when `cal` reconstructs m/z through the per-spectrum pair the converter declared exact
+ *  (`exact_per_spectrum` AND this spectrum's own finite columns) — the vendor m/z, not the chord.
+ *  Not surfaced by any UI today (nothing reads `ims_calibration.exact`); exported for the day one does. */
+export function imsMzExact(cal: ImsCalibration | null): boolean {
+  return !!(cal && cal.spectrumCoeffs && cal.exactPerSpectrum);
 }
 
 /** The index `metadata` object (`store.fileIndex.metadata`), or `{}`. */
@@ -75,6 +110,10 @@ function asObj(v: unknown): Record<string, unknown> | null {
   return v && typeof v === "object" ? (v as Record<string, unknown>) : null;
 }
 
+/** The default per-spectrum pair suffixes (the sqrt-grid `tof_c0` / `tof_c1` columns, MS:4000900/1 or
+ *  MZP:1000003/4 — matched by suffix, like {@link resolveGridMz}). */
+const TOF_PAIR_SUFFIXES = { c0: "_tof_c0", c1: "_tof_c1" } as const;
+
 /** Parse `metadata.ims_calibration` (a JSON string OR an inlined object) to `{a,b}`, or null
  *  when the file isn't ims-compact / the calibration is malformed. */
 export function readImsCalibration(reader: Reader): ImsCalibration | null {
@@ -85,7 +124,75 @@ export function readImsCalibration(reader: Reader): ImsCalibration | null {
   const te = raw["tof_encoding"];
   const tofEncoding =
     te === "per-scan-delta" || te === "absolute" || te === "m/z-chunked" ? te : null;
-  return { a, b, tofEncoding };
+  // `per_spectrum`: "tof_c0,tof_c1" (a comma list; an array is tolerated) naming the two
+  // per-spectrum metadata columns, c0 then c1. Without a valid key the pair is still bound when
+  // BOTH default `*_tof_c0` / `*_tof_c1` columns exist — that is the vendored Rust reader's trigger
+  // (`reconstruct_per_spectrum_grid_mz`: the `SqrtMzFromTof` array-index entry every ims-compact
+  // `tof` column carries + the `tof_c0`/`tof_c1` params by name), so an archive that carries the
+  // columns but lost the key (hand-edited index JSON, a partial migration) reconstructs the SAME
+  // m/z here as through `mzpeak-convert ARCHIVE -o x.mzML`. Other column names are never guessed.
+  const ps = raw["per_spectrum"];
+  const names: unknown[] = typeof ps === "string" ? ps.split(",").map((x) => x.trim()) : Array.isArray(ps) ? ps : [];
+  let perSpectrum: ImsCalibration["perSpectrum"] = null;
+  let perSpectrumSource: ImsCalibration["perSpectrumSource"] = null;
+  if (names.length === 2 && names.every((n) => typeof n === "string" && /^[A-Za-z0-9_]+$/.test(n))) {
+    perSpectrum = { c0: `_${names[0] as string}`, c1: `_${names[1] as string}` };
+    perSpectrumSource = "per_spectrum";
+  } else {
+    const spectra = spectraStruct(reader);
+    if (fieldBySuffix(spectra, TOF_PAIR_SUFFIXES.c0) && fieldBySuffix(spectra, TOF_PAIR_SUFFIXES.c1)) {
+      perSpectrum = { ...TOF_PAIR_SUFFIXES };
+      perSpectrumSource = "columns";
+    }
+  }
+  return { a, b, tofEncoding, perSpectrum, perSpectrumSource, exactPerSpectrum: raw["exact_per_spectrum"] === true };
+}
+
+/** Per reader: how many spectra a `per_spectrum` + `exact_per_spectrum` archive has so far left on
+ *  the chord because their pair cells were null / non-finite / 0 (see {@link resolveImsCalibration}).
+ *  The converter's lane is all-or-nothing, so any count > 0 is a half-written or truncated
+ *  metadata facet — warned once per reader on the console and readable here for a UI badge. */
+const imsPairUnbound = new WeakMap<object, number>();
+/** The number of spectra of `reader` resolved so far that fell back to the chord although the
+ *  archive claims an exact per-spectrum pair (0 = no degradation seen). */
+export function imsPairUnboundCount(reader: Reader): number {
+  return imsPairUnbound.get(reader as unknown as object) ?? 0;
+}
+
+/**
+ * The ims-compact calibration to reconstruct spectrum `index` with: the run-wide chord, with THIS
+ * spectrum's exact linear pair bound (`spectrumCoeffs`) when `ims_calibration.per_spectrum` names
+ * the columns (or the default `*_tof_c0`/`*_tof_c1` columns exist — {@link readImsCalibration})
+ * and both cells are finite. A missing / null / non-finite cell — or a `tof_c1` of 0,
+ * the value mzpeakts materialises for a NULL f64 cell (a spectrum the converter left on the chord;
+ * a real c1 = DigitizerTimebase·√C1/1e6 is never 0) — falls back to the chord: never a constant-
+ * m/z spectrum reconstructed from a null fill. Null when the file isn't ims-compact.
+ */
+export function resolveImsCalibration(reader: Reader, index: number): ImsCalibration | null {
+  const cal = readImsCalibration(reader);
+  if (!cal?.perSpectrum) return cal;
+  const spectra = spectraStruct(reader);
+  const c0 = spectrumNumBySuffix(spectra, cal.perSpectrum.c0, index);
+  const c1 = spectrumNumBySuffix(spectra, cal.perSpectrum.c1, index);
+  if (c0 == null || c1 == null || c1 === 0) {
+    // The archive CLAIMS every spectrum carries the exact pair; this one doesn't → it renders on
+    // the chord (up to ~4 ppm off on 2485.d). Never silent: count it and warn once per reader.
+    if (cal.exactPerSpectrum) {
+      const key = reader as unknown as object;
+      const n = (imsPairUnbound.get(key) ?? 0) + 1;
+      imsPairUnbound.set(key, n);
+      if (n === 1) {
+        console.warn(
+          `ims_calibration declares exact_per_spectrum but spectrum ${index} has no finite ` +
+          `${cal.perSpectrum.c0}/${cal.perSpectrum.c1} pair (null, NaN or c1 = 0); it and any further ` +
+          `such spectra fall back to the run-wide chord (a + b·tof)² — a half-written or truncated ` +
+          `spectra_metadata facet? (warned once per file; imsPairUnboundCount(reader) has the count)`,
+        );
+      }
+    }
+    return cal;
+  }
+  return { ...cal, spectrumCoeffs: { c0, c1 } };
 }
 
 /** A per-spectrum integer-axis → m/z map for SciEX/Agilent/Shimadzu grid data (`tof_index`). */
@@ -247,6 +354,17 @@ function fieldBySuffix(spectra: SpectraStruct | undefined, suffix: string): stri
   if (Array.isArray(kids)) for (const c of kids) if (typeof c?.name === "string" && c.name.endsWith(suffix)) return c.name;
   return null;
 }
+/** The spectrum-metadata `spectrum` struct vector (mzpeakts Arrow), if the reader exposes it. */
+function spectraStruct(reader: Reader): SpectraStruct | undefined {
+  return (reader as unknown as { spectrumMetadata?: { spectra?: SpectraStruct } }).spectrumMetadata?.spectra;
+}
+/** The FINITE number in the per-spectrum metadata column whose name ends in `suffix`, for
+ *  spectrum `index`; null when the column is absent or the cell is null / non-finite. */
+function spectrumNumBySuffix(spectra: SpectraStruct | undefined, suffix: string, index: number): number | null {
+  const name = fieldBySuffix(spectra, suffix);
+  const v = name ? spectra?.getChild?.(name)?.get?.(index) : null;
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
 
 /**
  * Resolve the per-spectrum integer-axis → m/z map for a grid spectrum, for ONE facet:
@@ -280,13 +398,8 @@ export function resolveGridMz(reader: Reader, index: number, facet: GridFacet = 
     return (axis) => axis * inv;
   }
   if (g.kind === "tof-grid-global") { const { c0, c1 } = g; return (axis) => { const m = c0 + c1 * axis; return m * m; }; }
-  const spectra = (reader as unknown as { spectrumMetadata?: { spectra?: SpectraStruct } }).spectrumMetadata?.spectra;
-  const numBySuffix = (suffix: string): number | null => {
-    const name = fieldBySuffix(spectra, suffix);
-    const v = name ? spectra?.getChild?.(name)?.get?.(index) : null;
-    return typeof v === "number" && Number.isFinite(v) ? v : null;
-  };
-  const c0 = numBySuffix("_tof_c0"), c1 = numBySuffix("_tof_c1");
+  const spectra = spectraStruct(reader);
+  const c0 = spectrumNumBySuffix(spectra, "_tof_c0", index), c1 = spectrumNumBySuffix(spectra, "_tof_c1", index);
   if (c0 == null || c1 == null) return null;
   if (g.kind === "tof-grid") return (axis) => { const m = c0 + c1 * axis; return m * m; };
   // agilent-grid: select the calibration row for this spectrum, then mz = (c0+c1·k)² −
@@ -624,7 +737,7 @@ export class UnresolvedGridAxisError extends Error {
  * Returns null when the facet holds no signal at all (no data arrays / no centroid rows). A
  * facet whose rows need a grid axis it cannot resolve throws {@link UnresolvedGridAxisError};
  * rows carrying a real f64 `mz` (a fallback spectrum) read it verbatim under either outcome.
- * Pass `grid`/`cal` from `resolveFacetGridMz(reader, index)` / `readImsCalibration(reader)`
+ * Pass `grid`/`cal` from `resolveFacetGridMz(reader, index)` / `resolveImsCalibration(reader, index)`
  * (resolved once per spectrum) or use {@link readSpectrumFacet} to resolve them here.
  */
 export function readFacetSignal(
@@ -660,7 +773,7 @@ function assertResolved(mz: Float64Array, raw: ArrayLike<unknown> | undefined, i
 
 /** {@link readFacetSignal} with the resolvers taken from `reader` for spectrum `index`. */
 export function readSpectrumFacet(reader: Reader, index: number, spectrum: RawSpectrum, facet: GridFacet): FacetSignal | null {
-  return readFacetSignal(spectrum, index, facet, resolveFacetGridMz(reader, index), readImsCalibration(reader));
+  return readFacetSignal(spectrum, index, facet, resolveFacetGridMz(reader, index), resolveImsCalibration(reader, index));
 }
 
 /**
@@ -780,7 +893,7 @@ export async function readEngineSpectrum(
   const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
   if (!spectrum) throw new Error(`No spectrum at index ${index}`);
 
-  const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveFacetGridMz(reader, index), source);
+  const recon = reconstructSpectrum(spectrum, index, representation, resolveImsCalibration(reader, index), resolveFacetGridMz(reader, index), source);
   return adaptSpectrum({
     index: recon.index,
     id: recon.id,
@@ -1002,7 +1115,7 @@ export async function readEngineSpectrumCached(
     }
     const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
     if (!spectrum) throw new Error(`No spectrum at index ${index}`);
-    const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveFacetGridMz(reader, index), source);
+    const recon = reconstructSpectrum(spectrum, index, representation, resolveImsCalibration(reader, index), resolveFacetGridMz(reader, index), source);
     return adaptSpectrum({
       index, id: recon.id, mz: recon.mz, intensity: recon.intensity, representation: recon.representation,
       ...(recon.sourceUsed ? { sourceUsed: recon.sourceUsed } : {}),
@@ -1035,7 +1148,7 @@ export async function readEngineSpectrumCached(
 
   const spectrum = (await reader.getSpectrum(index)) as RawSpectrum | null;
   if (!spectrum) throw new Error(`No spectrum at index ${index}`);
-  const recon = reconstructSpectrum(spectrum, index, representation, readImsCalibration(reader), resolveFacetGridMz(reader, index));
+  const recon = reconstructSpectrum(spectrum, index, representation, resolveImsCalibration(reader, index), resolveFacetGridMz(reader, index));
   // Cache the canonical decoded arrays + facet provenance (adaptSpectrum copies for the wire).
   cache.set(index, {
     mz: recon.mz, intensity: recon.intensity, msLevel,

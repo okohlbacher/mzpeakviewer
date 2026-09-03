@@ -12,7 +12,7 @@
 import type { Reader } from "./openUrl";
 import {
   readFacetSignal,
-  readImsCalibration,
+  resolveImsCalibration,
   resolveFacetGridMz,
   type GridFacet,
   type RawSpectrum,
@@ -83,7 +83,7 @@ export async function harvestDataArraysOrNull(
   // up front (imaging already refuses unresolvable grid files via isGridFile; this is the
   // per-spectrum backstop). readFacetSignal fails loud per facet for the partially-resolvable case.
   const grid = resolveFacetGridMz(reader, index);
-  const cal = readImsCalibration(reader);
+  const cal = resolveImsCalibration(reader, index);
   if (!grid.profile && !grid.centroid && !cal) assertNoGridAxis(spectrum, index);
   // Data-array source FIRST (spectra_data) — the ion-image source of truth.
   const prof = readFacetSignal(spectrum, index, "profile", grid, cal);

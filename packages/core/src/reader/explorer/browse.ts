@@ -12,7 +12,7 @@ import type { Reader } from "./open";
 import { recRepresentation } from "./cv";
 import type { ChromPoint, SpectrumArrays, StoredChromatogram } from "./types";
 import { assertNoGridAxis } from "../arrays";
-import { readFacetSignal, readImsCalibration, resolveFacetGridMz, type RawSpectrum as EngineRawSpectrum } from "../../engine/spectrum";
+import { readFacetSignal, resolveImsCalibration, resolveFacetGridMz, type RawSpectrum as EngineRawSpectrum } from "../../engine/spectrum";
 
 const MZ_KEY = "m/z array";
 const INTENSITY_KEY = "intensity array";
@@ -89,7 +89,7 @@ export async function getSpectrumArrays(
   // Resolve the per-facet grid / ims-compact codecs once; with NO resolver at all a grid axis is
   // unreadable — fail loud up front (the per-facet reader fails loud for the partial case).
   const grid = resolveFacetGridMz(reader, index);
-  const cal = readImsCalibration(reader);
+  const cal = resolveImsCalibration(reader, index);
   if (!grid.profile && !grid.centroid && !cal) assertNoGridAxis(spectrum, index);
   // Prefer the profile data-array source; fall back to centroids (spectra_peaks), then to the
   // data arrays again for a centroid-declared spectrum whose peaks facet is empty.
@@ -112,13 +112,22 @@ type XicPoint = {
   dataArrays: Record<string, ArrayLike<number> | ArrayLike<bigint> | ArrayLike<string> | undefined>;
 };
 
-/** Per-spectrum integer-axis → m/z map for a grid-encoded facet (engine/spectrum `GridMz`),
- *  or null when that spectrum's axis is unresolvable (e.g. missing per-spectrum coefficients). */
-export type XicGridResolver = (spectrumIndex: number) => ((axis: number) => number) | null;
+/** An ims-compact (timsTOF) axis map: `mz` maps an ABSOLUTE `tof`; `perScanDelta` says the
+ *  stream's `tof` is a per-mobility-scan delta that must be cumsum'd (reset on each 1/K0 change,
+ *  the engine/spectrum `readCentroids` guard) before mapping. */
+export type XicAxisMap = { mz: (axis: number) => number; perScanDelta?: boolean };
+/** Per-spectrum integer-axis → m/z map for a grid-encoded facet (engine/spectrum `GridMz`) or an
+ *  {@link XicAxisMap} for an ims-compact facet, or null when that spectrum's axis is unresolvable
+ *  (e.g. missing per-spectrum coefficients). */
+export type XicGridResolver = (spectrumIndex: number) => ((axis: number) => number) | XicAxisMap | null;
 
 // mzpeakts array_name of the integer grid axis (`tof_index`, MS:1000519) as packTableIntoDataArrays
 // keys it in the bulk XIC stream (same key as in getSpectrum's dataArrays).
 const GRID_AXIS_KEY = "tof_index";
+// The ims-compact tof axis (MS:1000786, array_name `tof`) of a timsTOF peaks facet, and the per-peak
+// 1/K0 array that marks its mobility-scan boundaries (Layout A per-scan deltas).
+const TOF_AXIS_KEY = "tof";
+const MOBILITY_KEY = "mean inverse reduced ion mobility array";
 const axisNum = (v: unknown): number =>
   typeof v === "bigint" ? Number(v) : typeof v === "number" ? v : NaN;
 
@@ -130,16 +139,34 @@ const axisNum = (v: unknown): number =>
  * `betweenSorted` slice, which yields NO point for such a spectrum — and also when the rows
  * are unmappable (an axis with no resolver): a gap, never a false zero.
  */
-function sumGridWindow(p: XicPoint, lo: number, hi: number, resolve: ((axis: number) => number) | null): number | null {
+function sumGridWindow(p: XicPoint, lo: number, hi: number, resolved: ((axis: number) => number) | XicAxisMap | null): number | null {
   const da = p.dataArrays;
   const inten = da[INTENSITY_KEY] as ArrayLike<number> | undefined;
-  const axis = da[GRID_AXIS_KEY] as ArrayLike<number | bigint> | undefined;
+  const axis = (da[GRID_AXIS_KEY] ?? da[TOF_AXIS_KEY]) as ArrayLike<number | bigint> | undefined;
   const mzArr = da[MZ_KEY] as ArrayLike<number> | undefined;
   if (!inten || (!axis && !mzArr)) return null;
+  const map = typeof resolved === "function" ? { mz: resolved } : resolved;
+  const resolve = map?.mz ?? null;
+  // ims-compact Layout A: `tof` is a per-mobility-scan delta → cumsum in STORED order, reset on
+  // each 1/K0 change (the same guard as engine/spectrum readCentroids). Without the mobility
+  // array there is no boundary to find and a raw delta would map to a plausible-looking m/z →
+  // unmappable: a gap, never a false value. (The converter has refused to READ this encoding
+  // since v0.7.2 and no longer writes it, so this branch serves legacy archives only.)
+  const mob = da[MOBILITY_KEY] as ArrayLike<number> | undefined;
+  const perScanDelta = !!map?.perScanDelta && !!axis;
+  if (perScanDelta && !mob) return null;
+  let acc = 0, prevMob = NaN;
   let sum = 0, hit = false;
   for (let i = 0; i < inten.length; i++) {
     const f = mzArr ? axisNum(mzArr[i]) : NaN;
-    const m = axis && resolve && (f === 0 || !Number.isFinite(f)) ? resolve(axisNum(axis[i])) : f;
+    let k = axis ? axisNum(axis[i]) : NaN;
+    if (perScanDelta) {
+      const mb = axisNum(mob![i]);
+      acc = mb !== prevMob ? k : acc + k; // absolute on scan start, else add the delta
+      prevMob = mb;
+      k = acc;
+    }
+    const m = axis && resolve && (f === 0 || !Number.isFinite(f)) ? resolve(k) : f;
     if (!Number.isFinite(m) || m < lo || m > hi) continue;
     hit = true;
     const v = inten[i];
@@ -155,11 +182,13 @@ function sumGridWindow(p: XicPoint, lo: number, hi: number, resolve: ((axis: num
  * spectra_peaks.
  *
  * `gridMz` (engine/chrom `gridXicResolver`) marks the facet being read as GRID-ENCODED
- * (SciEX/Agilent/Shimadzu `tof_index`): the reader's own m/z slice keys on the facet's
- * sorting column `mz`, which such a facet either lacks or null-fills (mzpeakts then throws
- * "Could not find … in Schema" or slices nothing), so the m/z window is instead applied here,
- * per row, on the reconstructed axis. Point-layout facets read the same bytes either way (the
- * reader's slice is post-read); a TIC (no window) is unaffected.
+ * (SciEX/Agilent/Shimadzu `tof_index`) or ims-compact (timsTOF integer `tof`): the reader's own
+ * m/z slice keys on the facet's sorting column `mz`, which such a facet either lacks or null-fills
+ * (mzpeakts then throws "Could not find … in Schema" or slices nothing), so the m/z window is
+ * instead applied here, per row, on the reconstructed axis (ims-compact: the spectrum's exact
+ * `tof_c0/tof_c1` pair when the archive carries it, else the run-wide chord; per-scan deltas
+ * cumsum'd first). Point-layout facets read the same bytes either way (the reader's slice is
+ * post-read); a TIC (no window) is unaffected.
  */
 export async function extractChromatogram(
   reader: Reader,

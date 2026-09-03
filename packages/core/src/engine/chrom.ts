@@ -24,20 +24,33 @@ import {
 import type { ChromPoint, SpectrumIndexRow } from "../reader/explorer/types";
 import type { XicGridResolver } from "../reader/explorer/browse";
 import { engineDiaXic } from "./dia";
-import { isGridFile, resolveGridMz } from "./spectrum";
+import { imsTofToMz, isGridFile, readImsCalibration, resolveGridMz, resolveImsCalibration } from "./spectrum";
 
 /**
- * The per-spectrum grid resolver `extractChromatogram` needs for a GRID-ENCODED file
- * (SciEX/Agilent/Shimadzu `tof_index`): the facet being read decides the index-block
- * precedence (profile → `tof_calibration` sqrt first; centroids → `mz_calibration` lattice
- * first — see engine/spectrum `GridFacet`). Undefined for a non-grid file, so the reader's own
- * m/z slice runs unchanged. Every XIC call site MUST pass this (review 2026-09-02: the reader
- * keys its window on the null-filled `mz` sorting column of a grid facet).
+ * The per-spectrum axis resolver `extractChromatogram` needs for a file whose facet stores an
+ * INTEGER axis instead of `mz`:
+ *  - GRID-ENCODED (SciEX/Agilent/Shimadzu `tof_index`): the facet being read decides the
+ *    index-block precedence (profile → `tof_calibration` sqrt first; centroids → `mz_calibration`
+ *    lattice first — see engine/spectrum `GridFacet`).
+ *  - ims-compact (timsTOF `tof`, `ims_calibration`): tof → m/z through the spectrum's own exact
+ *    `tof_c0/tof_c1` pair when the archive carries it (`resolveImsCalibration`), else the run-wide
+ *    chord; the map flags a per-scan-delta encoding so the window summer cumsums first.
+ * Undefined for any other file, so the reader's own m/z slice runs unchanged. Every XIC call site
+ * MUST pass this (review 2026-09-02: the reader keys its window on the null-filled — or, for
+ * ims-compact, absent — `mz` sorting column of such a facet).
  */
 export function gridXicResolver(reader: Reader, useProfile: boolean): XicGridResolver | undefined {
-  if (!isGridFile(reader)) return undefined;
-  const facet = useProfile ? "profile" : "centroid";
-  return (i) => resolveGridMz(reader, i, facet);
+  if (isGridFile(reader)) {
+    const facet = useProfile ? "profile" : "centroid";
+    return (i) => resolveGridMz(reader, i, facet);
+  }
+  if (readImsCalibration(reader)) {
+    return (i) => {
+      const cal = resolveImsCalibration(reader, i);
+      return cal ? { mz: imsTofToMz(cal), perScanDelta: cal.tofEncoding === "per-scan-delta" } : null;
+    };
+  }
+  return undefined;
 }
 
 /**
