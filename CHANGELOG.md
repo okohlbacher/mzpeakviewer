@@ -3,9 +3,28 @@
 All notable changes to mzPeakViewer are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.9.4] — 2026-09-03
 
 ### Added
+
+- **Spectra view: export the displayed spectrum as a SEQUEST `.dta` file.** A `⭳ .dta`
+  action in the points footer saves the spectrum EXACTLY as displayed — on a dual-stored
+  file the Signal toggle decides which facet is written, and the filename records it
+  (`<stem>.spec<N>.<facet>.dta`). Header follows the SEQUEST convention:
+  `MH+ = mz·z − (z−1)·1.00727646688` from the selected-ion m/z + charge when the file
+  records them, the isolation-window target with the standard `z = 1` assumption for DIA,
+  and the conventional `0 1` placeholder for precursor-less spectra (MS1); an empty
+  spectrum refuses with a message rather than writing an empty file. Desktop saves through
+  the native dialog + `fs` plugin (anchor downloads are inert in WKWebView; new scoped
+  `fs:allow-write-file` capability — the USER names the path), web uses a blob download.
+  `spectrumMetaTree` now also carries `selectedIons`: mzpeakts materialises selected ions
+  at RECORD level (not inside `precursors`) and the tree omitted them despite its wire doc
+  always promising "precursor / selected-ion" — the metadata panel gains them too, and the
+  export reads its precursor from there. New `app/src/dta.ts` + 9 tests pinning the header
+  math, precursor extraction across nested/flat spellings, formatting and filenames;
+  verified in-browser on the Shimadzu corpus (blank-centroid MS2 → `452.5 1` + 12,299
+  pairs; HEK dual spectrum 1050 exports both facets, 3,145-pair profile / 391-pair
+  centroid, with a real selected-ion header).
 
 - **Viewer (mzPeakViewer `packages/core`): ims-compact m/z from the per-spectrum exact linear pair.**
   When `ims_calibration` declares `per_spectrum: "tof_c0,tof_c1"` (the converter's C2 = 0 TDF
@@ -59,3 +78,31 @@ All notable changes to mzPeakViewer are documented here. The format follows
   ims-compact archive streams the entire peaks facet (mzpeakts has no tof-range pushdown for a
   facet without an `mz` column; ~6.6 s / 1.5 GB on 2485.mzpeak in node) — bound the read by a tof
   range or the `--ims-chunked` chunk index; no UI surfaces `imsMzExact` / `imsPairUnboundCount`.
+
+### Fixed
+
+- **Grid (lattice) facets: resolved per facet, with the grid axis authoritative.** A
+  Shimadzu archive can carry two grids at once — the profile facet's sqrt
+  `tof_calibration` and the centroid facet's `mz_calibration` lattice — so block
+  precedence is now per facet (centroids prefer `mz_calibration`, profile prefers
+  `tof_calibration`), falling back to the other block only when the preferred one is
+  absent; a present-but-malformed block resolves to null instead of silently
+  reconstructing through the wrong grid, and readers that cannot resolve a grid throw
+  rather than reporting zeros. Two bugs this exposed: mzpeakts materialises a gridded
+  row's null-filled m/z column as a Float64Array of ZEROS, so gating the grid branch on
+  the m/z array being absent returned all-zero spectra; and XIC over a grid facet found
+  no m/z column at all, returning zero intensity for every gridded spectrum. Integer axes
+  arrive as BigInt and are coerced before arithmetic. The non-engine readers
+  (`harvestDataArraysOrNull` for imaging, the explorer browse path) read `centroids[i].mz`
+  verbatim and saw 0/null on a lattice-centroid archive — both now decode through the
+  engine's per-facet resolver, and the 0n-vs-real-mz decision is per ROW on both facets so
+  a fallback f64 spectrum inside a lattice facet reads from `mz` while a gridded row reads
+  from the axis, regardless of which came first.
+- **mz-grid codec: divide by the scale, the exact form.** `k/1e9` and `k*1e-9` disagree on
+  ~40 % of lattice values, and division is the correct one: 1e9 is representable in
+  IEEE-754 but 1e-9 is not, so `k/scale` is correctly rounded while `k*(1/scale)` inherits
+  the reciprocal's error. Measured on a real lattice archive (216,742 Shimadzu centroids),
+  dividing reproduces every source m/z bit-for-bit while multiplying is off by up to
+  1.1e-13 Da on 85,706 of them. This reverses the direction taken mid-cycle, which had
+  aligned the viewer with a reference reader that multiplied; that reader now divides, and
+  the archive documents `mz = tof_index / scale`.
