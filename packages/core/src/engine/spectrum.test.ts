@@ -398,7 +398,7 @@ describe("resolveGridMz — calibration-shape gating", () => {
 
   it("resolves per-spectrum coeffs by SUFFIX, surviving the MZP→MS accession drift", () => {
     const meta = { tof_calibration: { codec: "tof-grid", model: "sciex_sqrt_per_spectrum", per_spectrum_columns: ["tof_c0", "tof_c1"] } };
-    // current corpus uses MS_4000900_tof_c0 / MS_4000901_tof_c1 (not MZP_1000003/4)
+    // archives written before converter 0.10.1 use MS_4000900_tof_c0 / MS_4000901_tof_c1 (MZP_1000003/4 since)
     const f = resolveGridMz(mkReader(meta, { MS_4000900_tof_c0: 0.05, MS_4000901_tof_c1: 0.0003 }), 0)!;
     expect(f(1_000_000)).toBeCloseTo((0.05 + 0.0003 * 1_000_000) ** 2, 6);
   });

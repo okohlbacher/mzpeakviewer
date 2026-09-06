@@ -110,8 +110,9 @@ function asObj(v: unknown): Record<string, unknown> | null {
   return v && typeof v === "object" ? (v as Record<string, unknown>) : null;
 }
 
-/** The default per-spectrum pair suffixes (the sqrt-grid `tof_c0` / `tof_c1` columns, MS:4000900/1 or
- *  MZP:1000003/4 — matched by suffix, like {@link resolveGridMz}). */
+/** The default per-spectrum pair suffixes (the sqrt-grid `tof_c0` / `tof_c1` columns — MZP:1000003/4
+ *  since converter 0.10.1, MS:4000900/1 in archives written before it — matched by suffix, like
+ *  {@link resolveGridMz}). */
 const TOF_PAIR_SUFFIXES = { c0: "_tof_c0", c1: "_tof_c1" } as const;
 
 /** Parse `metadata.ims_calibration` (a JSON string OR an inlined object) to `{a,b}`, or null
@@ -347,8 +348,9 @@ export function isGridFile(reader: Reader): boolean {
 /** A minimal view of the spectrum-metadata `spectrum` struct vector (mzpeakts Arrow). */
 type SpectraStruct = { getChild?: (n: string) => { get(i: number): unknown } | null; type?: { children?: { name?: unknown }[] } };
 /** The full metadata field name ENDING in `suffix` (e.g. "_tof_c0"), or null — robust to the
- *  accession-prefix drift (MZP_1000003_tof_c0 → MS_4000900_tof_c0); `per_spectrum_columns` pins
- *  the suffix, so we match on it rather than the full accession-prefixed name. */
+ *  accession-prefix drift (MS_4000900_tof_c0 in archives before converter 0.10.1, MZP_1000003_tof_c0
+ *  from 0.10.1 on); `per_spectrum_columns` pins the suffix, so we match on it rather than the full
+ *  accession-prefixed name. */
 function fieldBySuffix(spectra: SpectraStruct | undefined, suffix: string): string | null {
   const kids = spectra?.type?.children;
   if (Array.isArray(kids)) for (const c of kids) if (typeof c?.name === "string" && c.name.endsWith(suffix)) return c.name;
@@ -377,8 +379,9 @@ function spectrumNumBySuffix(spectra: SpectraStruct | undefined, suffix: string,
  *    calibration row; exact MassHunter m/z (mirrors `calibrated_mz` in agilent_profile.rs).
  * Per-spectrum values are read from the spectrum metadata columns by NAME SUFFIX
  * (`*_tof_c0` / `*_tof_c1` / `*_tof_calibration_id`) — the accession prefix drifts across
- * converter versions (MZP_1000003_tof_c0 → MS_4000900_tof_c0), so we match the suffix, not the
- * full name. Returns null when the file isn't a grid file OR this spectrum lacks coefficients.
+ * converter versions (MS_4000900_tof_c0 before 0.10.1, MZP_1000003_tof_c0 from 0.10.1), so we match
+ * the suffix, not the full name. Returns null when the file isn't a grid file OR this spectrum lacks
+ * coefficients.
  *
  * `facet` picks the index-block precedence (see {@link GridFacet}); it defaults to "centroid" so
  * the pre-facet call shape `resolveGridMz(reader, index)` keeps resolving exactly what it did for
