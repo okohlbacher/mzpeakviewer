@@ -3,6 +3,51 @@
 All notable changes to mzPeakViewer are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.5] — 2026-09-14
+
+### Fixed
+
+- **Dual-stored files: both representations are now first-class — Summary, selection and
+  navigation.** A file that stores every spectrum twice (profile in `spectra_data`,
+  centroid in `spectra_peaks`) was presented as profile-only: the Summary counted only the
+  DECLARED representation, the Spectra navigator paged scans (13,200 on a Shimadzu
+  LCMS-9030 run instead of 2×13,200), and centroids were reachable only through a
+  per-spectrum "Signal" preference whose visibility depended on a flag set during a read.
+  Root cause: which representations each spectrum STORES was never computed at open.
+  The engine now derives it from the metadata counts — `number_of_data_points > 0` ⇔ in
+  the profile facet, `number_of_peaks > 0` ⇔ in the centroid facet, both columns required
+  (verified row-for-row against actual facet contents on 157 corpus files and the legacy
+  nested fixtures, 0 mismatches) — and ships a per-spectrum bitmask
+  (`BrowseIndex.facets`, `STORED_PROFILE | STORED_CENTROID`) plus
+  `FileStats.storedRepresentation` / `storedPerLevel`. The Summary shows
+  "N profile · N centroid — each of N scans stored as both" (file panel, per MS level,
+  sidebar), and spectrum counts are records (2 per dual-stored scan). The Spectra view
+  navigates spectrum RECORDS (`app/src/recordIndex.ts`: key = index·2 + representation,
+  profile before centroid per scan) with a **Representation** filter (All / Profile /
+  Centroid, with counts) modeled on the MS-level filter; switching keeps the same scan.
+  A dual-stored record is read explicitly in its representation; `?sig=` now selects the
+  filter. Files storing a single representation, and files without count columns
+  (including the deprecated nested layout), keep one-record-per-spectrum navigation
+  unchanged. The old read-time "Signal" preference and its hidden re-read are removed.
+
+### Tests
+
+- **Canonical e2e guard `app/e2e/representations.spec.ts`** (built viewer, real worker +
+  WASM) pinning the three reported symptoms on a dual-stored fixture — Summary shows both
+  representations, 2×N records to click through (profile then centroid per scan), the
+  Representation filter selects and keeps the scan — plus `?sig=` and centroid-declared
+  deep links over HTTP range reads, and a single-representation negative control. Proven
+  to guard: 6/6 pass on this release, 5/6 fail on v0.9.4 on exactly the reported symptoms
+  (count 3 instead of 6, `#1/3` navigation, no representation identified). Unit guards:
+  `core/src/reader/explorer/stored-representation.test.ts` (count-column rule on both
+  layouts, half-pair fallback, real fixtures) and `app/src/recordIndex.test.ts`.
+- **Corpus sweep harness `packages/core/corpus/corpus-sweep.test.ts`** (opt-in): drives the
+  engine over the example corpus via HTTP range reads — open, a signal-bearing spectrum,
+  both facets of dual-stored files, DIA windows. 200/200 reconverted corpus files pass.
+- Known, pre-existing and unchanged by this release: 16 e2e failures (identical set on
+  v0.9.4 — legacy fixtures) and 10 core golden failures (legacy nested `imaging.mzpeak`,
+  P3-33).
+
 ## [0.9.4] — 2026-09-03
 
 ### Added
