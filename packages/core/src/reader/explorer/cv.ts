@@ -15,6 +15,8 @@ export const COL = {
   tic: "MS_1000285_total_ion_current_unit_MS_1000131",
   mzLow: "MS_1000528_lowest_observed_mz_unit_MS_1000040",
   mzHigh: "MS_1000527_highest_observed_mz_unit_MS_1000040",
+  nPoints: "MS_1003060_number_of_data_points",
+  nPeaks: "MS_1003059_number_of_peaks",
 } as const;
 
 // The flat (metadata-refactor) layout promotes these columns under PLAIN names — no nested
@@ -31,6 +33,8 @@ export const COL_FLAT = {
   tic: "total_ion_current",
   mzLow: "lowest_observed_mz",
   mzHigh: "highest_observed_mz",
+  nPoints: "number_of_data_points",
+  nPeaks: "number_of_peaks",
 } as const;
 
 /** Resolve a promoted column by its nested name, falling back to the flat name. */

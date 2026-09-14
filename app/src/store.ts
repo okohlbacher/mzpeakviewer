@@ -176,15 +176,16 @@ export interface AppState {
    *  (ABSOLUTE IMS coords) so a pixel-pick round-trips as `px=x,y` in the share URL
    *  instead of losing the coordinate to a bare `spectrum=index`. */
   selector:
-    | { by: "index"; index: number }
+    | { by: "index"; index: number; source?: "profile" | "centroid" }
     | { by: "pixel"; x: number; y: number; index: number }
     | null;
   /** Spectra-view MS-level filter (null = all). Only levels present in the file. */
   msLevelFilter: number | null;
-  /** Preferred signal source for dual-stored spectra ("auto" = declared representation).
-   *  Applied to Spectra-view selections only — NEVER to imaging pixel-picks or IMS frame
-   *  steps (adversarial-review: a forced read bypasses the ion fast path and would turn
-   *  warm pixel-picks into multi-second cold reads). */
+  /** Spectra-view REPRESENTATION filter for files that store both profile and centroid
+   *  ("auto" = All — every stored record). Round-trips as `?sig=`. Applied to Spectra-view
+   *  selections only — NEVER to imaging pixel-picks or IMS frame steps (adversarial-review:
+   *  a forced read bypasses the ion fast path and would turn warm pixel-picks into
+   *  multi-second cold reads). */
   signalSource: "auto" | "profile" | "centroid";
   /** Transient: Structure → "view index.json" jump asks the Metadata view to scroll
    *  to + highlight its Manifest section. The Metadata view clears it once consumed. */
@@ -244,7 +245,8 @@ export interface AppState {
    *  screen (drop-zone + demo datasets + URL field) shows again. */
   reset: () => void;
   setMsLevelFilter: (level: number | null) => void;
-  /** Set the preferred signal source and re-read the current spectrum with it. */
+  /** Set the representation filter. The Spectra view moves the selection into the filtered
+   *  set (same spectrum when it stores that representation), like the MS-level filter. */
   setSignalSource: (src: "auto" | "profile" | "centroid") => void;
   /** Structure → "view index.json": switch to the Metadata view and ask it to scroll
    *  to + highlight its Manifest section. Pass null (from Metadata) to clear once done. */
@@ -263,7 +265,14 @@ export interface AppState {
   /** Load a spectrum by index. `route` (default true) switches to the Spectra view
    *  on success; pass false to load the spectrum without leaving the current view
    *  (used by the imaging spectrum dock for in-place pixel-pick). */
-  selectSpectrum: (index: number, route?: boolean, pixel?: { x: number; y: number }) => Promise<void>;
+  selectSpectrum: (
+    index: number,
+    route?: boolean,
+    pixel?: { x: number; y: number },
+    /** Read exactly this stored representation (a Spectra-view record of a dual-stored
+     *  spectrum). Omitted → the filter applies in the Spectra view, else the declared one. */
+    source?: "profile" | "centroid",
+  ) => Promise<void>;
   /** Select the spectrum at imaging pixel (x,y) (ABSOLUTE IMS coords). Resolves the
    *  pixel → spectrum index via the loaded grid, records `px` provenance, and loads
    *  in-place (route=false). Used by an imaging pick and by a `?px=` deep link. No-op
@@ -767,18 +776,10 @@ export const useStore = create<AppState>((set, get) => ({
     set({ msLevelFilter: level });
   },
   setSignalSource: (src: "auto" | "profile" | "centroid") => {
+    // Filter only. Moving the selection into the filtered set is the Spectra view's job
+    // (it owns the record index), exactly like the MS-level filter — so the plot, picker
+    // and share URL always change together, never via a hidden re-read.
     set({ signalSource: src });
-    // Re-read the CURRENT spectrum with the new preference (route=false: stay put).
-    // Pixel selectors keep their provenance; hydration (no spectrum yet) just stores
-    // the preference and the first selection picks it up.
-    const st = get();
-    // Prefer the SELECTOR (the user's intent, possibly still loading) over the displayed
-    // spectrum (the past) — the other order silently cancelled an in-flight navigation
-    // and desynced the picker/share-URL from the plot (adversarial-review, confirmed).
-    const cur = st.selector?.index ?? st.spectrum?.index ?? null;
-    if (cur == null) return;
-    const px = st.selector && st.selector.by === "pixel" ? { x: st.selector.x, y: st.selector.y } : undefined;
-    void reselectWithSource(cur, px, src, set);
   },
 
   setMetadataReveal: (section: "manifest" | null) => {
@@ -810,17 +811,19 @@ export const useStore = create<AppState>((set, get) => ({
   // Stale-async guard: capture openSeq at call time; drop the result if a
   // newer openFile was issued while this request was in-flight.
   // -------------------------------------------------------------------------
-  selectSpectrum: async (index: number, route = true, pixel?: { x: number; y: number }) => {
+  selectSpectrum: async (index: number, route = true, pixel?: { x: number; y: number }, source?: "profile" | "centroid") => {
     const seq = currentOpenSeq;
+    // The representation to read: an explicit record's (Spectra navigator) → else the
+    // representation filter, for Spectra-view selections only (deep links, level jumps) —
+    // pixel-picks and other views stay on the auto path (warm caches, honest defaults).
+    const sigPref = get().signalSource;
+    const src = source ?? (!pixel && get().view === "spectra" && sigPref !== "auto" ? sigPref : undefined);
     // Pixel provenance (when picked on the imaging grid) makes the selection round-trip
-    // as `px=x,y`; otherwise it's a plain `spectrum=index`.
+    // as `px=x,y`; otherwise it's a plain `spectrum=index`, carrying the requested
+    // representation so the navigator knows WHICH record of a dual spectrum is selected.
     const selector = pixel
       ? ({ by: "pixel", x: pixel.x, y: pixel.y, index } as const)
-      : ({ by: "index", index } as const);
-    // Forced signal source applies ONLY to Spectra-view selections (Prev/Next/Go/dropdown)
-    // — pixel-picks and other views stay on the auto path (warm caches, honest defaults).
-    const sigPref = get().signalSource;
-    const src = !pixel && get().view === "spectra" && sigPref !== "auto" ? sigPref : undefined;
+      : ({ by: "index", index, ...(src ? { source: src } : {}) } as const);
     const selSeq = ++currentSelectSeq;
     // Route only if the user hasn't navigated elsewhere while the read was in flight
     // (a late completion yanking the user back to Spectra was an adversarial-review find).
@@ -1094,36 +1097,6 @@ engine.on("ionIndexReady", () => {
 });
 
 // Re-export helpers so views can use them without importing contracts directly
-/** Re-select `index` applying `src` explicitly (setSignalSource path — the view-based
- *  rule in selectSpectrum doesn't cover a pixel-provenance re-read). */
-async function reselectWithSource(
-  index: number,
-  _pixel: { x: number; y: number } | undefined, // provenance kept by NOT touching `selector`
-  src: "auto" | "profile" | "centroid",
-  set: (partial: Record<string, unknown>) => void,
-): Promise<void> {
-  const seq = currentOpenSeq;
-  const selSeq = ++currentSelectSeq; // same latest-select-owns-the-flag rule as selectSpectrum
-  set({ spectrumLoading: true });
-  try {
-    const spectrum = await engine.selectSpectrum(index, src === "auto" ? undefined : src);
-    if (seq !== currentOpenSeq) {
-      if (selSeq === currentSelectSeq) set({ spectrumLoading: false });
-      return;
-    }
-    set({ spectrum, ...(selSeq === currentSelectSeq ? { spectrumLoading: false } : {}) });
-  } catch (err) {
-    // A superseded reselect must not clear the newer select's loading flag; a real
-    // failure surfaces as a notice rather than dying silently (the silent catch made
-    // the toggle appear to work while showing the old facet — review finding).
-    const name = err instanceof Error ? err.name : "";
-    if (selSeq === currentSelectSeq) set({ spectrumLoading: false });
-    if (name !== "SupersededError" && name !== "CancelledError") {
-      set({ error: `Signal-source read failed: ${err instanceof Error ? err.message : String(err)}` });
-    }
-  }
-}
-
 export { showChromatograms, showWavelength, showMobility };
 
 /** Read-only open-generation token: capture before an async producer, compare before

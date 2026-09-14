@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import type { ImagingGridWire } from "@mzpeak/contracts";
 import { useStore } from "../store";
+import { spectrumCounts } from "../recordIndex";
 import { StudyDesignCta } from "./StudyDesign";
 import { classifyOpticalBand } from "../opticalBand";
 import { StatRow, Badge, Panel } from "@mzpeak/ui-kit";
@@ -50,6 +51,7 @@ export function Summary() {
   if (!stats || !caps) return null;
 
   const imaging = caps.imaging;
+  const counts = spectrumCounts(stats);
   const chrom = caps.chromatograms;
   const optical = caps.optical;
 
@@ -61,7 +63,7 @@ export function Summary() {
       {/* Metric tiles + TIC thumbnail (imaging) */}
       <div data-testid="summary-tiles" style={{ display: "flex", gap: "0.75rem", alignItems: "stretch", flexWrap: "wrap" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "0.6rem", flex: 1, minWidth: 240 }}>
-          <MetricTile label="Spectra" value={stats.numSpectra.toLocaleString()} />
+          <MetricTile label="Spectra" value={counts.records.toLocaleString()} />
           <MetricTile label="m/z range" value={stats.mzRange ? `${fmtRange(stats.mzRange, 0)}` : "—"} unit={stats.mzRange ? "Th" : undefined} />
           <MetricTile label="Layout" value={caps.layout} />
           <MetricTile label="Imaging" value={imaging.isImaging ? "yes" : "no"} accent={imaging.isImaging} />
@@ -83,8 +85,28 @@ export function Summary() {
         <StatRow label="Size" value={formatBytes(fileSize)} />
         <StatRow
           label="Spectra"
-          value={stats.numSpectra.toLocaleString()}
+          value={counts.records.toLocaleString()}
+          testid="summary-spectra"
         />
+        {counts.hasBoth && (
+          <StatRow
+            label="Representations"
+            testid="summary-representations"
+            value={
+              <span style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <Badge tone="success">{counts.profile!.toLocaleString()} profile</Badge>
+                <Badge tone="info">{counts.centroid!.toLocaleString()} centroid</Badge>
+                {counts.both > 0 && (
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
+                    {counts.both === counts.scans
+                      ? `each of ${counts.scans.toLocaleString()} scans stored as both`
+                      : `${counts.both.toLocaleString()} of ${counts.scans.toLocaleString()} scans stored as both`}
+                  </span>
+                )}
+              </span>
+            }
+          />
+        )}
         <StatRow label="Entities" value={stats.numEntities.toLocaleString()} />
         <StatRow
           label="m/z range"
@@ -107,8 +129,11 @@ export function Summary() {
         <Panel title="MS levels" defaultOpen testid="summary-ms-levels-panel">
           <div data-testid="summary-ms-levels" style={{ display: "flex", flexDirection: "column", gap: "0.1rem" }}>
             {stats.msLevels.map((level) => {
-              const count = stats.spectraPerLevel?.[level] ?? 0;
+              const stored = stats.storedPerLevel?.[level];
+              // Records at this level: every scan once, plus its second representation.
+              const count = (stats.spectraPerLevel?.[level] ?? 0) + (stored?.both ?? 0);
               const mode = levelRepresentationMode(stats.representationPerLevel?.[level]);
+              const showStored = !!stored && counts.hasBoth;
               return (
                 <StatRow
                   key={level}
@@ -119,12 +144,19 @@ export function Summary() {
                       <span style={{ fontFamily: "var(--font-mono, monospace)" }}>
                         {count.toLocaleString()} spectra
                       </span>
-                      {mode && (
-                        <Badge
-                          tone={mode === "mixed" ? "neutral" : mode === "centroid" ? "info" : "success"}
-                        >
-                          {mode}
-                        </Badge>
+                      {showStored ? (
+                        <>
+                          {stored!.profile > 0 && <Badge tone="success">{stored!.profile.toLocaleString()} profile</Badge>}
+                          {stored!.centroid > 0 && <Badge tone="info">{stored!.centroid.toLocaleString()} centroid</Badge>}
+                        </>
+                      ) : (
+                        mode && (
+                          <Badge
+                            tone={mode === "mixed" ? "neutral" : mode === "centroid" ? "info" : "success"}
+                          >
+                            {mode}
+                          </Badge>
+                        )
                       )}
                     </span>
                   }

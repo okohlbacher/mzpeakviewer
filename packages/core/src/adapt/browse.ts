@@ -21,6 +21,8 @@ export type BrowseRow = {
   time: number | null;
   /** Total ion current; null when absent → 0 in the columnar output. */
   tic: number | null;
+  /** Stored-representation bitmask (see BrowseIndex.facets); 0/absent = unknown. */
+  stored?: number;
 };
 
 /**
@@ -40,6 +42,7 @@ export function buildBrowseIndex(rows: BrowseRow[]): BrowseIndex {
   const msLevel = new Int16Array(n);
   const rt = new Float32Array(n);
   const tic = new Float32Array(n);
+  const facets = new Uint8Array(n);
 
   let i = 0;
   for (const r of rows) {
@@ -47,8 +50,9 @@ export function buildBrowseIndex(rows: BrowseRow[]): BrowseIndex {
     msLevel[i] = r.msLevel ?? MSLEVEL_ABSENT;
     rt[i] = r.time == null ? NaN : r.time;
     tic[i] = r.tic == null ? NaN : r.tic;
+    facets[i] = r.stored ?? 0;
     i++;
   }
 
-  return { id, msLevel, rt, tic };
+  return { id, msLevel, rt, tic, facets };
 }

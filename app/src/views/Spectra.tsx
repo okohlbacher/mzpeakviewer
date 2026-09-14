@@ -4,7 +4,11 @@ import { useStore } from "../store";
 import { parseRtRange } from "../rtRange";
 import { buildDta, precursorFromMeta, dtaFilename } from "../dta";
 import { saveTextFile } from "../localFile";
-import { buildLevelIndex, activeSet, rankOf, absoluteOf } from "../levelIndex";
+import { rankOf, absoluteOf } from "../levelIndex";
+import {
+  buildRecordIndex, activeRecords, currentRecordKey, isDualRecord,
+  recordKey, recordRep, recordSpectrum, type RepFilter,
+} from "../recordIndex";
 import { SpectrumPlot, MobilityFrameHeatmap, Select, Button, TreeView, spectrumReporters, type SelectOption, type ReporterMarker, type ReporterPeak } from "@mzpeak/ui-kit";
 
 // Categorical palette for isobaric channels — shared by the pills + the peak dots
@@ -16,10 +20,11 @@ const CHANNEL_PALETTE = [
 ];
 const channelColor = (i: number) => CHANNEL_PALETTE[i % CHANNEL_PALETTE.length]!;
 
-// The picker numbers spectra by their 1-based position within the selected MS level
-// (so a level with 1000 spectra runs 1..1000, never the native scan number); "All"
-// numbers 1..numSpectra by absolute index + 1. The relative↔absolute mapping is the
-// per-level array set built by buildLevelIndex (../levelIndex), memoized on `browse`.
+// The picker numbers spectrum RECORDS by their 1-based position within the active filter
+// (MS level × representation), never the native scan number. A record is one stored
+// representation of a spectrum, so a dual-stored file of N spectra pages through 2N
+// (profile then centroid per scan). The position↔record mapping is built once per file by
+// buildRecordIndex (../recordIndex), memoized on `browse`.
 // (Native scan numbers still drive the ?scan= deep link via ../scan + urlSync — that
 // resolves to an absolute index and is independent of how the picker numbers things.)
 
@@ -78,7 +83,9 @@ export function Spectra() {
 
   // Per-MS-level relative↔absolute mapping, built once per file (rebuilds only when
   // `browse` changes — switching MS levels just selects a different prebuilt array).
-  const levelIndex = useMemo(() => buildLevelIndex(browse), [browse]);
+  // Navigation runs over spectrum RECORDS — one per stored representation, so a
+  // dual-stored file pages through 2×N (see ../recordIndex). Built once per file.
+  const recordIdx = useMemo(() => buildRecordIndex(browse), [browse]);
 
   if (phase !== "ready" || !stats) {
     return (
@@ -118,22 +125,36 @@ export function Spectra() {
   // array, or every index in order for "All". Before `browse` arrives (the brief
   // window after open, or if scanBreakdown failed) fall back to a plain 0..n-1 range
   // and ignore any level filter — without msLevel data we can't honour it.
+  const repFilter: RepFilter = signalSource === "auto" ? "all" : signalSource;
   const active = browse
-    ? activeSet(levelIndex, msLevelFilter)
-    : Array.from({ length: numSpectra }, (_, i) => i);
+    ? activeRecords(recordIdx, browse, msLevelFilter, repFilter)
+    : Array.from({ length: numSpectra }, (_, i) => i * 2); // record keys, one per spectrum
   const filtered = msLevelFilter != null && !!browse;
+  const repFiltered = !!browse && recordIdx.hasBoth && repFilter !== "all";
+  // The record the current selection is: the representation the selection asked for, else
+  // what the displayed spectrum truthfully came from, else its only stored one.
+  const currentKey = currentRecordKey(
+    browse,
+    currentIndex,
+    selector?.by === "index" ? selector.source : undefined,
+    spectrum ? { index: spectrum.index, sourceUsed: spectrum.sourceUsed } : null,
+  );
+  // Read a record: a dual-stored spectrum's representation is requested EXPLICITLY (it
+  // is a distinct record); single-representation spectra keep the auto path (warm caches).
+  const selectRecord = (key: number) =>
+    void selectSpectrum(recordSpectrum(key), true, undefined, isDualRecord(browse, key) ? recordRep(key) : undefined);
   // 1-based position of the current spectrum in the active set (what the picker shows
   // and what users type). Null only if the current spectrum isn't in the active set
   // (e.g. mid-filter-switch before applyFilter jumps to the first match).
-  const currentRank = rankOf(active, currentIndex);
+  const currentRank = rankOf(active, currentKey);
 
   // Current spectrum's own MS level + its rank/total WITHIN that level — shown in the
   // meta readout regardless of the active filter, straight off the mapping arrays.
   // `?? null` guards an out-of-range currentIndex (TypedArray → undefined); an
   // in-bounds spectrum with no MS level is -1 (MSLEVEL_ABSENT), not null.
   const curLevel = browse ? (browse.msLevel[currentIndex] ?? null) : null;
-  const levelSet = curLevel != null ? activeSet(levelIndex, curLevel) : null;
-  const withinLevelRank = levelSet ? rankOf(levelSet, currentIndex) : null;
+  const levelSet = browse && curLevel != null ? activeRecords(recordIdx, browse, curLevel, repFilter) : null;
+  const withinLevelRank = levelSet ? rankOf(levelSet, currentKey) : null;
 
   // Peak→chrom snapshot reads the DISPLAYED spectrum (spectrumIndex), not the requested
   // selector — during a load the selector leads, so its RT/MS level wouldn't match the m/z
@@ -186,29 +207,44 @@ export function Spectra() {
   // When the active filter excludes the current spectrum, jump to the first match.
   function applyFilter(level: number | null) {
     setMsLevelFilter(level);
-    if (level != null && browse && browse.msLevel[currentIndex] !== level) {
-      const first = levelIndex.byLevel.get(level)?.[0];
-      if (first != null) void selectSpectrum(first);
-    }
+    if (!browse) return;
+    const next = activeRecords(recordIdx, browse, level, repFilter);
+    if (next.length > 0 && rankOf(next, currentKey) == null) selectRecord(next[0]!);
+  }
+
+  // Representation filter — same contract as the MS-level filter. Switching keeps the
+  // SAME spectrum when it stores the chosen representation (profile ↔ centroid of one
+  // scan), else jumps to the first record of the filtered set.
+  function applyRep(rep: RepFilter) {
+    setSignalSource(rep === "all" ? "auto" : rep);
+    if (!browse) return;
+    const next = activeRecords(recordIdx, browse, msLevelFilter, rep);
+    if (next.length === 0 || rankOf(next, currentKey) != null) return;
+    const same = rep === "all" ? null : recordKey(currentIndex, rep);
+    selectRecord(same != null && rankOf(next, same) != null ? same : next[0]!);
   }
 
   // Build select options from the active set. Cap at 1000 options. The displayed
   // number is always the 1-based position within the active set: within a level it is
   // the within-level index (1..count); in "All" it is absolute index + 1.
   const MAX_OPTS = 1000;
-  const optIndices = active.slice(0, MAX_OPTS);
-  const selectOptions: SelectOption[] = optIndices.map((i, pos) => ({
-    value: String(i),
-    label: !browse
-      ? `Spectrum ${pos + 1}`
-      : filtered
-        ? `MS${msLevelFilter} #${pos + 1} · ${browse.id[i]}`
-        : `#${pos + 1} · ${browse.id[i]}`,
-  }));
+  const optKeys = active.slice(0, MAX_OPTS);
+  const selectOptions: SelectOption[] = optKeys.map((k, pos) => {
+    const i = recordSpectrum(k);
+    const repTag = recordIdx.hasBoth ? ` · ${recordRep(k)}` : "";
+    return {
+      value: String(k),
+      label: !browse
+        ? `Spectrum ${pos + 1}`
+        : filtered
+          ? `MS${msLevelFilter} #${pos + 1} · ${browse.id[i]}${repTag}`
+          : `#${pos + 1} · ${browse.id[i]}${repTag}`,
+    };
+  });
 
   // Prev/Next step WITHIN the active set, using the current 1-based rank.
-  const prevIdx = currentRank != null && currentRank > 1 ? active[currentRank - 2]! : null;
-  const nextIdx =
+  const prevKey = currentRank != null && currentRank > 1 ? active[currentRank - 2]! : null;
+  const nextKey =
     currentRank != null && currentRank < active.length ? active[currentRank]! : null;
 
   // Large-file index input: the typed number is the 1-based position within the active
@@ -217,8 +253,8 @@ export function Spectra() {
   function commitInput() {
     const v = Number(inputVal.trim());
     if (Number.isFinite(v)) {
-      const abs = absoluteOf(active, Math.floor(v));
-      if (abs != null) void selectSpectrum(abs);
+      const key = absoluteOf(active, Math.floor(v));
+      if (key != null) selectRecord(key);
     }
     setInputVal("");
   }
@@ -257,28 +293,34 @@ export function Spectra() {
           </label>
         )}
 
-        {/* Signal source (dual-stored spectra): shown when the current spectrum has both
-            facets, or whenever a non-auto preference is active (escape hatch back to Auto). */}
-        {(spectrum?.altAvailable === true || signalSource !== "auto") && (
-          <label
-            title="Preferred signal for dual-stored spectra — falls back (and says so) when the chosen facet is unavailable"
-            style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}
-          >
-            Signal
-            <Select
-              data-testid="signal-source-select"
-              value={signalSource}
-              onChange={(val) => !spectrumLoading && setSignalSource(val as "auto" | "profile" | "centroid")}
-              options={[
-                { value: "auto", label: "Auto" },
-                { value: "profile", label: "Profile" },
-                { value: "centroid", label: "Centroid" },
-              ]}
-              ariaLabel="Signal source for dual-stored spectra"
-              size="sm"
-            />
-          </label>
-        )}
+        {/* Representation filter — shown whenever the file stores BOTH profile and centroid
+            (known at open from the metadata counts, never from a spectrum read). Modeled on
+            the MS-level filter: All pages through every stored record. */}
+        {(recordIdx.hasBoth || signalSource !== "auto") && (() => {
+          const perLevel = msLevelFilter != null ? stats.storedPerLevel?.[msLevelFilter] : stats.storedRepresentation;
+          const nAll = browse ? activeRecords(recordIdx, browse, msLevelFilter, "all").length : active.length;
+          const fmt = (n: number | undefined) => (n == null ? "" : ` (${n.toLocaleString()})`);
+          return (
+            <label
+              title="Profile and centroid spectra are both stored in this file — show all records, or only one representation"
+              style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "var(--text-sm)", color: "var(--text-muted)" }}
+            >
+              Representation
+              <Select
+                data-testid="signal-source-select"
+                value={signalSource}
+                onChange={(val) => applyRep(val === "auto" ? "all" : (val as "profile" | "centroid"))}
+                options={[
+                  { value: "auto", label: `All${fmt(nAll)}` },
+                  { value: "profile", label: `Profile${fmt(perLevel?.profile)}` },
+                  { value: "centroid", label: `Centroid${fmt(perLevel?.centroid)}` },
+                ]}
+                ariaLabel="Filter spectra by stored representation"
+                size="sm"
+              />
+            </label>
+          );
+        })()}
 
         {hasLargeFile ? (
           <>
@@ -290,9 +332,7 @@ export function Spectra() {
                 whiteSpace: "nowrap",
               }}
             >
-              {filtered
-                ? `MS${msLevelFilter} index (1–${active.length}):`
-                : `Spectrum index (1–${active.length}):`}
+              {`${[filtered ? `MS${msLevelFilter}` : null, repFiltered ? repFilter[0]!.toUpperCase() + repFilter.slice(1) : null].filter(Boolean).join(" ") || "Spectrum"} index (1–${active.length}):`}
             </label>
             <input
               id="spectrum-index-input"
@@ -329,8 +369,8 @@ export function Spectra() {
         ) : (
           <Select
             data-testid="spectrum-select"
-            value={String(currentIndex)}
-            onChange={(val) => void selectSpectrum(Number(val))}
+            value={String(currentKey)}
+            onChange={(val) => selectRecord(Number(val))}
             options={selectOptions}
             ariaLabel="Select spectrum"
             size="sm"
@@ -340,8 +380,8 @@ export function Spectra() {
         <Button
           variant="ghost"
           size="sm"
-          disabled={prevIdx == null || spectrumLoading}
-          onClick={() => prevIdx != null && void selectSpectrum(prevIdx)}
+          disabled={prevKey == null || spectrumLoading}
+          onClick={() => prevKey != null && selectRecord(prevKey)}
           aria-label="Previous spectrum"
           data-testid="spectrum-prev"
         >
@@ -350,8 +390,8 @@ export function Spectra() {
         <Button
           variant="ghost"
           size="sm"
-          disabled={nextIdx == null || spectrumLoading}
-          onClick={() => nextIdx != null && void selectSpectrum(nextIdx)}
+          disabled={nextKey == null || spectrumLoading}
+          onClick={() => nextKey != null && selectRecord(nextKey)}
           aria-label="Next spectrum"
           data-testid="spectrum-next"
         >
@@ -362,7 +402,9 @@ export function Spectra() {
           <span
             data-testid="spectrum-representation"
             title={
-              spectrum.sourceUsed && spectrum.sourceUsed !== spectrum.representation
+              isDualRecord(browse, spectrum.index * 2)
+                ? `Stored as both profile and centroid — showing ${effectiveRepr}`
+                : spectrum.sourceUsed && spectrum.sourceUsed !== spectrum.representation
                 ? `Showing the ${spectrum.sourceUsed} facet — the file declares ${spectrum.representation}`
                 : effectiveRepr === "centroid"
                   ? "Centroid (stick) spectrum"
@@ -392,7 +434,7 @@ export function Spectra() {
             }}
           >
             {effectiveRepr}
-            {spectrum.sourceUsed && spectrum.sourceUsed !== spectrum.representation ? " *" : ""}
+            {spectrum.sourceUsed && spectrum.sourceUsed !== spectrum.representation && !isDualRecord(browse, spectrum.index * 2) ? " *" : ""}
           </span>
         )}
         {spectrum && (
@@ -407,6 +449,7 @@ export function Spectra() {
             {[
               `abs #${spectrum.index}`,
               curLevel != null ? `MS${curLevel}` : null,
+              recordIdx.hasBoth ? recordRep(currentKey) : null,
               curLevel != null && withinLevelRank != null
                 ? `#${withinLevelRank}${levelTotal != null ? `/${levelTotal}` : ""} in level`
                 : null,

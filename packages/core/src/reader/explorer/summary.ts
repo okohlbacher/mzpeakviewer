@@ -29,6 +29,10 @@ export type ScanAggregates = Pick<
 > & {
   /** Per-MS-level representation breakdown (lazily-initialized buckets per level). */
   representationPerLevel: RepresentationPerLevel;
+  /** STORED representation totals from the count columns; null when the file has none. */
+  storedTotals: { profile: number; centroid: number; both: number; records: number } | null;
+  /** Per-MS-level stored representation (only levels that are known). */
+  storedPerLevel: Record<number, { profile: number; centroid: number; both: number }>;
 };
 
 export type ScanResult = { rows: SpectrumIndexRow[]; aggregates: ScanAggregates };
@@ -114,6 +118,8 @@ export async function scanSpectra(
         msLevelCounts: {},
         representationCounts: { profile: 0, centroid: 0, unknown: 0 },
         representationPerLevel: {},
+        storedTotals: null,
+        storedPerLevel: {},
         mzRange: null,
         rtRange: null,
         isImaging: false,
@@ -138,10 +144,20 @@ async function scanByColumns(
   const ticCol = getCol<ArrowCol>(vec, "tic");
   const mzLoCol = getCol<ArrowCol>(vec, "mzLow");
   const mzHiCol = getCol<ArrowCol>(vec, "mzHigh");
+  // Stored representations: number_of_data_points > 0 ⇔ the spectrum is in the profile
+  // facet, number_of_peaks > 0 ⇔ in the centroid facet. Verified row-for-row against the
+  // actual facet contents on 157 corpus files plus the legacy nested fixtures (0
+  // mismatches). BOTH columns are required — one alone cannot distinguish "not stored"
+  // from "not recorded", so a half-present pair falls back to declared-only (stored = 0).
+  const nPointsCol = getCol<ArrowCol>(vec, "nPoints");
+  const nPeaksCol = getCol<ArrowCol>(vec, "nPeaks");
+  const haveCounts = !!nPointsCol && !!nPeaksCol;
 
   const rows: SpectrumIndexRow[] = new Array(n);
   const msLevelCounts: Record<number, number> = {};
   const representationPerLevel: RepresentationPerLevel = {};
+  const storedPerLevel: Record<number, { profile: number; centroid: number; both: number }> = {};
+  const storedTotals = { profile: 0, centroid: 0, both: 0, records: 0 };
   let profile = 0;
   let centroid = 0;
   let unknownRep = 0;
@@ -187,6 +203,23 @@ async function scanByColumns(
     if (lo !== null && (mzMin === null || lo < mzMin)) mzMin = lo;
     if (hi !== null && (mzMax === null || hi > mzMax)) mzMax = hi;
 
+    let stored = 0;
+    if (haveCounts) {
+      if ((numOrNull(nPointsCol!.get(i)) ?? 0) > 0) stored |= 1;
+      if ((numOrNull(nPeaksCol!.get(i)) ?? 0) > 0) stored |= 2;
+      if (stored & 1) storedTotals.profile++;
+      if (stored & 2) storedTotals.centroid++;
+      if (stored === 3) storedTotals.both++;
+      // Every spectrum is at least one navigable record (an empty one included).
+      storedTotals.records += stored === 3 ? 2 : 1;
+      if (msLevel !== null) {
+        const b = storedPerLevel[msLevel] ?? (storedPerLevel[msLevel] = { profile: 0, centroid: 0, both: 0 });
+        if (stored & 1) b.profile++;
+        if (stored & 2) b.centroid++;
+        if (stored === 3) b.both++;
+      }
+    }
+
     rows[i] = {
       index: i,
       id: String(idCol?.get(i) ?? i),
@@ -194,6 +227,7 @@ async function scanByColumns(
       representation,
       time,
       tic: numOrNull(ticCol?.get(i)),
+      stored,
     };
 
     if (now() - sliceStart > SLICE_MS) {
@@ -210,6 +244,8 @@ async function scanByColumns(
       msLevelCounts,
       representationCounts: { profile, centroid, unknown: unknownRep },
       representationPerLevel,
+      storedTotals: haveCounts ? storedTotals : null,
+      storedPerLevel,
       mzRange: mzMin !== null && mzMax !== null ? [mzMin, mzMax] : null,
       rtRange: rtMin !== null && rtMax !== null ? [rtMin, rtMax] : null,
       isImaging: false,

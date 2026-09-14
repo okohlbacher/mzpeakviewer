@@ -40,6 +40,15 @@ export type FileStats = {
    *  Summary view falls back to count-only rows. Keys are MS levels (numbers), aligned
    *  with `spectraPerLevel`/`msLevels`. */
   representationPerLevel?: Record<number, { profile: number; centroid: number; unknown: number }>;
+  /** STORED representations — which signal facets actually hold each spectrum, from the
+   *  metadata counts (number_of_data_points > 0 ⇒ profile facet, number_of_peaks > 0 ⇒
+   *  centroid facet). Distinct from the DECLARED representation above: a dual-stored file
+   *  declares one representation per spectrum yet stores both. `records` counts every
+   *  stored (spectrum, representation) pair — 2 per dual-stored spectrum. Absent when the
+   *  file carries no count columns (then only the declared representation is known). */
+  storedRepresentation?: { profile: number; centroid: number; both: number; records: number };
+  /** Per-MS-level `storedRepresentation` (same keys as `spectraPerLevel`). */
+  storedPerLevel?: Record<number, { profile: number; centroid: number; both: number }>;
   instrument?: string | null;
 };
 
@@ -59,7 +68,17 @@ export type BrowseIndex = {
   rt: Float32Array;
   /** Per-spectrum total ion current. */
   tic: Float32Array;
+  /** Stored representations per spectrum, a bitmask: {@link STORED_PROFILE} set when the
+   *  profile facet (spectra_data) holds it, {@link STORED_CENTROID} when the centroid facet
+   *  (spectra_peaks) does — 3 = dual-stored. 0 = unknown (no count columns) or empty.
+   *  Optional → older engine output omits it and navigation stays one-per-spectrum. */
+  facets?: Uint8Array;
 };
+
+/** {@link BrowseIndex.facets} bit: the spectrum is stored in the profile facet. */
+export const STORED_PROFILE = 1;
+/** {@link BrowseIndex.facets} bit: the spectrum is stored in the centroid facet. */
+export const STORED_CENTROID = 2;
 
 /** Profile vs centroid — the plot branches on this (peak labels, fill vs needles). */
 export type SpectrumRepresentation = "profile" | "centroid" | null;

@@ -21,6 +21,7 @@ import "@fontsource/ibm-plex-sans/600.css";
 import "@fontsource/ibm-plex-mono/400.css";
 
 import { useStore, showChromatograms, showWavelength, showMobility, showStudy } from "./store";
+import { spectrumCounts } from "./recordIndex";
 import type { View } from "@mzpeak/contracts";
 import { Summary } from "./views/Summary";
 import { StudyDesign } from "./views/StudyDesign";
@@ -431,8 +432,11 @@ function MiniStats() {
           contracts — always present when a file is open. */}
       <MiniRow
         k="Spectra"
-        v={<span data-testid="num-spectra">{stats.numSpectra.toLocaleString()}</span>}
+        v={<span data-testid="num-spectra">{spectrumCounts(stats).records.toLocaleString()}</span>}
       />
+      {spectrumCounts(stats).hasBoth && (
+        <MiniRow k="Stored" v={<span data-testid="stored-representations">profile + centroid</span>} />
+      )}
       {stats.mzRange && (
         <MiniRow
           k="m/z"

@@ -44,6 +44,9 @@ export type SpectrumIndexRow = {
   time: number | null;
   /** total ion current from MS:1000285 if promoted, else null. */
   tic: number | null;
+  /** Stored-representation bitmask (1 = profile facet, 2 = centroid facet, 3 = both);
+   *  0 when the file has no count columns, or the spectrum is empty. */
+  stored: number;
 };
 
 /** A fully reconstructed single spectrum's signal arrays + identity. */

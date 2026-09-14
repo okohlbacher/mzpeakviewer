@@ -25,7 +25,7 @@ function countEntities(reader: Reader): number {
 
 /** Map a SpectrumIndexRow to the adapter's BrowseRow (drops index/representation). */
 function toBrowseRow(r: SpectrumIndexRow): BrowseRow {
-  return { id: r.id, msLevel: r.msLevel, time: r.time, tic: r.tic };
+  return { id: r.id, msLevel: r.msLevel, time: r.time, tic: r.tic, stored: r.stored };
 }
 
 /**
@@ -88,6 +88,9 @@ export async function engineScanBreakdown(
       unknown: aggregates.representationCounts.unknown,
     },
     representationPerLevel: aggregates.representationPerLevel,
+    ...(aggregates.storedTotals
+      ? { storedRepresentation: aggregates.storedTotals, storedPerLevel: aggregates.storedPerLevel }
+      : {}),
     instrument: fast.instrument,
   };
 

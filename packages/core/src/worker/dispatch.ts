@@ -425,7 +425,7 @@ export async function dispatch(req: WorkerRequest, ctx: EngineContext, respond: 
         ctx.scan = { rows, representationCounts: stats.representationCounts };
         respond(
           { type: "scanBreakdownResult", requestId: req.requestId, stats, browse, ticColumn },
-          buffersOf(browse.msLevel, browse.rt, browse.tic),
+          buffersOf(browse.msLevel, browse.rt, browse.tic, browse.facets),
         );
         return;
       }
