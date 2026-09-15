@@ -3,6 +3,19 @@
 All notable changes to mzPeakViewer are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.6] — 2026-09-15
+
+### Fixed
+
+- **macOS builds are now Developer ID signed and notarized.** No earlier release was:
+  the desktop workflow signs only when `APPLE_CERTIFICATE` is set, and that secret (plus
+  its password, the keychain password and the notarization password) had never been
+  added, so every build since v0.6.0 logged "macOS signing DISABLED" and shipped an
+  ad-hoc-signed app that Gatekeeper rejects. The secrets are now set from the signing
+  vault by `tools/set-apple-secrets.sh` (values via STDIN, never printed; refuses a
+  malformed notary password, an identity/team mismatch or a `.p12` that does not open).
+  No application code changes.
+
 ## [0.9.5] — 2026-09-14
 
 ### Fixed
