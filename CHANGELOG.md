@@ -3,6 +3,35 @@
 All notable changes to mzPeakViewer are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.7] — 2026-09-26
+
+### Added
+
+- **timsTOF files in the grid layout open.** The reference writer (HUPO-PSI/mzPeak `e62e18c`)
+  and mzpeak-convert ≥0.13.0 store timsTOF peaks with the coordinate grid chunk encoding
+  (`MS:1003826`): integer indices in a per-row `{grid_type, parameters, indices}` column that
+  carries its own m/z and ion-mobility model, with real m/z in the chunk bounds. Every spectrum
+  read of such a file failed with `Unknown chunk encoding: MS:1003826` — which, since the corpus
+  was reconverted with 0.13.0, was every timsTOF file in it. The vendored mzpeakts now decodes
+  the grid (timsTOF m/z incl. the `C2`/`C3`/`C4` terms, TIMS 1/K0, and the generic linear and
+  square-root grids; an unknown model fails loud). Checked against non-grid twins of the same
+  runs (PXD059079 2485 and the spec's diaPASEF pair): identical point counts, intensities and
+  XICs, m/z within 1.1e-9 ppm, 1/K0 within 5e-16.
+
+### Fixed
+
+- **Ion mobility on grid files.** Struct columns have no leaf schema index, and the reader's
+  visited-column check keyed them all as `null`, so the 1/K0 grid column was skipped.
+
+### Tests
+
+- `grid.golden.test.ts` (in `npm test`): the spec's `diaPASEF.grid.mzpeak` as fixture, every
+  spectrum checked against values from its point-layout twin, plus the grid-model contracts.
+- `corpus/grid-ab.test.ts` (opt-in): any grid archive against its non-grid twin, every spectrum
+  plus XICs.
+- Whole example corpus, old reader vs new: 193 → 200 of 200 files open; all 193 previously
+  readable files give identical results.
+
 ## [0.9.6] — 2026-09-15
 
 ### Fixed
