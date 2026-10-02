@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Redirecting…</title>
+    <meta name="robots" content="noindex" />
+    <!--
+      Legacy /IV/ client redirect shim (MERGE-ROADMAP §3.4, Phase 5).
+
+      Old mzPeakIV deep links (GitHub Pages / mzpeak.org) land here. This static,
+      dependency-free page mirrors translateLegacyIvSearch() from
+      @mzpeak/contracts (packages/contracts/src/url/legacy.ts) INLINE — it must be
+      self-contained because it's served as plain HTML before any bundle loads.
+
+      The two REAL value rewrites (everything else passes through verbatim):
+        1. IV `scan=N` was a 1-BASED DISPLAYED INDEX, not a native scan number →
+           becomes `spectrum=N-1` (unified `scan` keeps native-number meaning).
+        2. IV `ion=mz` + separate `&tol=Da` folds into `ion=mz,Da`.
+
+      Then location.replace()s to the unified app at the parent path ("../") so it
+      works under any deploy base (mzpeak.org `/view/`, GH Pages project root).
+    -->
+    <script>
+      (function () {
+        var inP = new URLSearchParams(window.location.search);
+        var out = new URLSearchParams();
+
+        // 1. scan=N (1-based index) → spectrum=N-1
+        var scan = inP.get("scan");
+        if (scan != null) {
+          var n = Number(scan);
+          if (Number.isInteger(n)) {
+            out.set("spectrum", String(Math.max(0, n - 1)));
+          } else {
+            // Non-integer: carry verbatim rather than corrupt it.
+            out.set("scan", scan);
+          }
+        }
+
+        // 2. ion=mz (+ &tol=Da) → ion=mz,Da
+        var ion = inP.get("ion");
+        var tol = inP.get("tol");
+        if (ion != null) {
+          if (tol != null && ion.indexOf(",") === -1) {
+            out.set("ion", ion + "," + tol);
+          } else {
+            out.set("ion", ion);
+          }
+        }
+
+        // Pass-through params (names preserved); scan/ion/tol handled above.
+        inP.forEach(function (val, k) {
+          if (k === "scan" || k === "ion" || k === "tol") return;
+          out.append(k, val);
+        });
+
+        var q = out.toString();
+        // Parent path = the unified app root, independent of deploy base.
+        var target = "../" + (q ? "?" + q : "");
+        window.location.replace(target);
+      })();
+    </script>
+  </head>
+  <body>
+    <noscript>
+      This page redirects to the mzPeak Viewer. Please enable JavaScript, or
+      <a href="../">open the viewer directly</a>.
+    </noscript>
+    <p>Redirecting to the mzPeak Viewer…</p>
+  </body>
+</html>
