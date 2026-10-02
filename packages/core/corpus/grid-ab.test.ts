@@ -53,8 +53,17 @@ describe.skipIf(!A || !B)("grid-ab", () => {
       return { rows, representationCounts: stats.representationCounts };
     };
     const [ca, cb] = [await ctxOf(ga.reader), await ctxOf(gb.reader)];
-    for (const mz of [445.12, 524.26, 785.84]) {
-        const req = { mode: "xic" as const, mz, tolDa: 0.02 };
+    // XIC targets from the data: the base peak of three spectra spread across the run.
+    const targets: number[] = [];
+    for (const i of [Math.floor(n / 4), Math.floor(n / 2), Math.floor((3 * n) / 4)]) {
+      const s = await readEngineSpectrum(gb.reader, i);
+      let k = -1;
+      for (let j = 0; j < s.intensity.length; j++) if (k < 0 || s.intensity[j]! > s.intensity[k]!) k = j;
+      if (k >= 0 && s.intensity[k]! > 0) targets.push(Math.round(s.mz[k]! * 100) / 100);
+    }
+    expect(targets.length, "no non-empty spectrum to take an XIC target from").toBeGreaterThan(0);
+    for (const mz of targets) {
+      const req = { mode: "xic" as const, mz, tolDa: 0.02 };
       const [xa, xb] = [await engineExtractChrom(ga.reader, req, ca), await engineExtractChrom(gb.reader, req, cb)];
       expect(xa.time.length, `XIC ${mz} length`).toBe(xb.time.length);
       let sa = 0, sb = 0;
