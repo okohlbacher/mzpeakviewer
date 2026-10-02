@@ -3,6 +3,23 @@
 All notable changes to mzPeakViewer are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.8] — 2026-10-03
+
+### Changed
+
+- **Vendored mzpeakts merged with upstream `feature/metadata_refactor` (`91e3ce5`).** Three
+  commits by Joshua Klein: more activation visitors (`dissociation_method` and
+  `collision_energy` as columns of the activation struct, which mzpeak-convert ≥0.14.0
+  writes), opt-in SHA-512 archive checksum verification (`checkArchiveIntegrity`; adds the
+  `js-sha512` dependency; the viewer does not call it yet), and refreshed test data. No change
+  to what the viewer shows: the whole example corpus opened with identical results before and
+  after the merge.
+
+### Tests
+
+- `corpus/grid-ab.test.ts` takes its XIC targets from the data (the base peak of three
+  spectra across the run) instead of fixed m/z values that missed most files.
+
 ## [0.9.7] — 2026-09-26
 
 ### Added
