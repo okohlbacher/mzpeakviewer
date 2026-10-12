@@ -3,6 +3,42 @@
 All notable changes to mzPeakViewer are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.9] — 2026-10-12
+
+### Fixed
+
+- **Runs without retention times (imaging, e.g. imzML) plot against the spectrum index.**
+  Every spectrum's time is 0 in such archives, so TIC/XIC points all stacked at x = 0 and a
+  chromatogram click could not pick a spectrum. Without a time axis the spectrum index
+  (acquisition order) is the chromatogram x everywhere, labelled as such; the RT range shows "—".
+- **Structure stayed empty after viewing an optical image.** The member list waited behind the
+  full download of a 172 MB whole-slide image; it no longer queues behind reader work.
+- **Optical images.** TIFF is read with geotiff.js through range reads of the archive member
+  and the largest pyramid level that fits the display limit is shown — an Aperio `.svs`
+  (34,199 × 22,614 px, JPEG 2000) now shows its 1,024 × 677 level after reading 1.6 of
+  172 MB, and the `.tif` beside it renders. Embedded PNG/JPEG images decode (natively); their
+  pixel size is checked from the header before decoding.
+- **Imaging views show the true extent of the MS data**, cropped to the occupied pixels, rather
+  than the declared canvas with the tissue in a corner. The overlay places optical images with
+  their registration affine (or, unregistered, over the declared extent).
+- **The converter's placeholder chromatogram row** (a run without chromatograms) is no longer
+  listed or counted as a chromatogram.
+
+### Changed
+
+- **Summary: image registration instead of "Detection confidence".** MS pixel size and its
+  source, each image's registration to the MS grid (registered or only laid over it, scale,
+  uneven stretch), and how images relate to one another.
+- **Vendored mzpeakts merged with upstream main (`db47999`):** Joshua Klein's grid support
+  replaces our own grid decoder, and his Numpress fix (the same 64-bit Linear fix as our PR #1);
+  our SLOF/PIC decoding stays on top. Its declaration build is pinned to its own TypeScript.
+- **Dependencies:** TypeScript 7.0, Vitest 5, Vite 8.3, React 19.3, zip.js 2.23, apache-arrow
+  21.2, hyparquet 1.31, Playwright 1.64, Tauri 2.12 (JS packages and Rust crates); geotiff 3.0.5
+  added. parquet-wasm stays on mzpeakts' custom 0.7.1 build (page index).
+- The app and test builds resolve zip.js, apache-arrow, parquet-wasm and arrow-js-ffi to ONE
+  copy: mzpeakts is compiled from source and its own install carries separate copies, and a
+  zip.js 2.23 reader handed to zip.js 2.8 failed every HTTP read.
+
 ## [0.9.8] — 2026-10-03
 
 ### Changed
