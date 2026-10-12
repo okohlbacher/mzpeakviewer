@@ -12,23 +12,6 @@
 import type { Reader } from "./openUrl";
 import type { ManifestEntry, UnsupportedFinding } from "./types";
 
-// Supported transforms (for reference / documentation):
-// "MS:1003901" = NULL_INTERPOLATE_CURIE (handled by interpolateNulls)
-// "MS:1003902" = NULL_ZERO_CURIE (handled by nullToZero)
-// "MS:1000576" = No compression (direct copy)
-// "MS:1003089" = Delta encoding (decodeDelta)
-// null         = No transform specified
-
-// ── Unsupported encoding accessions ───────────────────────────────────────────
-
-// MS-Numpress encodings the bundled mzpeakts reader CANNOT decode (rejected at open).
-// As of this change ALL THREE Numpress variants are decoded by the vendored reader —
-// Linear (MS:1002312) + SLOF (MS:1002314) + PIC (MS:1002313), via numpress.ts
-// `decodeLinear`/`decodeSlof`/`decodePic` wired into data.ts (main axis + secondary).
-// So the Numpress gate is now empty; this map remains for the auxiliary-array /
-// directory-storage findings (and any future genuinely-undecodable encoding).
-const NUMPRESS_ACCESSIONS = new Map<string, string>([]);
-
 // ── detectUnsupported ─────────────────────────────────────────────────────────
 
 /**
@@ -38,10 +21,9 @@ const NUMPRESS_ACCESSIONS = new Map<string, string>([]);
  * Returns a named `UnsupportedFinding` per problem.
  * Returns `[]` if all encodings are supported.
  *
- * Checks (in order):
- * 1. Numpress: any ArrayIndexEntry with `transform` in {MS:1002312, MS:1002313, MS:1002314}.
- * 2. Auxiliary arrays: populated `auxiliary_arrays` list in the file index metadata.
- * 3. Directory storage: `storage_type === 'directory'` in the file index metadata.
+ * Checks: a populated `auxiliary_arrays` list, and `storage_type === 'directory'`, in the file
+ * index metadata. (Every array transform in use — delta, Numpress Linear/SLOF/PIC, the coordinate
+ * grid, null-zero/interpolate — is decoded by the vendored reader, so none is gated here.)
  */
 export function detectUnsupported(
   reader: Reader,
@@ -50,31 +32,7 @@ export function detectUnsupported(
   const findings: UnsupportedFinding[] = [];
   const seenCodes = new Set<string>();
 
-  // ── 1. Numpress: check ArrayIndex transforms (static, from Parquet metadata) ──
-  function checkArrayIndex(idx: unknown) {
-    if (!idx || typeof idx !== "object") return;
-    const entries = (idx as { entries?: unknown[] }).entries;
-    if (!Array.isArray(entries)) return;
-    for (const e of entries) {
-      if (!e || typeof e !== "object") continue;
-      const entry = e as { transform?: string | null; bufferFormat?: string };
-      const transform = entry.transform ?? null;
-      if (transform && NUMPRESS_ACCESSIONS.has(transform)) {
-        if (!seenCodes.has(transform)) {
-          seenCodes.add(transform);
-          findings.push({
-            code: transform,
-            label: NUMPRESS_ACCESSIONS.get(transform)!,
-          });
-        }
-      }
-    }
-  }
-
-  checkArrayIndex(reader._spectrumDataReader?.arrayIndex ?? null);
-  checkArrayIndex(reader._spectrumPeaksReader?.arrayIndex ?? null);
-
-  // ── 2. Auxiliary arrays ──────────────────────────────────────────────────────
+  // ── Auxiliary arrays ──────────────────────────────────────────────────────
   const fileIndexMeta: Record<string, unknown> =
     (reader.store?.fileIndex?.metadata as Record<string, unknown>) ?? {};
   const auxArrays = fileIndexMeta["auxiliary_arrays"];
@@ -89,7 +47,7 @@ export function detectUnsupported(
     }
   }
 
-  // ── 3. Directory storage ─────────────────────────────────────────────────────
+  // ── Directory storage ─────────────────────────────────────────────────────
   const storageType = fileIndexMeta["storage_type"];
   if (typeof storageType === "string" && storageType.toLowerCase() === "directory") {
     const code = "directory-storage";

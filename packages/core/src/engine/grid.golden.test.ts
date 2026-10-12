@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { decodeGridCell, gridModel } from "mzpeakts";
+import { grid } from "mzpeakts";
 import { openEngineFile, type EngineFile } from "./open";
 import { readEngineSpectrum } from "./spectrum";
 
@@ -49,19 +49,12 @@ describe("GRID golden: MS:1003826 grid-encoded timsTOF peaks", () => {
   });
 });
 
-describe("grid models (mzpeakts)", () => {
-  const cell = (grid_type: string, parameters: number[], indices: number[]) => ({
-    grid_type,
-    parameters: { toArray: () => Float64Array.from(parameters) },
-    indices: { toArray: () => Uint32Array.from(indices) },
-  });
-  it("main axis is a running sum INCLUDING the first index; secondary axes are absolute", () => {
-    const lin = (idx: number[], delta: boolean) =>
-      Array.from(decodeGridCell(cell("MS:1003824", [10, 2, 1], idx), delta).toArray());
-    expect(lin([5, 1, 3], true)).toEqual([20, 22, 28]); // bins 5, 6, 9
-    expect(lin([5, 1, 3], false)).toEqual([20, 12, 16]);
+describe("grid models (upstream mzpeakts grid.ts)", () => {
+  it("evaluates a linear grid model", () => {
+    const m = grid.gridFromParameters("MS:1003824", Float64Array.from([10, 2, 1]));
+    expect([5, 6, 9].map((i) => m.fromIndex(i))).toEqual([20, 22, 28]);
   });
   it("an unknown grid model fails loud instead of defaulting", () => {
-    expect(() => gridModel("MS:0000000", [1, 2])).toThrow(/Unknown coordinate grid model/);
+    expect(() => grid.gridFromParameters("MS:0000000", Float64Array.from([1, 2]))).toThrow(/Unknown grid/);
   });
 });

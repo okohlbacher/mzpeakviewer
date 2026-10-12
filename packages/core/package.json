@@ -15,17 +15,18 @@
   },
   "dependencies": {
     "@mzpeak/contracts": "*",
-    "@zip.js/zip.js": "2.8.26",
-    "apache-arrow": "21.1.0",
+    "@zip.js/zip.js": "2.23.0",
+    "apache-arrow": "21.2.0",
     "arrow-js-ffi": "0.4.3",
-    "hyparquet": "^1.26.0",
-    "hyparquet-compressors": "^1.1.1",
+    "geotiff": "3.0.5",
+    "hyparquet": "^1.31.3",
+    "hyparquet-compressors": "^1.1.2",
     "mzpeakts": "file:../../vendor/mzpeakts/lib",
-    "parquet-wasm": "0.7.1",
-    "utif2": "^4.1.0"
+    "parquet-wasm": "0.7.1"
   },
   "devDependencies": {
-    "typescript": "~5.9.3",
-    "vitest": "4.1.11"
+    "typescript": "~7.0.2",
+    "utif2": "^4.1.0",
+    "vitest": "5.0.4"
   }
 }

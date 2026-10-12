@@ -11,7 +11,14 @@ const mzpeaktsSrc = fileURLToPath(
 
 export default defineConfig({
   plugins: [wasm()],
-  resolve: { alias: { mzpeakts: mzpeaktsSrc } },
+  resolve: {
+    alias: { mzpeakts: mzpeaktsSrc },
+    // mzpeakts is compiled from source (alias above); its own node_modules (installed by its
+    // `npm ci`, as CI does) holds separate copies of these. Resolve every import to ONE copy —
+    // e.g. a zip.js 2.23 HttpRangeReader handed to a zip.js 2.8 ZipReader fails mid-read
+    // ("Offset is outside the bounds of the DataView").
+    dedupe: ["@zip.js/zip.js", "apache-arrow", "parquet-wasm", "arrow-js-ffi"],
+  },
   test: {
     globals: true,
     environment: "node",
