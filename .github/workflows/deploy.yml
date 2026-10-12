@@ -43,7 +43,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       # bootstrap step 2: the apps alias their bundler at the reader's TS source but consume
       # it as `file:../vendor/mzpeakts/lib`, so the reader must be installed + built first.
