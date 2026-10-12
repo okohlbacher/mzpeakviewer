@@ -10,6 +10,7 @@ import type { FileStats, BrowseIndex, Presence } from "@mzpeak/contracts";
 import { buildBrowseIndex, type BrowseRow } from "../adapt/browse";
 import type { Reader } from "../reader/openUrl";
 import { computeFastSummary, scanSpectra } from "../reader/explorer/summary";
+import { hasTimeAxis } from "../reader/explorer/timeAxis";
 import type { SpectrumIndexRow } from "../reader/explorer/types";
 
 /** Number of `mzpeak_index.json` entities — the `numEntities` stat. Minimal,
@@ -80,6 +81,7 @@ export async function engineScanBreakdown(
     numEntities,
     mzRange: aggregates.mzRange,
     rtRange: aggregates.rtRange,
+    ...(hasTimeAxis(reader) ? {} : { timeAxis: "index" as const }),
     msLevels,
     spectraPerLevel: aggregates.msLevelCounts,
     representationCounts: {

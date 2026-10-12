@@ -10,6 +10,7 @@
 // null-filled `mz` (read back as 0), so the codec — not the verbatim `mz` — is the truth.
 import type { Reader } from "./open";
 import { recRepresentation } from "./cv";
+import { hasTimeAxis, spectrumX } from "./timeAxis";
 import type { ChromPoint, SpectrumArrays, StoredChromatogram } from "./types";
 import { assertNoGridAxis } from "../arrays";
 import { readFacetSignal, resolveImsCalibration, resolveFacetGridMz, type RawSpectrum as EngineRawSpectrum } from "../../engine/spectrum";
@@ -209,8 +210,11 @@ export async function extractChromatogram(
   // convention, unit UO:0000031 — same convention the wavelength path converts). The reader
   // compares against raw file values, so the window converts s→min going in and every point
   // converts min→s coming out. This is the ONE boundary where MS times enter the app.
+  // No time axis (hasTimeAxis): x is the spectrum index, so a "time" window is an index
+  // window — read the whole run and let the local filter below window on the index.
+  const timeAxis = hasTimeAxis(reader);
   const tRange =
-    timeRange != null ? { start: timeRange[0] / 60, end: timeRange[1] / 60 } : null;
+    timeRange != null && timeAxis ? { start: timeRange[0] / 60, end: timeRange[1] / 60 } : null;
 
   // Grid facet + m/z window: collect every row (null range) and window on the grid axis here.
   const gridWindow = mzRange && gridMz ? mzRange : null;
@@ -236,7 +240,7 @@ export async function extractChromatogram(
     out.push({
       index: Number(p.index),
       // minutes → seconds (see tRange note above); index fallback stays unitless.
-      time: typeof p.time === "number" ? p.time * 60 : Number(p.index),
+      time: spectrumX(timeAxis, typeof p.time === "number" ? p.time : null, Number(p.index)) ?? Number(p.index),
       intensity: sum,
     });
   }
@@ -276,7 +280,27 @@ export function chromatogramIds(reader: Reader): { index: number; id: string }[]
   const n = cm?.length ?? 0;
   const out: { index: number; id: string }[] = [];
   for (let i = 0; i < n; i++) {
-    out.push({ index: i, id: String(cm!.get(i).id) });
+    const rec = cm!.get(i);
+    if (!isPlaceholderChromatogram(rec)) out.push({ index: i, id: String(rec.id) });
   }
   return out;
+}
+
+/** mzpeak-convert ≥0.17.0 gives a run without chromatograms one placeholder row (it keeps the
+ *  facet open for readers that need a row), marked by this user param: not a chromatogram. */
+export function isPlaceholderChromatogram(rec: { params?: unknown }): boolean {
+  return (rec.params as { name?: unknown }[] | undefined)?.some((q) => q?.name === "placeholder chromatogram") ?? false;
+}
+
+/** Stored chromatograms, not counting the placeholder row. The placeholder is only ever the SOLE
+ *  row, so only a one-row facet is inspected (O(1) — building every record of an SRM run with
+ *  thousands of transitions at open would block the worker). */
+export function storedChromatogramCount(reader: Reader): number {
+  const n = reader.numChromatograms ?? 0;
+  if (n !== 1) return n;
+  try {
+    return isPlaceholderChromatogram(reader.chromatogramMetadata!.get(0) as { params?: unknown }) ? 0 : 1;
+  } catch {
+    return 1; // a record that won't materialize (legacy layouts): count it
+  }
 }

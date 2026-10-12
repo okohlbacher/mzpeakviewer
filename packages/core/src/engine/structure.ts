@@ -38,31 +38,7 @@ import type {
 } from "@mzpeak/contracts";
 import { adaptParquetFooter, type FooterColumnInput, type FooterInput } from "../adapt/footer";
 import type { Reader } from "../reader/openUrl";
-
-// ── Reader/store structural views (the opaque Reader's internals we touch) ───────
-
-type RawZipEntry = {
-  filename?: unknown;
-  compressedSize?: unknown;
-  uncompressedSize?: unknown;
-  directory?: unknown;
-};
-
-/** A zip.js-backed remote member: size + range-reading slice() → arrayBuffer(). */
-type RemoteBlob = {
-  size: number;
-  slice(start?: number, end?: number): { arrayBuffer(): Promise<ArrayBuffer> };
-};
-
-type Store = {
-  entries?: RawZipEntry[];
-  fileIndex?: { files?: { name?: unknown; data_kind?: unknown }[] };
-  open?: (name: string) => Promise<RemoteBlob | undefined>;
-};
-
-function readerStore(reader: Reader): Store | undefined {
-  return (reader as unknown as { store?: Store }).store;
-}
+import { readerStore, type RemoteBlob, type Store } from "./store";
 
 function num(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v as number);

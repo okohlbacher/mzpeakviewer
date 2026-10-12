@@ -38,8 +38,10 @@ scope.addEventListener("message", (e: MessageEvent<WorkerRequest>) => {
   if (msg && USER_READ_TYPES.has(msg.type)) {
     ctx.lastUserActivity = typeof performance !== "undefined" ? performance.now() : 0;
   }
-  void ctx.mutex
-    .runExclusive(() => dispatch(msg, ctx, respond))
+  // The member list only reads the already-parsed ZIP directory (no reader I/O): answer it
+  // without queueing behind a long read — the Structure view stayed empty behind one.
+  const run = msg?.type === "archiveList" ? dispatch(msg, ctx, respond) : ctx.mutex.runExclusive(() => dispatch(msg, ctx, respond));
+  void run
     .then(() => {
       // Re-stamp activity on COMPLETION (not just on receipt above): a long foreground read
       // (e.g. a cold ion render) can run past the cooldown, and stamping only at receipt

@@ -37,6 +37,7 @@ export function ChromPlot({
   onNavigate,
   selectedTime,
   height = HEIGHT,
+  xLabel = "retention time (s)",
 }: {
   points: ChromPoint[];
   /** Left-click a point: select the nearest spectrum (typically without leaving the view). */
@@ -46,6 +47,8 @@ export function ChromPlot({
   selectedTime: number | null;
   /** Plot height in px (the managed Chromatograms cards resize this). @default 200 */
   height?: number;
+  /** x-axis label — "spectrum index" for runs without a time axis. @default "retention time (s)" */
+  xLabel?: string;
 }) {
   const selRef = useRef<number | null>(selectedTime);
   selRef.current = selectedTime;
@@ -69,7 +72,7 @@ export function ChromPlot({
         legend: { show: false },
         plugins: [wheelZoomPlugin({ factor: 0.8 })],
         series: [
-          { label: "RT (s)" },
+          { label: xLabel },
           {
             label: "intensity",
             stroke: STAGE.line,
@@ -77,7 +80,7 @@ export function ChromPlot({
             points: { show: false },
           },
         ],
-        axes: stageAxes("retention time (s)", "intensity"),
+        axes: stageAxes(xLabel, "intensity"),
         hooks: {
           draw: [(u) => drawTimeMarker(u, selRef.current)],
           ready: [
@@ -110,7 +113,7 @@ export function ChromPlot({
       return new uPlot(opts, data, el);
     },
     height,
-    [points], // height drives setSize (not rebuild) inside useUplot, preserving zoom on resize
+    [points, xLabel], // height drives setSize (not rebuild) inside useUplot, preserving zoom on resize
     [selectedTime],
   );
 

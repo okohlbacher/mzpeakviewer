@@ -14,6 +14,7 @@
 //     rewrites the representation, so we don't lie about what the file says it is.
 //   - when BOTH sources are empty we throw a named error rather than emit zeros.
 
+import { indexMeta, asObj } from "./store";
 import type { SpectrumArrays as WireSpectrumArrays, MobilityCodec } from "@mzpeak/contracts";
 import { adaptSpectrum } from "../adapt/spectrum";
 import { packMobility } from "../reader/mobility";
@@ -97,17 +98,6 @@ export function imsTofToMz(cal: ImsCalibration): (tof: number) => number {
  *  Not surfaced by any UI today (nothing reads `ims_calibration.exact`); exported for the day one does. */
 export function imsMzExact(cal: ImsCalibration | null): boolean {
   return !!(cal && cal.spectrumCoeffs && cal.exactPerSpectrum);
-}
-
-/** The index `metadata` object (`store.fileIndex.metadata`), or `{}`. */
-function indexMeta(reader: Reader): Record<string, unknown> {
-  const m = (reader as unknown as { store?: { fileIndex?: { metadata?: unknown } } }).store?.fileIndex?.metadata;
-  return m && typeof m === "object" ? (m as Record<string, unknown>) : {};
-}
-/** A metadata value that may be an inlined object OR a JSON string → object, else null. */
-function asObj(v: unknown): Record<string, unknown> | null {
-  if (typeof v === "string") { try { v = JSON.parse(v); } catch { return null; } }
-  return v && typeof v === "object" ? (v as Record<string, unknown>) : null;
 }
 
 /** The default per-spectrum pair suffixes (the sqrt-grid `tof_c0` / `tof_c1` columns — MZP:1000003/4

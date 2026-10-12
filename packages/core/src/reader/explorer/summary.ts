@@ -6,6 +6,8 @@
 // of this FileStats path and are intentionally omitted here.
 import type { Reader } from "./open";
 import { getCol, numOrNull, toRepresentation } from "./cv";
+import { storedChromatogramCount } from "./browse";
+import { hasTimeAxis, spectrumX } from "./timeAxis";
 import type { FileSummary, ManifestEntry, SpectrumIndexRow } from "./types";
 
 /** Minimal shape of an Apache Arrow child vector (one column). */
@@ -52,7 +54,7 @@ export function computeFastSummary(
     fileName,
     fileSize,
     numSpectra: reader.spectrumMetadata?.length ?? 0,
-    numChromatograms: reader.numChromatograms ?? 0,
+    numChromatograms: storedChromatogramCount(reader),
     numEntities: manifest.length,
     msLevelCounts: {},
     representationCounts: { profile: 0, centroid: 0, unknown: 0 },
@@ -99,6 +101,7 @@ function instrumentModel(reader: Reader): string | null {
  */
 const SLICE_MS = 12;
 
+
 export async function scanSpectra(
   reader: Reader,
   onProgress?: (done: number, total: number) => void,
@@ -126,13 +129,14 @@ export async function scanSpectra(
       },
     };
   }
-  return scanByColumns(vec, n, onProgress);
+  return scanByColumns(vec, n, hasTimeAxis(reader), onProgress);
 }
 
 /** Browse-index pass over the top-level Arrow columns (no row materialization). */
 async function scanByColumns(
   vec: NonNullable<ArrowStructVec>,
   n: number,
+  timeAxis: boolean,
   onProgress?: (done: number, total: number) => void,
 ): Promise<ScanResult> {
   // Resolve each promoted column by its nested OR flat name (getCol) — the flat
@@ -189,10 +193,8 @@ async function scanByColumns(
       else bucket.unknown++;
     }
 
-    // File time column is MINUTES; the wire BrowseIndex.rt and FileStats.rtRange are
-    // SECONDS (wire.ts:58). Convert here — the single producer of MS retention times.
-    const rawTime = numOrNull(timeCol?.get(i));
-    const time = rawTime !== null ? rawTime * 60 : null;
+    // File time column is MINUTES; the wire BrowseIndex.rt and FileStats.rtRange are SECONDS.
+    const time = spectrumX(timeAxis, numOrNull(timeCol?.get(i)), i);
     if (time !== null) {
       if (rtMin === null || time < rtMin) rtMin = time;
       if (rtMax === null || time > rtMax) rtMax = time;
@@ -247,7 +249,7 @@ async function scanByColumns(
       storedTotals: haveCounts ? storedTotals : null,
       storedPerLevel,
       mzRange: mzMin !== null && mzMax !== null ? [mzMin, mzMax] : null,
-      rtRange: rtMin !== null && rtMax !== null ? [rtMin, rtMax] : null,
+      rtRange: timeAxis && rtMin !== null && rtMax !== null ? [rtMin, rtMax] : null,
       isImaging: false,
     },
   };

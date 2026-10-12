@@ -25,6 +25,8 @@ const xicInputStyle = (widthRem: number): CSSProperties => ({
 
 export function Chromatograms() {
   const phase = useStore((s) => s.phase);
+  // No time axis (imaging etc.): chromatogram x and the RT window are spectrum indices.
+  const indexAxis = useStore((s) => s.stats?.timeAxis === "index");
   const chromList = useStore((s) => s.chromList);
   const settings = useStore((s) => s.settings);
   const addTic = useStore((s) => s.addTic);
@@ -119,11 +121,11 @@ export function Chromatograms() {
           <span style={{ color: "var(--text-muted)" }}>±</span>
           <input data-testid="xic-tol-input" type="number" step="any" aria-label="XIC m/z tolerance (Da)" value={xicTol}
             onChange={(e) => setXicTol(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddXic(); }} style={xicInputStyle(4.5)} />
-          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>Da · RT</span>
-          <input data-testid="xic-rtmin-input" type="number" step="any" placeholder="min s" aria-label="XIC RT min (s)" value={xicRtMin}
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>{indexAxis ? "Da · spectra" : "Da · RT"}</span>
+          <input data-testid="xic-rtmin-input" type="number" step="any" placeholder={indexAxis ? "from #" : "min s"} aria-label={indexAxis ? "XIC first spectrum index" : "XIC RT min (s)"} value={xicRtMin}
             onChange={(e) => setXicRtMin(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddXic(); }} style={xicInputStyle(4.5)} />
           <span style={{ color: "var(--text-muted)" }}>–</span>
-          <input data-testid="xic-rtmax-input" type="number" step="any" placeholder="max s" aria-label="XIC RT max (s)" value={xicRtMax}
+          <input data-testid="xic-rtmax-input" type="number" step="any" placeholder={indexAxis ? "to #" : "max s"} aria-label={indexAxis ? "XIC last spectrum index" : "XIC RT max (s)"} value={xicRtMax}
             onChange={(e) => setXicRtMax(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddXic(); }} style={xicInputStyle(4.5)} />
           <Button variant="secondary" size="sm" onClick={onAddXic} disabled={!xicValid} data-testid="xic-btn">Add XIC</Button>
           {!xicRtValid && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-danger, #dc2626)" }}>RT: both min &lt; max, or both blank.</span>}
@@ -255,6 +257,7 @@ function ChromCard({ item }: { item: ChromItem }) {
   const selectSpectrum = useStore((s) => s.selectSpectrum);
   const browse = useStore((s) => s.browse);
   const selector = useStore((s) => s.selector);
+  const indexAxis = useStore((s) => s.stats?.timeAxis === "index");
   const [dragOver, setDragOver] = useState(false);
 
   // Memoize by series so a selection / settings / sibling-resize re-render doesn't rebuild
@@ -326,7 +329,8 @@ function ChromCard({ item }: { item: ChromItem }) {
       {!item.collapsed && (points.length > 0 ? (
         <>
           <div data-testid="chrom-plot-host">
-            <ChromPlot points={points} height={item.height} onPick={(t) => pickNearestSpectrum(t, false)} onNavigate={(t) => pickNearestSpectrum(t, true)} selectedTime={selectedTime} />
+            <ChromPlot points={points} height={item.height} onPick={(t) => pickNearestSpectrum(t, false)} onNavigate={(t) => pickNearestSpectrum(t, true)} selectedTime={selectedTime}
+              xLabel={indexAxis && item.source !== "stored" ? "spectrum index (no retention times in this file)" : undefined} />
           </div>
           <ResizeHandle height={item.height} onResize={(h) => setChromHeight(item.itemId, h)} />
         </>

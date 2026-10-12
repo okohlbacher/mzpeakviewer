@@ -1,14 +1,14 @@
 // Summary view — metric tiles + TIC thumbnail, then file stats, capability
 // readout, and imaging block.
 import { useEffect, useRef } from "react";
-import type { ImagingGridWire } from "@mzpeak/contracts";
+import type { ImagingGridWire, OpticalImageMeta } from "@mzpeak/contracts";
 import { useStore } from "../store";
 import { spectrumCounts } from "../recordIndex";
 import { StudyDesignCta } from "./StudyDesign";
 import { classifyOpticalBand } from "../opticalBand";
 import { StatRow, Badge, Panel } from "@mzpeak/ui-kit";
 import type { ChannelAssignment } from "@mzpeak/contracts";
-import { rasterizeTic, formatBytes } from "./render";
+import { rasterizeTic, formatBytes, formatCompact } from "./render";
 
 function fmtRange(r: [number, number] | null, digits = 2): string {
   if (!r) return "—";
@@ -202,10 +202,6 @@ export function Summary() {
           label="Optical images"
           value={optical.hasOptical ? optical.count.toLocaleString() : "—"}
         />
-        <StatRow
-          label="Detection confidence"
-          value={imaging.confidence}
-        />
         {caps.encodings.length > 0 && (
           <StatRow
             label="Array encodings"
@@ -251,23 +247,7 @@ export function Summary() {
               imaging.signals.length > 0 ? imaging.signals.join(", ") : "hint only"
             }
           />
-          {optical.hasOptical && (
-            <StatRow
-              label="Optical images"
-              value={
-                <span style={{ display: "flex", flexWrap: "wrap", gap: "0.25rem" }}>
-                  {opticalImages.map((img) => (
-                    <Badge key={img.archivePath} tone="info" mono>
-                      {img.name ?? img.archivePath}
-                      {img.width != null && img.height != null
-                        ? ` (${img.width}×${img.height})`
-                        : ""}
-                    </Badge>
-                  ))}
-                </span>
-              }
-            />
-          )}
+          <RegistrationRows grid={grid} images={opticalImages} />
         </Panel>
       )}
 
@@ -477,5 +457,75 @@ function TicThumbnail({ grid, tic }: { grid: ImagingGridWire; tic: Float32Array 
       />
       <span style={{ fontSize: "var(--text-xs, 0.7rem)", color: "var(--text-muted, #94a3b8)" }}>TIC overview</span>
     </div>
+  );
+}
+
+const QUALITY_TEXT: Record<string, string> = {
+  teach_points: "registered by teach points (Bruker FlexImaging .mis)",
+};
+const SOURCE_TEXT: Record<string, string> = {
+  declared: "declared by the source",
+  user_supplied: "user-supplied at conversion",
+  unknown: "unknown",
+};
+
+/** True when the image is only laid over the MS extent (nothing registered it). */
+const unregistered = (img: OpticalImageMeta) =>
+  !img.registration?.quality || img.registration.quality === "assumed_full_extent";
+
+/** Scale text for an axis-aligned affine (b = d = 0): image px per MS px, µm per image px, and
+ *  a warning when the two axes disagree (the placement distorts the image). */
+function scaleText(m: number[], umPerMsPx: number | null): string {
+  const [a, , , , e] = m as [number, number, number, number, number, number];
+  if (m[1] !== 0 || m[3] !== 0 || a === 0 || e === 0) return "affine with rotation/shear";
+  const um = umPerMsPx ? ` (≈ ${formatCompact(umPerMsPx * Math.abs(a))} µm/image px)` : "";
+  const uneven = Math.abs(Math.abs(a / e) - 1) > 0.05 ? " — stretched unevenly (aspect ratios differ)" : "";
+  return `1 MS px = ${formatCompact(1 / a)} × ${formatCompact(1 / e)} image px${um}${uneven}`;
+}
+
+/** Imaging registration: MS pixel size, each image's registration to the MS grid (the index's
+ *  `images[].affine`: quality + scale), and how the images relate to one another. */
+function RegistrationRows({ grid, images }: { grid: ImagingGridWire | null; images: OpticalImageMeta[] }) {
+  const ps = grid?.pixelSizeUm ?? null;
+  const src = grid?.pixelSizeSource ?? null;
+  const ext = grid?.canvas ?? (grid ? { width: grid.width, height: grid.height } : null);
+  const srcText = src ? ` (${SOURCE_TEXT[src] ?? src})` : "";
+  const pixelSize = ps ? `${ps.x} × ${ps.y} µm${srcText}` : `not stated${src === "unknown" ? "" : srcText}`;
+  return (
+    <>
+      <StatRow label="MS pixel size" value={pixelSize} testid="summary-ms-pixel-size" />
+      {images.map((img) => {
+        const m = img.registration?.matrix;
+        const quality = unregistered(img)
+          ? `not registered — laid over the full MS extent${ext ? ` (${ext.width} × ${ext.height} px)` : ""}`
+          : QUALITY_TEXT[img.registration!.quality!] ?? img.registration!.quality!;
+        const size = img.width != null && img.height != null ? `${img.width} × ${img.height} px` : null;
+        const scale = m ? scaleText(m, ps ? (ps.x + ps.y) / 2 : null) : null;
+        return (
+          <StatRow
+            key={img.archivePath}
+            label={`Image ↔ MS: ${img.name ?? img.archivePath}`}
+            value={
+              <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.15rem" }}>
+                <span>{quality}</span>
+                <span style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>
+                  {[size, scale].filter(Boolean).join(" · ")}
+                </span>
+              </span>
+            }
+          />
+        );
+      })}
+      {images.length > 1 && (
+        <StatRow
+          label="Image ↔ image"
+          value={
+            images.every(unregistered)
+              ? "not registered to each other — each is only laid over the MS extent, so their relative placement is assumed"
+              : "via the MS grid (no direct image-to-image registration is stored)"
+          }
+        />
+      )}
+    </>
   );
 }

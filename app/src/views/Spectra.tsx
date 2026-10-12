@@ -485,7 +485,7 @@ export function Spectra() {
           onPeakContextMenu={(mz, x, y) => setPeakMenu({
             mz, x, y,
             msLevel: shownLevel != null && shownLevel >= 1 ? shownLevel : null,
-            spectrumRtSec: shownRtSec,
+            spectrumRtSec: stats.timeAxis === "index" ? null : shownRtSec,
             rtBounds: stats.rtRange,
           })}
         />
@@ -664,6 +664,7 @@ export function Spectra() {
           defaultTolDa={settings.xicTolDa}
           rtHalfSec={settings.xicRtHalfMin * 60}
           spectrumRtSec={peakMenu.spectrumRtSec}
+          indexAxis={stats.timeAxis === "index"}
           rtBounds={peakMenu.rtBounds}
           msLevel={peakMenu.msLevel}
           onClose={closePeakMenu}
@@ -830,7 +831,7 @@ function ChannelPills({
  *  ± the Settings half-window, clamped to the run), and the MS level the XIC is limited to.
  *  Dismisses on backdrop click or Esc. */
 function PeakChromMenu({
-  mz, x, y, defaultTolDa, rtHalfSec, spectrumRtSec, rtBounds, msLevel, onCreate, onClose,
+  mz, x, y, defaultTolDa, rtHalfSec, spectrumRtSec, rtBounds, msLevel, onCreate, onClose, indexAxis = false,
 }: {
   mz: number;
   x: number;
@@ -839,6 +840,8 @@ function PeakChromMenu({
   rtHalfSec: number;
   spectrumRtSec: number | null;
   rtBounds: [number, number] | null;
+  /** The run has no time axis: the window is a spectrum-index range. */
+  indexAxis?: boolean;
   msLevel: number | null;
   onCreate: (tolDa: number, rt: [number, number] | undefined) => void;
   onClose: () => void;
@@ -891,7 +894,7 @@ function PeakChromMenu({
           Da
         </label>
         <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "var(--text-sm)", color: "var(--text-muted)", flexWrap: "wrap" }}>
-          RT (s)
+          {indexAxis ? "Spectra #" : "RT (s)"}
           <input data-testid="peak-chrom-rtmin" type="number" step="any" placeholder="min" value={rtMin} onChange={(e) => setRtMin(e.target.value)} style={inp} />
           –
           <input data-testid="peak-chrom-rtmax" type="number" step="any" placeholder="max" value={rtMax} onChange={(e) => setRtMax(e.target.value)} style={inp} />

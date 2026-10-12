@@ -32,6 +32,10 @@ export type FileStats = {
   numEntities: number;
   mzRange: [number, number] | null;
   rtRange: [number, number] | null;
+  /** "index" when the run has no retention-time axis (every spectrum's time absent or equal —
+   *  typical for imaging): BrowseIndex.rt and every chromatogram x then hold the spectrum INDEX
+   *  (acquisition order), not seconds, and rtRange is null. Absent = a real time axis. */
+  timeAxis?: "index";
   msLevels: number[];
   spectraPerLevel?: Record<number, number>;
   representationCounts: { profile: number; centroid: number; unknown?: number };
@@ -241,6 +245,14 @@ export type ImagingGridWire = {
   spectrumIndex: Int32Array;
   /** 1 byte per cell: present(1)/absent(0). */
   presenceMask: Uint8Array;
+  /** The full declared extent the grid is cropped from (the occupied bounding box), and the
+   *  crop's 0-based offset into it. Optical registrations ("assumed full extent") refer to the
+   *  canvas, not the cropped grid. Absent = the grid IS the canvas. */
+  canvas?: { width: number; height: number; offsetX: number; offsetY: number };
+  /** MS pixel size (µm) and where it came from (index `imaging.pixel_size_source`:
+   *  "declared" | "user_supplied" | "unknown" …). */
+  pixelSizeUm?: { x: number; y: number } | null;
+  pixelSizeSource?: string | null;
 };
 
 /** Descriptor for an embedded optical image (decoded lazily via getOpticalImage). */
@@ -250,6 +262,12 @@ export type OpticalImageMeta = {
   width?: number | null;
   height?: number | null;
   bytes?: number | null;
+  /** The image's registration to the MS pixel grid, as the index states it (imaging profile
+   *  `images[].affine`): `matrix` [a,b,c,d,e,f] maps 0-based image pixel centres (of the FULL-size
+   *  image) to 1-based MS pixel centres, x_ms = a·col + b·row + c, y_ms = d·col + e·row + f;
+   *  `quality` e.g. "assumed_full_extent" (laid over the grid, nothing registered) or
+   *  "teach_points" (registered, e.g. a Bruker FlexImaging .mis sequence). */
+  registration?: { maps: string | null; quality: string | null; matrix: number[] | null } | null;
 };
 
 /** A chromatogram trace (TIC/XIC/stored). time = x (seconds), intensity = y. */

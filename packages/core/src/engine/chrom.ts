@@ -24,6 +24,7 @@ import {
 import type { ChromPoint, SpectrumIndexRow } from "../reader/explorer/types";
 import type { XicGridResolver } from "../reader/explorer/browse";
 import { engineDiaXic } from "./dia";
+import { isPlaceholderChromatogram } from "../reader/explorer/browse";
 import { imsTofToMz, isGridFile, readImsCalibration, resolveGridMz, resolveImsCalibration } from "./spectrum";
 
 /**
@@ -124,6 +125,7 @@ export function engineChromatogramList(reader: Reader): ChromatogramInfo[] {
       selectedIons?: { mz?: unknown }[];
       meta?: unknown;
     };
+    if (isPlaceholderChromatogram(rec)) continue;
     const meta = plainify({
       id: rec.id,
       index: rec.index,

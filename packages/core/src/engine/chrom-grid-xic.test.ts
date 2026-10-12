@@ -19,8 +19,9 @@ function fakeReader(points: FakePoint[], metadata: Record<string, unknown> = {},
   const calls: Call[] = [];
   const reader = {
     store: { fileIndex: { metadata } },
+    // `time` mirrors the XIC points below (index/60 min), so the file has a time axis.
     spectrumMetadata: coeffs
-      ? { spectra: { getChild: (n: string) => ({ get: () => coeffs[n] }), type: { children: Object.keys(coeffs).map((name) => ({ name })) } } }
+      ? { length: points.length, spectra: { getChild: (n: string) => ({ get: (i: number) => (n === "time" ? i / 60 : coeffs[n]) }), type: { children: Object.keys(coeffs).map((name) => ({ name })) } } }
       : undefined,
     extractXIC: async (tRange: unknown, mzRange: unknown, useProfile: boolean) => {
       calls.push({ tRange, mzRange, useProfile });

@@ -43,14 +43,8 @@ export type CoordResult = {
   strategy: "promoted-columns" | "cv-params" | "id-parse";
 };
 
-/** Run-level grid geometry. `null` sub-fields mean "not declared by the file". */
-export type GridGeometry = {
-  pixelCount: { x: number; y: number } | null;
-  pixelSizeUm: { x: number; y: number } | null;
-  /** 1-based by spec default; read from the discovery block when present. */
-  coordinateBase: number;
-  geometrySource: "discovery-block" | "run-params";
-};
+import type { GridGeometry } from "./imagingTypes";
+export type { GridGeometry };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -300,6 +294,7 @@ function fromDiscoveryBlock(reader: Reader): GridGeometry | null {
     pixelSizeUm,
     coordinateBase: baseRaw === null ? 1 : baseRaw,
     geometrySource: "discovery-block",
+    pixelSizeSource: typeof block["pixel_size_source"] === "string" ? block["pixel_size_source"] : null,
   };
 }
 
@@ -365,6 +360,7 @@ function fromRunParams(reader: Reader): GridGeometry | null {
     pixelSizeUm,
     coordinateBase: 1,
     geometrySource: "run-params",
+    pixelSizeSource: pixelSizeUm ? "declared" : null,
   };
 }
 

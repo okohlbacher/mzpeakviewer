@@ -27,6 +27,8 @@ import { buildCapabilityModel } from "../adapt/capability";
 import { wavelengthRange } from "./wavelength";
 import { flattenGrid } from "../adapt/grid";
 import { fileMeta, manifest as readManifest } from "../reader/fileMeta";
+import { storedChromatogramCount } from "../reader/explorer/browse";
+import { asObj, indexMeta } from "./store";
 import { openBlob, openUrl, type Reader } from "../reader/openUrl";
 import { CorruptFileError, UnsupportedEncodingError } from "../reader/errors";
 import { readMsLevels } from "../reader/columns";
@@ -60,6 +62,17 @@ export type EngineFile = {
 };
 
 /** Parse embedded optical-image descriptors from the index metadata.imaging block. */
+function parseAffine(raw: unknown): OpticalImageMeta["registration"] {
+  const a = asObj(raw);
+  if (!a) return null;
+  const m = Array.isArray(a.matrix) ? a.matrix.map(Number) : null;
+  return {
+    maps: typeof a.maps === "string" ? a.maps : null,
+    quality: typeof a.registration_quality === "string" ? a.registration_quality : null,
+    matrix: m && m.length === 6 && m.every(Number.isFinite) ? m : null,
+  };
+}
+
 function parseOpticalImages(imagingMeta: unknown): OpticalImageMeta[] {
   if (!imagingMeta || typeof imagingMeta !== "object") return [];
   const images = (imagingMeta as Record<string, unknown>).images;
@@ -78,6 +91,7 @@ function parseOpticalImages(imagingMeta: unknown): OpticalImageMeta[] {
       width: Number.isFinite(w) ? w : null,
       height: Number.isFinite(h) ? h : null,
       bytes: Number.isFinite(Number(o.size_bytes)) ? Number(o.size_bytes) : null,
+      registration: parseAffine(o.affine),
     });
   }
   return out;
@@ -249,7 +263,7 @@ async function assembleEngineFile(reader: Reader): Promise<EngineFile> {
   const capabilities = buildCapabilityModel({
     imagingSignals,
     probed: true, // full probe ran (not just the index hint)
-    numChromatograms: reader.numChromatograms ?? 0,
+    numChromatograms: storedChromatogramCount(reader),
     ticColumn: "unknown", // resolved by the scan pass downstream; unknown at open
     opticalCount: 0, // filled below from the parsed optical images
     // Wavelength (UV/VIS) count is known immediately — the wavelength metadata table is
@@ -264,7 +278,7 @@ async function assembleEngineFile(reader: Reader): Promise<EngineFile> {
   });
 
   // ── Optical images (cheap — already in the in-memory index) ────────────────
-  const opticalImages = parseOpticalImages(reader.store?.fileIndex?.metadata?.imaging);
+  const opticalImages = parseOpticalImages(asObj(indexMeta(reader).imaging));
   capabilities.optical = {
     hasOptical: opticalImages.length > 0,
     count: opticalImages.length,
@@ -303,6 +317,9 @@ async function assembleEngineFile(reader: Reader): Promise<EngineFile> {
         width: grid.width,
         height: grid.height,
         coordinateBase: grid.coordinateBase, // REAL base — never default to 0
+        canvas: grid.canvas, // the grid is cropped to the occupied pixels; origin = base + offset
+        pixelSizeUm: grid.pixelSizeUm,
+        pixelSizeSource: grid.pixelSizeSource,
         coordToSpectrumIndex: grid.coordToSpectrumIndex,
         presenceMask: grid.presenceMask,
       });

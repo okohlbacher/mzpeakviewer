@@ -38,6 +38,10 @@ export type GridInput = {
   coordToSpectrumIndex: Map<number, number> | Array<[number, number]>;
   /** Dense presence raster, length width*height: 1 = filled, 0 = absent. */
   presenceMask: Uint8Array;
+  /** Declared extent + crop offset (see ImagingGridWire.canvas); the origin follows from it. */
+  canvas?: { width: number; height: number; offsetX: number; offsetY: number };
+  pixelSizeUm?: { x: number; y: number } | null;
+  pixelSizeSource?: string | null;
 };
 
 /**
@@ -68,11 +72,14 @@ export function flattenGrid(input: GridInput): ImagingGridWire {
   return {
     width: input.width,
     height: input.height,
-    originX: input.originX ?? input.coordinateBase,
-    originY: input.originY ?? input.coordinateBase,
+    originX: input.originX ?? input.coordinateBase + (input.canvas?.offsetX ?? 0),
+    originY: input.originY ?? input.coordinateBase + (input.canvas?.offsetY ?? 0),
     coordKey,
     spectrumIndex,
     presenceMask: input.presenceMask,
+    canvas: input.canvas,
+    pixelSizeUm: input.pixelSizeUm,
+    pixelSizeSource: input.pixelSizeSource,
   };
 }
 

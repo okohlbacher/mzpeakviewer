@@ -24,6 +24,9 @@ export interface GridGeometry {
   pixelSizeUm: { x: number; y: number } | null;
   coordinateBase: number;
   geometrySource: "discovery-block" | "run-params";
+  /** Where pixelSizeUm came from: the index's `imaging.pixel_size_source` ("declared",
+   *  "user_supplied", "unknown" …), or "declared" for the run's own IMS parameters. */
+  pixelSizeSource?: string | null;
 }
 
 /** Which CoordSource strategy produced the coordinates. Surfaced in diagnostics. */
@@ -39,8 +42,12 @@ export interface ImagingGrid {
   height: number;
   /** Read from geometry — never hard-coded. */
   coordinateBase: number;
+  /** The full declared extent (or observed max) the grid is cropped from — what optical
+   *  registrations refer to — and the crop's 0-based offset into it. */
+  canvas: { width: number; height: number; offsetX: number; offsetY: number };
   /** IMS:1000046/47, or null → 1:1. */
   pixelSizeUm: { x: number; y: number } | null;
+  pixelSizeSource: string | null;
   /** Sparse lookup. Key = y0*width + x0 (row-major, 0-based). */
   coordToSpectrumIndex: Map<number, number>;
   /** Length width*height. 1 = filled, 0 = empty. */

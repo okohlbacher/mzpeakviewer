@@ -115,6 +115,9 @@ export function GridView() {
           <StatRow label="Missing" value={`${stats.missing.toLocaleString()} px`} />
           <StatRow label="Mapped spectra" value={stats.mapped.toLocaleString()} />
           <StatRow label="Origin (x, y)" value={`${grid.originX}, ${grid.originY}`} />
+          {grid.canvas && (grid.canvas.width !== grid.width || grid.canvas.height !== grid.height) && (
+            <StatRow label="Declared extent" value={`${grid.canvas.width} × ${grid.canvas.height} (shown: the occupied ${grid.width} × ${grid.height})`} />
+          )}
           <StatRow label="Orientation" value="top-left · col=x · row=y · y-down" />
         </Panel>
         <p style={{ marginTop: "0.75rem", fontSize: "var(--text-xs, 0.7rem)", color: "var(--text-muted, #94a3b8)", maxWidth: 320 }}>

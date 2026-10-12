@@ -60,23 +60,56 @@ function blit(ctx: CanvasRenderingContext2D, rgba: Uint8ClampedArray, w: number,
   ctx.putImageData(img, 0, 0);
 }
 
-/** Stretch a decoded optical image (native size) onto the grid box (w×h) and read
- *  back its RGBA so it can be alpha-composited alongside the data layers. */
-function opticalToGrid(decoded: DecodedOptical, w: number, h: number): Uint8ClampedArray | null {
-  const src = document.createElement("canvas");
-  src.width = decoded.width;
-  src.height = decoded.height;
-  const sctx = src.getContext("2d");
-  if (!sctx) return null;
-  blit(sctx, decoded.rgba, decoded.width, decoded.height);
+/** The decoded image as a canvas — built once per decode (it can be 64 Mpx), not per render. */
+const sourceCanvases = new WeakMap<DecodedOptical, HTMLCanvasElement>();
+function sourceCanvas(decoded: DecodedOptical): HTMLCanvasElement | null {
+  let src = sourceCanvases.get(decoded);
+  if (!src) {
+    src = document.createElement("canvas");
+    src.width = decoded.width;
+    src.height = decoded.height;
+    const sctx = src.getContext("2d");
+    if (!sctx) return null;
+    blit(sctx, decoded.rgba, decoded.width, decoded.height);
+    sourceCanvases.set(decoded, src);
+  }
+  return src;
+}
+
+/** Draw a decoded optical image onto the grid box (w×h) through `transform` (decoded-image
+ *  pixels → grid canvas pixels, canvas setTransform order [a, b, c, d, e, f]) and read back its
+ *  RGBA so it can be alpha-composited alongside the data layers. */
+function opticalToGrid(decoded: DecodedOptical, w: number, h: number, transform: number[]): Uint8ClampedArray | null {
+  const src = sourceCanvas(decoded);
   const dst = document.createElement("canvas");
   dst.width = w;
   dst.height = h;
   const dctx = dst.getContext("2d");
-  if (!dctx) return null;
+  if (!src || !dctx) return null;
   dctx.imageSmoothingEnabled = false;
-  dctx.drawImage(src, 0, 0, w, h);
+  dctx.setTransform(...(transform as [number, number, number, number, number, number]));
+  dctx.drawImage(src, 0, 0);
   return new Uint8ClampedArray(dctx.getImageData(0, 0, w, h).data);
+}
+
+/** The optical image's placement on the (cropped) grid canvas as a setTransform matrix.
+ *  Registered: the index's affine maps FULL-size image pixel centres (col, row) to 1-based MS
+ *  pixel centres (x_ms = a·col + b·row + c); grid cell gx is centred at x_ms = originX + gx,
+ *  i.e. canvas x = x_ms − originX + 0.5, and the decoded image may be a smaller pyramid level
+ *  (sx, sy) drawing pixel u over [u, u+1). Unregistered: laid over the declared extent. */
+function opticalTransform(
+  decoded: DecodedOptical,
+  grid: { originX: number; originY: number; width: number; height: number; canvas?: { width: number; height: number; offsetX: number; offsetY: number } },
+  meta: OpticalImageMeta | undefined,
+): number[] {
+  const m = meta?.registration?.matrix;
+  if (m && meta?.width && meta?.height) {
+    const [a, b, c, d, e, f] = m as [number, number, number, number, number, number];
+    const sx = meta.width / decoded.width, sy = meta.height / decoded.height;
+    return [a * sx, d * sx, b * sy, e * sy, c - grid.originX + 0.5 - 0.5 * (a + b), f - grid.originY + 0.5 - 0.5 * (d + e)];
+  }
+  const cv = grid.canvas ?? { width: grid.width, height: grid.height, offsetX: 0, offsetY: 0 };
+  return [cv.width / decoded.width, 0, 0, cv.height / decoded.height, -cv.offsetX, -cv.offsetY];
 }
 
 // False-colour channel tokens (--channel-r/g/b).
@@ -528,7 +561,11 @@ function ImagingInner({
         if (key === "tic") return tic ? rasterizeTic(tic, grid, colormap, logScale) : null;
         if (key === "ion") return displayIonImage ? rasterizeImage(displayIonImage, grid, { colormap, percentile: 0.99, logScale, tic: ticNorm ? tic : null, ticNorm }) : null;
         if (key === "rgb") return multi ? rasterizeMultiChannel(multi, grid, null, false) : null;
-        if (key === "optical") return decodedOptical ? opticalToGrid(decodedOptical, width, height) : null;
+        if (key === "optical") {
+          if (!decodedOptical) return null;
+          const meta = opticalImages.find((o) => o.archivePath === selectedOpticalPath);
+          return opticalToGrid(decodedOptical, width, height, opticalTransform(decodedOptical, grid, meta));
+        }
         return null;
       };
       // layerOrder is top→bottom; paint bottom→top.
@@ -557,6 +594,8 @@ function ImagingInner({
     displayIonImage,
     multi,
     decodedOptical,
+    opticalImages,
+    selectedOpticalPath,
     layerOrder,
     layerCfg,
     grid,
